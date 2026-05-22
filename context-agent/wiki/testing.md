@@ -97,3 +97,53 @@ npm run lint    # tsc --noEmit
 npm test        # Vitest
 ```
 If `node_modules` is missing, run `npm install` first.
+
+## Settings UI tests (added 2026-05-22)
+
+### Component test locations
+
+| File | Coverage |
+|------|----------|
+| `src/preferences.test.ts` | Pure normalize/merge helpers — no mocks needed (13 tests) |
+| `src/App.test.tsx` | Settings opener render, panel open on click, axe (updated; old theme-toggle test removed) |
+| `src/settings/SettingsPanel.test.tsx` | Dialog render, open/close, General controls, onUpdatePreferences calls, axe (10 tests) |
+
+### Mock pattern for settings tests
+
+```typescript
+vi.mock("../bindings", () => ({
+  commands: {
+    preferencesRead: vi.fn().mockResolvedValue({ status: "ok", data: {} }),
+    preferencesWrite: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+  },
+}));
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: vi.fn(() => ({ setSize: vi.fn(), setPosition: vi.fn() })),
+  LogicalSize: vi.fn(),
+  LogicalPosition: vi.fn(),
+}));
+```
+
+### Radix jsdom stubs
+
+Radix Select requires PointerEvent and scrollIntoView — add these in `beforeAll` in test files that use Radix Select:
+
+```typescript
+beforeAll(() => {
+  (globalThis as any).PointerEvent = window.MouseEvent;
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.releasePointerCapture = () => {};
+  window.HTMLElement.prototype.setPointerCapture = () => {};
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+});
+```
+
+Use `globalThis` (not `global`) — TypeScript in this project doesn't have the Node.js `global` type.
+
+### E2E settings coverage
+
+`e2e/hello.spec.ts` covers: heading, settings opener, panel open, Escape close, close-button close, and immediate `data-theme` update on theme change (6 tests).
+
+### E2E persistence limitation
+
+Full cross-session preference persistence (change → close → reopen → verify) requires a real Tauri binary with an isolated app data directory via `tauri-driver`. The current Playwright config targets the Vite dev server only (`http://localhost:1420`). The persistence smoke in `e2e/hello.spec.ts` verifies the UI side (data-theme attribute update) but not file I/O. Document this limitation in any CI configuration that runs `npm run test:e2e`.
