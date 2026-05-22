@@ -12,8 +12,19 @@ fn setup_schema(conn: &Connection) -> Result<()> {
             id          INTEGER PRIMARY KEY,
             name        TEXT    NOT NULL,
             applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS shared_settings (
+            key         TEXT PRIMARY KEY,
+            value_json  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );",
     )
+}
+
+pub fn open_at(path: &std::path::Path) -> Result<Connection> {
+    let conn = Connection::open(path)?;
+    setup_schema(&conn)?;
+    Ok(conn)
 }
 
 /// Load the sqlite-vec extension so that `vec_*` SQL functions become available.
@@ -72,6 +83,19 @@ mod tests {
             .query_row("SELECT count(*) FROM migrations", [], |row| row.get(0))
             .expect("count query should succeed");
         assert_eq!(count, 1, "inserted row should be present");
+    }
+
+    #[test]
+    fn schema_creates_shared_settings_table() {
+        let conn = open_in_memory().expect("database should open");
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='shared_settings'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query should succeed");
+        assert_eq!(count, 1, "shared_settings table must exist after schema setup");
     }
 
     #[test]
