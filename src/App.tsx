@@ -1,5 +1,6 @@
 import { Moon, Sun } from "lucide-react";
 import { useState, useEffect } from "react";
+import { commands, type AppStatus } from "./bindings";
 
 type Theme = "latte" | "macchiato";
 
@@ -18,6 +19,13 @@ function useTheme(): [Theme, (t: Theme) => void] {
 
 function App() {
   const [theme, setTheme] = useTheme();
+  const [status, setStatus] = useState<AppStatus | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      commands.appStatus().then(setStatus).catch(console.error);
+    }
+  }, []);
 
   return (
     <main className="min-h-screen bg-background text-text flex flex-col items-center justify-center gap-6 font-sans">
@@ -48,6 +56,12 @@ function App() {
         )}
         Toggle theme
       </button>
+
+      {status && (
+        <p className="text-xs text-subtext font-mono">
+          v{status.version} · ready: {String(status.ready)}
+        </p>
+      )}
     </main>
   );
 }
