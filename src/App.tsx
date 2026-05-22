@@ -4,7 +4,7 @@ import { commands, type AppStatus } from "./bindings";
 import { type AppPreferences, DEFAULT_PREFERENCES } from "./preferences";
 import { applyTheme, applyFonts, getSystemPrefersDark } from "./theme";
 import { loadPreferences, savePreferences } from "./settings/settingsStorage";
-import { restoreWindowState, persistWindowState, cleanupWindowStateDebounce } from "./windowState";
+import { restoreWindowState, persistWindowState } from "./windowState";
 import { SettingsPanel } from "./settings/SettingsPanel";
 
 function App() {

@@ -15,10 +15,10 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: /hello hm/i })).toBeInTheDocument();
   });
 
-  it("renders theme toggle button", () => {
+  it("renders open settings button", () => {
     render(<App />);
     expect(
-      screen.getByRole("button", { name: /toggle theme|switch to (dark|light) mode/i })
+      screen.getByRole("button", { name: /open settings/i })
     ).toBeInTheDocument();
   });
 
