@@ -1,8 +1,9 @@
 use rusqlite::Connection;
 use serde_json::Value;
-use crate::settings::error::SettingsError;
+use crate::settings::{error::SettingsError, keys};
 
 pub fn shared_settings_set(conn: &Connection, key: &str, value: &Value) -> Result<(), SettingsError> {
+    keys::validate_key(key)?;
     let value_json = value.to_string();
     conn.execute(
         "INSERT INTO shared_settings (key, value_json, updated_at)
@@ -17,6 +18,7 @@ pub fn shared_settings_set(conn: &Connection, key: &str, value: &Value) -> Resul
 }
 
 pub fn shared_settings_get(conn: &Connection, key: &str) -> Result<Option<Value>, SettingsError> {
+    keys::validate_key(key)?;
     let mut stmt = conn
         .prepare("SELECT value_json FROM shared_settings WHERE key = ?1")
         .map_err(|e| SettingsError::Database(e.to_string()))?;
@@ -81,6 +83,22 @@ mod tests {
             let result = shared_settings_get(&conn, key).unwrap();
             assert_eq!(result.as_ref(), Some(val), "type fidelity failed for key {key}");
         }
+    }
+
+    #[test]
+    fn set_rejects_invalid_key() {
+        let conn = open_in_memory().unwrap();
+        let result = shared_settings_set(&conn, "bad key!", &serde_json::json!("v"));
+        assert!(result.is_err(), "invalid key should be rejected by set");
+        let result = shared_settings_set(&conn, "", &serde_json::json!("v"));
+        assert!(result.is_err(), "empty key should be rejected by set");
+    }
+
+    #[test]
+    fn get_rejects_invalid_key() {
+        let conn = open_in_memory().unwrap();
+        let result = shared_settings_get(&conn, "has/slash");
+        assert!(result.is_err(), "invalid key should be rejected by get");
     }
 
     #[test]

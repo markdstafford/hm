@@ -8,6 +8,13 @@ pub fn preferences_path() -> Result<PathBuf, SettingsError> {
     Ok(project_dirs.config_dir().join("preferences.toml"))
 }
 
+/// Returns the production database path: ~/Library/Application Support/hm/hm.db on macOS.
+pub fn db_path() -> Result<PathBuf, SettingsError> {
+    let project_dirs = directories::ProjectDirs::from("", "", "hm")
+        .ok_or_else(|| SettingsError::PathResolution("could not determine data directory".into()))?;
+    Ok(project_dirs.data_dir().join("hm.db"))
+}
+
 pub fn read_preferences_at(path: &Path) -> Result<Value, SettingsError> {
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,

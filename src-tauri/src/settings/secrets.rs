@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::settings::error::SettingsError;
+use crate::settings::{error::SettingsError, keys};
 
 pub trait SecretStore: Send + Sync {
     fn set(&self, key: &str, value: &str) -> Result<(), SettingsError>;
@@ -29,6 +29,7 @@ impl Default for InMemorySecretStore {
 
 impl SecretStore for InMemorySecretStore {
     fn set(&self, key: &str, value: &str) -> Result<(), SettingsError> {
+        keys::validate_key(key)?;
         self.store
             .lock()
             .unwrap()
@@ -37,10 +38,12 @@ impl SecretStore for InMemorySecretStore {
     }
 
     fn get(&self, key: &str) -> Result<Option<String>, SettingsError> {
+        keys::validate_key(key)?;
         Ok(self.store.lock().unwrap().get(key).cloned())
     }
 
     fn delete(&self, key: &str) -> Result<(), SettingsError> {
+        keys::validate_key(key)?;
         self.store.lock().unwrap().remove(key);
         Ok(())
     }
@@ -63,6 +66,7 @@ impl KeychainSecretStore {
 
 impl SecretStore for KeychainSecretStore {
     fn set(&self, key: &str, value: &str) -> Result<(), SettingsError> {
+        keys::validate_key(key)?;
         let entry = keyring::Entry::new(&self.service, key)
             .map_err(|_| SettingsError::Keychain("failed to access keychain".into()))?;
         entry
@@ -71,6 +75,7 @@ impl SecretStore for KeychainSecretStore {
     }
 
     fn get(&self, key: &str) -> Result<Option<String>, SettingsError> {
+        keys::validate_key(key)?;
         let entry = keyring::Entry::new(&self.service, key)
             .map_err(|_| SettingsError::Keychain("failed to access keychain".into()))?;
         match entry.get_password() {
@@ -81,6 +86,7 @@ impl SecretStore for KeychainSecretStore {
     }
 
     fn delete(&self, key: &str) -> Result<(), SettingsError> {
+        keys::validate_key(key)?;
         let entry = keyring::Entry::new(&self.service, key)
             .map_err(|_| SettingsError::Keychain("failed to access keychain".into()))?;
         match entry.delete_credential() {
@@ -124,6 +130,26 @@ mod tests {
     fn delete_missing_key_is_safe_noop() {
         let s = store();
         assert!(s.delete("nonexistent").is_ok());
+    }
+
+    #[test]
+    fn set_rejects_invalid_key() {
+        let s = store();
+        assert!(s.set("bad key!", "v").is_err(), "space in key should be rejected");
+        assert!(s.set("", "v").is_err(), "empty key should be rejected");
+        assert!(s.set("path/sep", "v").is_err(), "slash in key should be rejected");
+    }
+
+    #[test]
+    fn get_rejects_invalid_key() {
+        let s = store();
+        assert!(s.get("bad key!").is_err(), "invalid key should be rejected by get");
+    }
+
+    #[test]
+    fn delete_rejects_invalid_key() {
+        let s = store();
+        assert!(s.delete("bad\nkey").is_err(), "control char in key should be rejected by delete");
     }
 
     #[test]

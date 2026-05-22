@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::Mutex;
-use tauri::Manager;
 
 use crate::settings::{keys, preferences, secrets::ManagedSecretStore, shared};
 
@@ -47,12 +46,8 @@ pub fn app_status() -> AppStatus {
 
 #[tauri::command]
 #[specta::specta]
-pub fn preferences_read(app: tauri::AppHandle) -> Result<JsonValue, String> {
-    let path = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("failed to resolve config dir: {e}"))?
-        .join("preferences.toml");
+pub fn preferences_read() -> Result<JsonValue, String> {
+    let path = preferences::preferences_path().map_err(|e| e.to_string())?;
     preferences::read_preferences_at(&path)
         .map(JsonValue)
         .map_err(|e| e.to_string())
@@ -60,12 +55,8 @@ pub fn preferences_read(app: tauri::AppHandle) -> Result<JsonValue, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn preferences_write(app: tauri::AppHandle, prefs: JsonValue) -> Result<(), String> {
-    let path = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("failed to resolve config dir: {e}"))?
-        .join("preferences.toml");
+pub fn preferences_write(prefs: JsonValue) -> Result<(), String> {
+    let path = preferences::preferences_path().map_err(|e| e.to_string())?;
     preferences::write_preferences_at(&path, &prefs.0).map_err(|e| e.to_string())
 }
 

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_specta::{collect_commands, Builder};
 
+use settings::preferences::db_path;
 use settings::secrets::{KeychainSecretStore, ManagedSecretStore};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,14 +35,11 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
-            // Production SQLite database
-            let db_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data dir");
-            std::fs::create_dir_all(&db_dir).expect("failed to create app data dir");
-            let db_path = db_dir.join("hm.db");
-            let conn = db::open_at(&db_path).expect("failed to open database");
+            // Production SQLite database: ~/Library/Application Support/hm/hm.db on macOS
+            let path = db_path().expect("failed to resolve database path");
+            std::fs::create_dir_all(path.parent().expect("db path has no parent"))
+                .expect("failed to create data dir");
+            let conn = db::open_at(&path).expect("failed to open database");
             app.manage(Mutex::new(conn));
 
             // Production keychain secret store (service namespace "hm")
