@@ -9,10 +9,13 @@ pub fn preferences_path() -> Result<PathBuf, SettingsError> {
 }
 
 pub fn read_preferences_at(path: &Path) -> Result<Value, SettingsError> {
-    if !path.exists() {
-        return Ok(Value::Object(serde_json::Map::new()));
-    }
-    let content = std::fs::read_to_string(path)?;
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Value::Object(serde_json::Map::new()));
+        }
+        Err(e) => return Err(SettingsError::from(e)),
+    };
     let value: Value = toml::from_str(&content)
         .map_err(|e| SettingsError::Serialization(e.to_string()))?;
     if !value.is_object() {
@@ -26,7 +29,7 @@ pub fn read_preferences_at(path: &Path) -> Result<Value, SettingsError> {
 pub fn write_preferences_at(path: &Path, prefs: &Value) -> Result<(), SettingsError> {
     if !prefs.is_object() {
         return Err(SettingsError::InvalidPayload(
-            "preferences must be a JSON object".into(),
+            "preferences value must be an object".into(),
         ));
     }
     let toml_str = toml::to_string_pretty(prefs)
@@ -36,7 +39,10 @@ pub fn write_preferences_at(path: &Path, prefs: &Value) -> Result<(), SettingsEr
     }
     let tmp_path = path.with_extension("toml.tmp");
     std::fs::write(&tmp_path, &toml_str)?;
-    std::fs::rename(&tmp_path, path)?;
+    if let Err(e) = std::fs::rename(&tmp_path, path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(SettingsError::from(e));
+    }
     Ok(())
 }
 
