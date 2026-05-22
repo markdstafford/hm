@@ -1,0 +1,7 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema/capabilities.json",
+  "identifier": "default",
+  "description": "Default app capabilities",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
