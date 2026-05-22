@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod db;
+pub mod settings;
 
 use tauri_specta::{collect_commands, Builder};
 
