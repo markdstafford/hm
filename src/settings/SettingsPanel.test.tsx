@@ -8,7 +8,7 @@ import type { AppPreferences } from "../preferences";
 // Radix Select uses PointerEvent and scrollIntoView internally; jsdom doesn't implement them.
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (global as any).PointerEvent = window.MouseEvent;
+  (globalThis as any).PointerEvent = window.MouseEvent;
   // Radix also checks hasPointerCapture / releasePointerCapture on elements
   if (!window.HTMLElement.prototype.hasPointerCapture) {
     window.HTMLElement.prototype.hasPointerCapture = () => false;
