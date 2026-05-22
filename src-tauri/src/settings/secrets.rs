@@ -49,6 +49,48 @@ impl SecretStore for InMemorySecretStore {
 /// Newtype wrapper so `Arc<dyn SecretStore + Send + Sync>` can be used as Tauri managed state.
 pub struct ManagedSecretStore(pub std::sync::Arc<dyn SecretStore + Send + Sync>);
 
+/// Production keychain-backed secret store.
+/// Uses service namespace "hm" (documented in context-agent/wiki/code-map.md).
+pub struct KeychainSecretStore {
+    service: String,
+}
+
+impl KeychainSecretStore {
+    pub fn new(service: impl Into<String>) -> Self {
+        KeychainSecretStore { service: service.into() }
+    }
+}
+
+impl SecretStore for KeychainSecretStore {
+    fn set(&self, key: &str, value: &str) -> Result<(), SettingsError> {
+        let entry = keyring::Entry::new(&self.service, key)
+            .map_err(|_| SettingsError::Keychain("failed to access keychain".into()))?;
+        entry
+            .set_password(value)
+            .map_err(|_| SettingsError::Keychain("failed to write secret".into()))
+    }
+
+    fn get(&self, key: &str) -> Result<Option<String>, SettingsError> {
+        let entry = keyring::Entry::new(&self.service, key)
+            .map_err(|_| SettingsError::Keychain("failed to access keychain".into()))?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(_) => Err(SettingsError::Keychain("failed to read secret".into())),
+        }
+    }
+
+    fn delete(&self, key: &str) -> Result<(), SettingsError> {
+        let entry = keyring::Entry::new(&self.service, key)
+            .map_err(|_| SettingsError::Keychain("failed to access keychain".into()))?;
+        match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(_) => Err(SettingsError::Keychain("failed to delete secret".into())),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +132,16 @@ mod tests {
         s.set("mykey", "first").unwrap();
         s.set("mykey", "second").unwrap();
         assert_eq!(s.get("mykey").unwrap(), Some("second".to_string()));
+    }
+
+    #[test]
+    #[ignore = "requires real OS keychain — run manually with: cargo test -- --ignored keychain_smoke_set_get_delete"]
+    fn keychain_smoke_set_get_delete() {
+        let s = KeychainSecretStore::new("hm-test");
+        s.set("smoke-test-key", "smoke-test-value").unwrap();
+        let val = s.get("smoke-test-key").unwrap();
+        assert_eq!(val, Some("smoke-test-value".to_string()));
+        s.delete("smoke-test-key").unwrap();
+        assert_eq!(s.get("smoke-test-key").unwrap(), None);
     }
 }
