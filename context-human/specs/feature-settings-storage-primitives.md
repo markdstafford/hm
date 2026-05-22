@@ -1,6 +1,6 @@
 ---
 type: feature
-status: implementing
+status: complete
 created: 2026-05-22
 last_updated: 2026-05-22
 source_issue: [https://github.com/markdstafford/hm/issues/4](https://github.com/markdstafford/hm/issues/4)
