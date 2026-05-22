@@ -1,6 +1,6 @@
 ---
 type: enhancement
-status: implementing
+status: complete
 created: 2026-05-22
 last_updated: 2026-05-22
 source_issue: [https://github.com/markdstafford/hm/issues/5](https://github.com/markdstafford/hm/issues/5)
