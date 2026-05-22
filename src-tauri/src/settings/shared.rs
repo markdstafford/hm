@@ -94,6 +94,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
         shared_settings_set(&conn, "ts-key", &serde_json::json!("v2")).unwrap();
         let t2: String = conn
             .query_row(
@@ -102,6 +103,6 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(!t1.is_empty() && !t2.is_empty());
+        assert!(t2 > t1, "updated_at should advance on overwrite");
     }
 }
