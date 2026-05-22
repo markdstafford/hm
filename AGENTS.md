@@ -6,7 +6,7 @@
 1. Read the context map below before planning. Use the app spec and ADRs to understand why the current shape exists before changing it.
 2. Keep human and agent context separate. Human-facing product and architecture docs live under `context-human/`; durable working notes for agents live under `context-agent/`.
 3. Update `context-agent/` as you learn durable implementation context during a feature, especially decisions, code maps, gotchas, and follow-up notes that future agents should not rediscover.
-4. Use micromanager for any document expected to be human-facing, including README changes, product specs, ADRs, issue writeups, plans intended for human review, and release notes.
+4. Use `micromanager` for any document expected to be human-facing, including README changes, product specs, ADRs, issue writeups, plans intended for human review, and release notes.
 5. Work in small, reversible steps. Prefer incremental changes that can be tested and rolled back independently.
 6. Use red/green TDD for behavior changes: add or update a failing test, make it pass, then refactor while tests stay green.
 7. Verify with the narrowest relevant check first, then broader checks when available. Do not invent install, run, test, or build commands before the scaffold defines them.
@@ -40,7 +40,7 @@
 - Desktop shell: Tauri with a Rust core and TypeScript/React UI.
 - Styling: Tailwind v4 design tokens; no shadcn.
 - Data: SQLite plus sqlite-vec.
-- Testing once scaffolded: `cargo test`, Vitest + React Testing Library, Playwright, and axe-core where relevant.
+- Testing once scaffolded: `cargo test`, `Vitest` + `React Testing Library`, `Playwright`, and `axe-core` where relevant.
 
 ## Provider notes
 
