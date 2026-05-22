@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+/* ─── Catppuccin Latte (light) ─────────────────────────────────────────── */
+:root,
+[data-theme="latte"] {
+  --ctp-rosewater: #dc8a78;
+  --ctp-flamingo:  #dd7878;
+  --ctp-pink:      #ea76cb;
+  --ctp-mauve:     #8839ef;
+  --ctp-red:       #d20f39;
+  --ctp-maroon:    #e64553;
+  --ctp-peach:     #fe640b;
+  --ctp-yellow:    #df8e1d;
+  --ctp-green:     #40a02b;
+  --ctp-teal:      #179299;
+  --ctp-sky:       #04a5e5;
+  --ctp-sapphire:  #209fb5;
+  --ctp-blue:      #1e66f5;
+  --ctp-lavender:  #7287fd;
+  --ctp-text:      #4c4f69;
+  --ctp-subtext1:  #5c5f77;
+  --ctp-subtext0:  #6c6f85;
+  --ctp-overlay2:  #7c7f93;
+  --ctp-overlay1:  #8c8fa1;
+  --ctp-overlay0:  #9ca0b0;
+  --ctp-surface2:  #acb0be;
+  --ctp-surface1:  #bcc0cc;
+  --ctp-surface0:  #ccd0da;
+  --ctp-base:      #eff1f5;
+  --ctp-mantle:    #e6e9ef;
+  --ctp-crust:     #dce0e8;
+}
+
+/* ─── Catppuccin Macchiato (dark) ───────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --ctp-rosewater: #f4dbd6;
+    --ctp-flamingo:  #f0c6c6;
+    --ctp-pink:      #f5bde6;
+    --ctp-mauve:     #c6a0f6;
+    --ctp-red:       #ed8796;
+    --ctp-maroon:    #ee99a0;
+    --ctp-peach:     #f5a97f;
+    --ctp-yellow:    #eed49f;
+    --ctp-green:     #a6da95;
+    --ctp-teal:      #8bd5ca;
+    --ctp-sky:       #91d7e3;
+    --ctp-sapphire:  #7dc4e4;
+    --ctp-blue:      #8aadf4;
+    --ctp-lavender:  #b7bdf8;
+    --ctp-text:      #cad3f5;
+    --ctp-subtext1:  #b8c0e0;
+    --ctp-subtext0:  #a5adcb;
+    --ctp-overlay2:  #939ab7;
+    --ctp-overlay1:  #8087a2;
+    --ctp-overlay0:  #6e738d;
+    --ctp-surface2:  #5b6078;
+    --ctp-surface1:  #494d64;
+    --ctp-surface0:  #363a4f;
+    --ctp-base:      #24273a;
+    --ctp-mantle:    #1e2030;
+    --ctp-crust:     #181926;
+  }
+}
+
+[data-theme="macchiato"] {
+  --ctp-rosewater: #f4dbd6;
+  --ctp-flamingo:  #f0c6c6;
+  --ctp-pink:      #f5bde6;
+  --ctp-mauve:     #c6a0f6;
+  --ctp-red:       #ed8796;
+  --ctp-maroon:    #ee99a0;
+  --ctp-peach:     #f5a97f;
+  --ctp-yellow:    #eed49f;
+  --ctp-green:     #a6da95;
+  --ctp-teal:      #8bd5ca;
+  --ctp-sky:       #91d7e3;
+  --ctp-sapphire:  #7dc4e4;
+  --ctp-blue:      #8aadf4;
+  --ctp-lavender:  #b7bdf8;
+  --ctp-text:      #cad3f5;
+  --ctp-subtext1:  #b8c0e0;
+  --ctp-subtext0:  #a5adcb;
+  --ctp-overlay2:  #939ab7;
+  --ctp-overlay1:  #8087a2;
+  --ctp-overlay0:  #6e738d;
+  --ctp-surface2:  #5b6078;
+  --ctp-surface1:  #494d64;
+  --ctp-surface0:  #363a4f;
+  --ctp-base:      #24273a;
+  --ctp-mantle:    #1e2030;
+  --ctp-crust:     #181926;
+}
+
+/* ─── Tailwind v4 theme tokens ──────────────────────────────────────────── */
+@theme {
+  /* Typography */
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Fira Code", ui-monospace, monospace;
+
+  --text-xs:   0.6875rem; /* 11px */
+  --text-sm:   0.75rem;   /* 12px */
+  --text-base: 0.8125rem; /* 13px */
+  --text-md:   0.875rem;  /* 14px */
+  --text-lg:   1rem;      /* 16px */
+
+  /* 4px base spacing scale */
+  --spacing: 0.25rem; /* 1 unit = 4px */
+
+  /* Semantic colors */
+  --color-background: var(--ctp-base);
+  --color-mantle:     var(--ctp-mantle);
+  --color-crust:      var(--ctp-crust);
+  --color-surface:    var(--ctp-surface0);
+  --color-surface-1:  var(--ctp-surface1);
+  --color-surface-2:  var(--ctp-surface2);
+  --color-overlay:    var(--ctp-overlay0);
+  --color-text:       var(--ctp-text);
+  --color-subtext:    var(--ctp-subtext0);
+  --color-subtext-1:  var(--ctp-subtext1);
+  --color-primary:    var(--ctp-sapphire);
+  --color-border:     var(--ctp-surface2);
+  --color-focus:      var(--ctp-sapphire);
+  --color-green:      var(--ctp-green);
+  --color-red:        var(--ctp-red);
+  --color-yellow:     var(--ctp-yellow);
+  --color-mauve:      var(--ctp-mauve);
+  --color-peach:      var(--ctp-peach);
+
+  /* Control heights */
+  --height-control-sm:   1.5rem;   /* 24px */
+  --height-control-base: 1.75rem;  /* 28px */
+  --height-control-lg:   2rem;     /* 32px */
+
+  /* Sidebar */
+  --width-sidebar: 15.25rem; /* 244px */
+
+  /* Motion */
+  --duration-hover:  100ms;
+  --duration-enter:  150ms;
+  --duration-exit:   100ms;
+  --duration-layout: 250ms;
+}

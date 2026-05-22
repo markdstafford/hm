@@ -21,6 +21,7 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+Library/
 
 # Logs
 *.log
@@ -41,6 +42,7 @@ Thumbs.db
 # Ephemeral implementation plans and friction logs
 context-human/.superpowers-plans/
 context-human/.friction-logs/
+docs/superpowers/plans/
 
 # eng-docs (project uses context-human/ structure)
 .eng-docs/
