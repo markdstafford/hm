@@ -56,8 +56,27 @@ describe("normalizePreferences", () => {
     expect(result.window?.height).toBeUndefined();
   });
 
-  it("ignores unknown top-level keys — does not crash", () => {
-    expect(() => normalizePreferences({ unknownKey: "val" })).not.toThrow();
+  it("preserves unknown top-level keys", () => {
+    const result = normalizePreferences({ unknownKey: "val" }) as Record<string, unknown>;
+    expect(result.unknownKey).toBe("val");
+  });
+
+  it("preserves unknown appearance keys", () => {
+    const result = normalizePreferences({
+      appearance: { themeMode: "light", customField: "yes" },
+    }) as Record<string, unknown>;
+    const ap = result.appearance as Record<string, unknown>;
+    expect(ap.customField).toBe("yes");
+    expect(ap.themeMode).toBe("light");
+  });
+
+  it("preserves unknown window keys alongside valid numeric fields", () => {
+    const result = normalizePreferences({
+      window: { width: 1200, height: 800, extra: "keep" },
+    }) as Record<string, unknown>;
+    const win = result.window as Record<string, unknown>;
+    expect(win.width).toBe(1200);
+    expect(win.extra).toBe("keep");
   });
 });
 

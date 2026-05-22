@@ -4,7 +4,7 @@ import { commands, type AppStatus } from "./bindings";
 import { type AppPreferences, DEFAULT_PREFERENCES } from "./preferences";
 import { applyTheme, applyFonts, getSystemPrefersDark } from "./theme";
 import { loadPreferences, savePreferences } from "./settings/settingsStorage";
-import { restoreWindowState, persistWindowState } from "./windowState";
+import { restoreWindowState, registerWindowListeners } from "./windowState";
 import { SettingsPanel } from "./settings/SettingsPanel";
 
 function App() {
@@ -13,6 +13,13 @@ function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
+
+  // Always-current copy of prefs for use in window event callbacks, which
+  // cannot close over React state directly without becoming stale.
+  const prefsRef = useRef<AppPreferences>(DEFAULT_PREFERENCES);
+  useEffect(() => {
+    prefsRef.current = prefs;
+  }, [prefs]);
 
   // Load preferences on mount
   useEffect(() => {
@@ -50,6 +57,27 @@ function App() {
     }
   }, []);
 
+  // Register Tauri window move/resize listeners so window state persists whenever
+  // the user moves or resizes the window, not only when settings change.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+
+    let cleanup: (() => void) | null = null;
+
+    registerWindowListeners(async (winPatch) => {
+      const result = await savePreferences(prefsRef.current, winPatch);
+      if (result.ok) {
+        setPrefs(result.next);
+      }
+    }).then((fn) => {
+      cleanup = fn;
+    });
+
+    return () => {
+      cleanup?.();
+    };
+  }, []);
+
   const updatePreferences = useCallback(async (patch: Partial<AppPreferences>) => {
     const result = await savePreferences(prefs, patch);
     setPrefs(result.next);
@@ -57,9 +85,6 @@ function App() {
       setSaveError("Could not save preferences");
       setTimeout(() => setSaveError(null), 4000);
     }
-    persistWindowState(async (winPatch) => {
-      await savePreferences(result.next, winPatch);
-    });
   }, [prefs]);
 
   const handleSettingsOpen = () => setSettingsOpen(true);

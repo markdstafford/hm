@@ -36,6 +36,12 @@ test("settings panel closes with close button", async ({ page }) => {
   await expect(page.getByRole("dialog")).not.toBeVisible();
 });
 
+// Cross-session persistence (change → close → reopen → verify) requires a compiled Tauri
+// binary and tauri-driver with an isolated app-data directory. The Vite dev-server
+// environment used here does not have access to real preferencesWrite/preferencesRead IPC,
+// so that path cannot be verified in this suite. See context-agent/wiki/testing.md.
+test.todo("settings theme persists across app restart — requires tauri-driver with isolated app data");
+
 // UI-side smoke: validates data-theme attribute updates immediately on theme change.
 // Full persistence verification (change persists after app restart) requires tauri-driver.
 test("changing theme mode in settings updates data-theme immediately", async ({ page }) => {

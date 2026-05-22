@@ -146,4 +146,4 @@ Use `globalThis` (not `global`) — TypeScript in this project doesn't have the 
 
 ### E2E persistence limitation
 
-Full cross-session preference persistence (change → close → reopen → verify) requires a real Tauri binary with an isolated app data directory via `tauri-driver`. The current Playwright config targets the Vite dev server only (`http://localhost:1420`). The persistence smoke in `e2e/hello.spec.ts` verifies the UI side (data-theme attribute update) but not file I/O. Document this limitation in any CI configuration that runs `npm run test:e2e`.
+Full cross-session preference persistence (change → close → reopen → verify) requires a compiled Tauri `.app` binary and `tauri-driver` with an isolated app-data directory. The current Playwright config targets the Vite dev server only (`http://localhost:1420`), where Tauri IPC commands (`preferencesWrite` / `preferencesRead`) are unavailable. The persistence smoke in `e2e/hello.spec.ts` verifies the UI side (data-theme attribute update) but not file I/O. A `test.todo()` placeholder marks the pending coverage. Document this limitation in any CI configuration that runs `npm run test:e2e`.

@@ -41,37 +41,57 @@ export async function restoreWindowState(prefs: AppPreferences): Promise<void> {
   }
 }
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+/**
+ * Registers Tauri window move and resize event listeners that debounce window
+ * state captures and forward them to the provided callback. Returns a cleanup
+ * function that unregisters listeners and cancels any pending debounce.
+ *
+ * No-ops and returns a no-op cleanup when running outside Tauri.
+ */
+export async function registerWindowListeners(
+  onStateCapture: (patch: Partial<AppPreferences>) => Promise<void>
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
 
-export async function persistWindowState(
-  updatePrefs: (patch: Partial<AppPreferences>) => Promise<void>
-): Promise<void> {
-  if (!isTauri()) return;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  if (debounceTimer !== null) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(async () => {
-    try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const appWindow = getCurrentWindow();
-      const size = await appWindow.innerSize();
-      const pos = await appWindow.outerPosition();
-      await updatePrefs({
-        window: {
-          width: size.width,
-          height: size.height,
-          x: pos.x,
-          y: pos.y,
-        },
-      });
-    } catch (err) {
-      console.warn("[windowState] persist failed:", err);
-    }
-  }, 500);
-}
+  const captureState = () => {
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const appWindow = getCurrentWindow();
+        const size = await appWindow.innerSize();
+        const pos = await appWindow.outerPosition();
+        await onStateCapture({
+          window: {
+            width: size.width,
+            height: size.height,
+            x: pos.x,
+            y: pos.y,
+          },
+        });
+      } catch (err) {
+        console.warn("[windowState] persist failed:", err);
+      }
+    }, 500);
+  };
 
-export function cleanupWindowStateDebounce(): void {
-  if (debounceTimer !== null) {
-    clearTimeout(debounceTimer);
-    debounceTimer = null;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const appWindow = getCurrentWindow();
+    const unlistenMove = await appWindow.onMoved(captureState);
+    const unlistenResize = await appWindow.onResized(captureState);
+    return () => {
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      unlistenMove();
+      unlistenResize();
+    };
+  } catch (err) {
+    console.warn("[windowState] failed to register listeners:", err);
+    return () => {};
   }
 }
