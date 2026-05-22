@@ -108,3 +108,32 @@ Two pieces of managed Tauri state are registered in `lib.rs::run()`:
 - Secret values are never stored in TOML, SQLite, source files, generated bindings, logs, or test output.
 - `SettingsError::Keychain` and `SettingsError::Database` Display implementations intentionally omit internal details.
 - `KeychainSecretStore` error messages never include the key value or secret value.
+
+## Settings UI (added 2026-05-22)
+
+### Module layout
+
+```
+src/
+  preferences.ts       AppPreferences type, ThemeMode, DEFAULT_PREFERENCES, normalizePreferences, mergePreferences, resolvedPreferences
+  preferences.test.ts  Unit tests for normalize/merge helpers (pure functions, no Tauri dependency)
+  theme.ts             applyTheme(mode, _prefersDark) — sets/removes data-theme on <html>; applyFonts(uiFont, monoFont) — overrides --font-sans/--font-mono CSS vars on :root
+  windowState.ts       restoreWindowState(prefs), registerWindowListeners(onStateCapture) — listeners debounced 500ms; both guarded for non-Tauri environments
+  settings/
+    settingsTypes.ts       SettingsCategory, SettingsPanelProps
+    settingsStorage.ts     loadPreferences(), savePreferences(current, patch) — wraps Tauri commands with normalize + merge logic
+    SettingsPanel.tsx      Radix Dialog shell: sidebar (General category), content area, close button, Escape handler, cross-fade animation
+    GeneralSettings.tsx    Radix Select controls for themeMode, uiFont, monoFont; SettingRow layout component
+    SettingsPanel.test.tsx Component tests: render, open/close, controls, onUpdatePreferences calls, axe
+```
+
+### App.tsx integration
+
+App.tsx owns `AppPreferences` state. On mount: `loadPreferences()` → `setPrefs()` → `restoreWindowState()`. Also on mount (Tauri only): `registerWindowListeners()` registers debounced move/resize handlers that call `savePreferences` and `setPrefs` — a `prefsRef` keeps the callbacks current without stale closures. On themeMode change: `applyTheme()` + media-query listener cleanup. On font change: `applyFonts()`. `updatePreferences(patch)` merges + writes via `savePreferences` + surfaces save errors in a timed alert. SettingsPanel receives `prefs` and `onUpdatePreferences` as props.
+
+### Window state caveats
+
+- `restoreWindowState` and `registerWindowListeners` use dynamic `import("@tauri-apps/api/window")` so they tree-shake cleanly in non-Tauri builds.
+- Window state is captured automatically on Tauri `onMoved` and `onResized` events, debounced 500ms. Listeners are registered in a `useEffect` on App mount and cleaned up on unmount.
+- `prefsRef` in App.tsx keeps an always-current copy of `prefs` for the window listener callback, avoiding stale-closure issues with debounced async writes.
+- Saved positions outside [-2000, 10000] in either axis are ignored to prevent off-screen windows.
