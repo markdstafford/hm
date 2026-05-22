@@ -1,3 +1,4 @@
+import type React from "react";
 import * as Select from "@radix-ui/react-select";
 import { ChevronDown, Check } from "lucide-react";
 import type { AppPreferences, ThemeMode } from "../preferences";
@@ -16,6 +17,10 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
 
 const UI_FONT_OPTIONS = ["Inter Variable", "SF Pro", "Helvetica Neue", "Arial"];
 const MONO_FONT_OPTIONS = ["Fira Code", "JetBrains Mono", "Cascadia Code", "Menlo"];
+
+function fontStyle(fontFamily: string): React.CSSProperties {
+  return { fontFamily };
+}
 
 function SettingRow({ label, description, children }: {
   label: string;
@@ -40,7 +45,7 @@ function AppSelect<T extends string>({
   label,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; itemStyle?: React.CSSProperties }[];
   onChange: (val: T) => void;
   label: string;
 }) {
@@ -71,7 +76,9 @@ function AppSelect<T extends string>({
                 <Select.ItemIndicator>
                   <Check size={12} aria-hidden={true} />
                 </Select.ItemIndicator>
-                <Select.ItemText>{opt.label}</Select.ItemText>
+                <Select.ItemText>
+                  <span style={opt.itemStyle}>{opt.label}</span>
+                </Select.ItemText>
               </Select.Item>
             ))}
           </Select.Viewport>
@@ -97,10 +104,9 @@ export function GeneralSettings({ prefs, onUpdatePreferences }: GeneralSettingsP
 
   return (
     <div>
-      <h2 className="text-md font-semibold text-text mb-0.5">General</h2>
-      <p className="text-xs text-subtext mb-4">Local app preferences stored on this Mac</p>
+      <h2 className="text-md font-semibold text-text mb-4">General</h2>
 
-      <section aria-labelledby="appearance-heading" className="mb-6">
+      <section aria-labelledby="appearance-heading">
         <h3 id="appearance-heading" className="text-xs font-semibold text-subtext uppercase tracking-wider mb-2">
           Appearance
         </h3>
@@ -116,7 +122,7 @@ export function GeneralSettings({ prefs, onUpdatePreferences }: GeneralSettingsP
           <SettingRow label="UI font" description="Font used for interface text">
             <AppSelect
               value={uiFont}
-              options={UI_FONT_OPTIONS.map((f) => ({ value: f, label: f }))}
+              options={UI_FONT_OPTIONS.map((f) => ({ value: f, label: f, itemStyle: fontStyle(f) }))}
               onChange={handleUiFontChange}
               label="UI font"
             />
@@ -124,22 +130,11 @@ export function GeneralSettings({ prefs, onUpdatePreferences }: GeneralSettingsP
           <SettingRow label="Monospace font" description="Font used in code and timestamps">
             <AppSelect
               value={monoFont}
-              options={MONO_FONT_OPTIONS.map((f) => ({ value: f, label: f }))}
+              options={MONO_FONT_OPTIONS.map((f) => ({ value: f, label: f, itemStyle: fontStyle(f) }))}
               onChange={handleMonoFontChange}
               label="Monospace font"
             />
           </SettingRow>
-        </div>
-      </section>
-
-      <section aria-labelledby="window-heading">
-        <h3 id="window-heading" className="text-xs font-semibold text-subtext uppercase tracking-wider mb-2">
-          Window
-        </h3>
-        <div className="rounded-md border border-border bg-surface/30 px-3 py-3">
-          <p className="text-sm text-subtext">
-            Window size and position are saved automatically.
-          </p>
         </div>
       </section>
     </div>

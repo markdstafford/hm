@@ -14,17 +14,13 @@ export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences }: Set
   return (
     <Dialog.Root open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
       <Dialog.Portal>
-        <Dialog.Overlay
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0"
-          style={{ animationDuration: "200ms" }}
-        />
         <Dialog.Content
           aria-label="Settings"
-          className="fixed inset-0 flex items-center justify-center p-8 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0"
+          className="fixed inset-0 flex data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0"
           style={{ animationDuration: "200ms" }}
           onEscapeKeyDown={onClose}
         >
-          <div className="relative flex w-full max-w-3xl h-[520px] rounded-lg border border-border bg-mantle shadow-2xl overflow-hidden">
+          <div className="relative flex w-full h-full bg-mantle overflow-hidden">
             {/* Sidebar */}
             <nav
               aria-label="Settings categories"
