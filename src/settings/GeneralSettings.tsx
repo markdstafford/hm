@@ -137,6 +137,15 @@ export function GeneralSettings({ prefs, onUpdatePreferences }: GeneralSettingsP
           </SettingRow>
         </div>
       </section>
+
+      <section aria-labelledby="window-heading" className="mt-6">
+        <h3 id="window-heading" className="text-xs font-semibold text-subtext uppercase tracking-wider mb-2">
+          Window
+        </h3>
+        <div className="rounded-md border border-border bg-surface/30 px-3 py-3">
+          <p className="text-sm text-subtext">Window size and position are saved automatically.</p>
+        </div>
+      </section>
     </div>
   );
 }

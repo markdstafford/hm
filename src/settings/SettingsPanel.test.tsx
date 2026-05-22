@@ -103,6 +103,24 @@ describe("SettingsPanel", () => {
     );
   });
 
+  it("renders UI font options with their own fontFamily style when dropdown is open", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("combobox", { name: /ui font/i }));
+    const interOption = await screen.findByRole("option", { name: /inter variable/i });
+    const styledSpan = interOption.querySelector<HTMLElement>("span[style]");
+    expect(styledSpan?.style.fontFamily).toContain("Inter Variable");
+  });
+
+  it("renders monospace font options with their own fontFamily style when dropdown is open", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("combobox", { name: /monospace font/i }));
+    const firaOption = await screen.findByRole("option", { name: /fira code/i });
+    const styledSpan = firaOption.querySelector<HTMLElement>("span[style]");
+    expect(styledSpan?.style.fontFamily).toContain("Fira Code");
+  });
+
   it("has no accessibility violations when open", async () => {
     const { container } = renderPanel();
     const results = await axe(container);
