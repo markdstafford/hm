@@ -5,6 +5,13 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	appStatus: () => __TAURI_INVOKE<AppStatus>("app_status"),
+	preferencesRead: () => typedError<unknown, string>(__TAURI_INVOKE("preferences_read")),
+	preferencesWrite: (prefs: unknown) => typedError<null, string>(__TAURI_INVOKE("preferences_write", { prefs })),
+	secretSet: (key: string, value: string) => typedError<null, string>(__TAURI_INVOKE("secret_set", { key, value })),
+	secretGet: (key: string) => typedError<string | null, string>(__TAURI_INVOKE("secret_get", { key })),
+	secretDelete: (key: string) => typedError<null, string>(__TAURI_INVOKE("secret_delete", { key })),
+	sharedSettingsGet: (key: string) => typedError<unknown | null, string>(__TAURI_INVOKE("shared_settings_get", { key })),
+	sharedSettingsSet: (key: string, value: unknown) => typedError<null, string>(__TAURI_INVOKE("shared_settings_set", { key, value })),
 };
 
 /* Types */
@@ -12,4 +19,14 @@ export type AppStatus = {
 	version: string,
 	ready: boolean,
 };
+
+/* Tauri Specta runtime */
+async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
+    try {
+        return { status: "ok", data: await result };
+    } catch (e) {
+        if (e instanceof Error) throw e;
+        return { status: "error", error: e as any };
+    }
+}
 

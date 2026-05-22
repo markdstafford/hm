@@ -19,7 +19,7 @@ sqlite-vec = "=0.1.9"
 toml = { version = "0.8", features = ["preserve_order"] }
 directories = "5"
 keyring = "3"
-specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta-typescript = "=0.0.12"
 
