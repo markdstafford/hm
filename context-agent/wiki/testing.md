@@ -59,3 +59,41 @@ had a missing bundled C file (`sqlite-vec-diskann.c`) and was unusable on macOS.
 2. Add the command to `collect_commands![...]` in `src-tauri/src/lib.rs`.
 3. Run `npm run tauri dev` once to regenerate `src/bindings.ts`.
 4. Use `commands.yourCommand()` from `./bindings` in React.
+
+## Settings tests (added 2026-05-22)
+
+### New Rust tests
+
+| Module                          | Tests                                                             |
+|---------------------------------|-------------------------------------------------------------------|
+| `settings::preferences`         | round-trip, missing file, parent creation, non-object rejection   |
+| `settings::keys`                | accepted/rejected key patterns (7 tests)                          |
+| `settings::secrets` (in-memory) | set/get/delete/missing/overwrite (5 tests)                        |
+| `settings::secrets` (keychain)  | ignored smoke test — run manually with `-- --ignored`             |
+| `settings::shared`              | set/get/missing/overwrite/type fidelity/updated_at (5 tests)      |
+| `db::tests`                     | existing 3 tests + `shared_settings` table creation (4 total)     |
+
+### Keychain test strategy
+
+Unit tests for secrets use `InMemorySecretStore` — no OS keychain prompt in CI.
+The real keychain path is tested via a single `#[ignore]`-annotated test in `secrets.rs`. To run it locally:
+```bash
+cd src-tauri && cargo test -- --ignored keychain_smoke_set_get_delete
+```
+
+### Binding regeneration (headless)
+
+`src/bindings.ts` is normally regenerated when `npm run tauri dev` starts in debug mode. A test in `lib.rs` provides a headless alternative:
+```bash
+cd src-tauri && cargo test generate_typescript_bindings
+```
+This writes `src/bindings.ts` from the current `collect_commands!` list without launching the Tauri app. Note: the test spawns a thread with a 32 MiB stack to avoid a stack overflow caused by a known recursion bug in specta rc.25 type traversal.
+
+### Frontend type checks
+
+After changing commands or bindings, run:
+```bash
+npm run lint    # tsc --noEmit
+npm test        # Vitest
+```
+If `node_modules` is missing, run `npm install` first.
