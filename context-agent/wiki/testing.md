@@ -9,6 +9,7 @@ Last updated: 2026-05-21 (scaffold)
 | `npm test` | Vitest unit + component tests in jsdom |
 | `npm run lint` | TypeScript type check (`tsc --noEmit`) |
 | `cd src-tauri && cargo test` | Rust unit tests |
+| `npx playwright install webkit` | First-time setup: install WebKit browser executable |
 | `npm run test:e2e` | Playwright e2e against Vite dev server |
 | `npm run tauri dev` | Vite dev server + Tauri desktop window |
 

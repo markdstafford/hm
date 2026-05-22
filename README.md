@@ -38,6 +38,7 @@ npm run tauri dev    # start Vite dev server + launch the Tauri window
 npm test             # Vitest unit + component tests
 npm run lint         # TypeScript type check
 cd src-tauri && cargo test   # Rust unit tests
+npx playwright install webkit   # first-time setup: install browser executables
 npm run test:e2e     # Playwright e2e (requires Vite dev server running)
 ```
 

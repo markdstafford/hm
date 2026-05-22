@@ -8,6 +8,6 @@ test("hello hm heading is visible", async ({ page }) => {
 test("theme toggle button is present", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("button", { name: /toggle theme/i })
+    page.getByRole("button", { name: /switch to (dark|light) mode/i })
   ).toBeVisible();
 });
