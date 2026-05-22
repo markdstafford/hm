@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Build output
+dist/
+src-tauri/target/
+
+# Test results
+test-results/
+playwright-report/
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# SQLite WAL/SHM (volatile, recreated on open)
+*.db-shm
+*.db-wal
+
+# Worktrees
+.worktrees/
+.claude/worktrees/
+
+# Ephemeral implementation plans and friction logs
+context-human/.superpowers-plans/
+context-human/.friction-logs/
+
+# eng-docs (project uses context-human/ structure)
+.eng-docs/
+
+# Claude Code — track shared settings, ignore everything else
+.claude/*
+!.claude/settings.json
+
+# Autocatalyst ephemeral state
+.autocatalyst/
+
+# OpenAI Agents SDK materialized skill files
+.agents/
