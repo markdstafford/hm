@@ -54,3 +54,57 @@ and `text-primary` consume these tokens.
 - `tsconfig.node.json` uses `composite: true` (required by TS project references)
 - `tauri.conf.json` `"csp": null` — intentional for development, must be addressed before distribution
 - `src-tauri/icons/icon.png` — placeholder, must be replaced with real icons before distribution
+
+## Settings module (added 2026-05-22)
+
+### Module layout
+
+```
+src-tauri/src/settings/
+  mod.rs             re-exports all sub-modules
+  error.rs           SettingsError enum — safe Display strings for all storage failures
+  keys.rs            validate_key() — shared validation for all key-based APIs
+  preferences.rs     read_preferences_at(path), write_preferences_at(path, prefs), preferences_path()
+  secrets.rs         SecretStore trait, InMemorySecretStore, KeychainSecretStore, ManagedSecretStore
+  shared.rs          shared_settings_get(conn, key), shared_settings_set(conn, key, value)
+```
+
+### Command list
+
+| Rust fn               | TypeScript binding        | Storage           |
+|-----------------------|---------------------------|-------------------|
+| `app_status`          | `appStatus`               | none              |
+| `preferences_read`    | `preferencesRead`         | TOML file         |
+| `preferences_write`   | `preferencesWrite`        | TOML file         |
+| `secret_set`          | `secretSet`               | OS keychain       |
+| `secret_get`          | `secretGet`               | OS keychain       |
+| `secret_delete`       | `secretDelete`            | OS keychain       |
+| `shared_settings_get` | `sharedSettingsGet`       | SQLite            |
+| `shared_settings_set` | `sharedSettingsSet`       | SQLite            |
+
+### Storage paths (macOS)
+
+| Storage class      | Path                                                        |
+|--------------------|-------------------------------------------------------------|
+| Preferences        | `~/Library/Application Support/hm/preferences.toml`        |
+| Keychain namespace | service = `"hm"`, account = the validated key string        |
+| SQLite database    | `~/Library/Application Support/hm/hm.db`                   |
+
+The SQLite path uses `app.path().app_data_dir()` (Tauri 2 managed path). On macOS this resolves to `~/Library/Application Support/hm/`. The keychain namespace `"hm"` is a placeholder; it should be updated to the final Tauri bundle identifier before distribution.
+
+### App state pattern
+
+Two pieces of managed Tauri state are registered in `lib.rs::run()`:
+
+- `Mutex<rusqlite::Connection>` — holds the open SQLite connection. Lock, use, and release immediately; never hold the lock while doing keychain or filesystem work.
+- `ManagedSecretStore(Arc<dyn SecretStore + Send + Sync>)` — wraps the production `KeychainSecretStore`. Commands receive this via `tauri::State<'_, ManagedSecretStore>`.
+
+### specta JsonValue workaround
+
+`serde_json::Value`'s `specta::Type` implementation in specta rc.25 is infinitely recursive at binding-generation time. Commands use a `JsonValue` newtype (in `commands.rs`) that wraps `serde_json::Value` with transparent serde and emits TypeScript `unknown` via `specta_typescript::define`. This is safe to remove if a future specta version fixes the recursion.
+
+### Security notes
+
+- Secret values are never stored in TOML, SQLite, source files, generated bindings, logs, or test output.
+- `SettingsError::Keychain` and `SettingsError::Database` Display implementations intentionally omit internal details.
+- `KeychainSecretStore` error messages never include the key value or secret value.
