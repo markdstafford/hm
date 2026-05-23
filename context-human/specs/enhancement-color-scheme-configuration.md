@@ -2,7 +2,7 @@
 type: enhancement
 status: implementing
 created: 2026-05-22
-last_updated: 2026-05-22
+last_updated: 2026-05-23
 source_issue: [https://github.com/markdstafford/hm/issues/6](https://github.com/markdstafford/hm/issues/6)
 related_specs:
 	- [feature-settings-storage-primitives.md](http://feature-settings-storage-primitives.md)
