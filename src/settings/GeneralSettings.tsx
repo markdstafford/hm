@@ -1,19 +1,13 @@
 import type React from "react";
 import * as Select from "@radix-ui/react-select";
 import { ChevronDown, Check } from "lucide-react";
-import type { AppPreferences, ThemeMode } from "../preferences";
+import type { AppPreferences } from "../preferences";
 import { DEFAULT_PREFERENCES } from "../preferences";
 
 interface GeneralSettingsProps {
   prefs: AppPreferences;
   onUpdatePreferences: (patch: Partial<AppPreferences>) => Promise<void>;
 }
-
-const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-];
 
 const UI_FONT_OPTIONS = ["Inter Variable", "SF Pro", "Helvetica Neue", "Arial"];
 const MONO_FONT_OPTIONS = ["Fira Code", "JetBrains Mono", "Cascadia Code", "Menlo"];
@@ -89,12 +83,8 @@ function AppSelect<T extends string>({
 }
 
 export function GeneralSettings({ prefs, onUpdatePreferences }: GeneralSettingsProps) {
-  const themeMode = prefs.appearance?.themeMode ?? DEFAULT_PREFERENCES.appearance!.themeMode!;
   const uiFont = prefs.appearance?.uiFont ?? DEFAULT_PREFERENCES.appearance!.uiFont!;
   const monoFont = prefs.appearance?.monoFont ?? DEFAULT_PREFERENCES.appearance!.monoFont!;
-
-  const handleThemeChange = (val: ThemeMode) =>
-    onUpdatePreferences({ appearance: { themeMode: val } });
 
   const handleUiFontChange = (val: string) =>
     onUpdatePreferences({ appearance: { uiFont: val } });
@@ -106,19 +96,11 @@ export function GeneralSettings({ prefs, onUpdatePreferences }: GeneralSettingsP
     <div>
       <h2 className="text-md font-semibold text-text mb-4">General</h2>
 
-      <section aria-labelledby="appearance-heading">
-        <h3 id="appearance-heading" className="text-xs font-semibold text-subtext uppercase tracking-wider mb-2">
-          Appearance
+      <section aria-labelledby="fonts-heading">
+        <h3 id="fonts-heading" className="text-xs font-semibold text-subtext uppercase tracking-wider mb-2">
+          Fonts
         </h3>
         <div className="rounded-md border border-border bg-surface/30 px-3 divide-y divide-border">
-          <SettingRow label="Theme mode" description="Controls light or dark appearance">
-            <AppSelect
-              value={themeMode}
-              options={THEME_OPTIONS}
-              onChange={handleThemeChange}
-              label="Theme mode"
-            />
-          </SettingRow>
           <SettingRow label="UI font" description="Font used for interface text">
             <AppSelect
               value={uiFont}

@@ -4,6 +4,9 @@ import {
   mergePreferences,
   resolvedPreferences,
   DEFAULT_PREFERENCES,
+  resolveThemeSlots,
+  resolveTheme,
+  resolveCatppuccinAccent,
 } from "./preferences";
 
 describe("normalizePreferences", () => {
@@ -80,6 +83,82 @@ describe("normalizePreferences", () => {
   });
 });
 
+describe("color scheme normalization", () => {
+  it("defaults lightTheme to catppuccin-latte when missing", () => {
+    const result = normalizePreferences({ appearance: {} });
+    expect(result.appearance?.lightTheme).toBe("catppuccin-latte");
+  });
+
+  it("defaults darkTheme to catppuccin-macchiato when missing", () => {
+    const result = normalizePreferences({ appearance: {} });
+    expect(result.appearance?.darkTheme).toBe("catppuccin-macchiato");
+  });
+
+  it("accepts valid lightTheme id", () => {
+    const result = normalizePreferences({ appearance: { lightTheme: "github-light" } });
+    expect(result.appearance?.lightTheme).toBe("github-light");
+  });
+
+  it("rejects dark theme id in lightTheme slot — falls back to catppuccin-latte", () => {
+    const result = normalizePreferences({ appearance: { lightTheme: "catppuccin-mocha" } });
+    expect(result.appearance?.lightTheme).toBe("catppuccin-latte");
+  });
+
+  it("accepts valid darkTheme id", () => {
+    const result = normalizePreferences({ appearance: { darkTheme: "dracula" } });
+    expect(result.appearance?.darkTheme).toBe("dracula");
+  });
+
+  it("rejects light theme id in darkTheme slot — falls back to catppuccin-macchiato", () => {
+    const result = normalizePreferences({ appearance: { darkTheme: "catppuccin-latte" } });
+    expect(result.appearance?.darkTheme).toBe("catppuccin-macchiato");
+  });
+
+  it("rejects unknown theme id in lightTheme slot", () => {
+    const result = normalizePreferences({ appearance: { lightTheme: "nonexistent" } });
+    expect(result.appearance?.lightTheme).toBe("catppuccin-latte");
+  });
+
+  it("defaults catppuccin accent to sapphire when missing", () => {
+    const result = normalizePreferences({ appearance: { themeFeatures: {} } });
+    expect(result.appearance?.themeFeatures?.catppuccin?.accent).toBe("sapphire");
+  });
+
+  it("accepts valid catppuccin accent", () => {
+    const result = normalizePreferences({ appearance: { themeFeatures: { catppuccin: { accent: "green" } } } });
+    expect(result.appearance?.themeFeatures?.catppuccin?.accent).toBe("green");
+  });
+
+  it("rejects invalid catppuccin accent — falls back to sapphire", () => {
+    const result = normalizePreferences({ appearance: { themeFeatures: { catppuccin: { accent: "rainbow" } } } });
+    expect(result.appearance?.themeFeatures?.catppuccin?.accent).toBe("sapphire");
+  });
+
+  it("handles deprecated flavor: latte — maps to catppuccin-latte lightTheme", () => {
+    const result = normalizePreferences({ appearance: { flavor: "latte" } });
+    expect(result.appearance?.lightTheme).toBe("catppuccin-latte");
+  });
+
+  it("handles deprecated flavor: mocha — maps darkTheme to catppuccin-mocha", () => {
+    const result = normalizePreferences({ appearance: { flavor: "mocha" } });
+    expect(result.appearance?.darkTheme).toBe("catppuccin-mocha");
+  });
+
+  it("explicit lightTheme takes precedence over deprecated flavor", () => {
+    const result = normalizePreferences({ appearance: { lightTheme: "github-light", flavor: "latte" } });
+    expect(result.appearance?.lightTheme).toBe("github-light");
+  });
+
+  it("preserves unknown themeFeatures keys", () => {
+    const result = normalizePreferences({
+      appearance: { themeFeatures: { customTheme: { option: "yes" } } }
+    }) as Record<string, unknown>;
+    const ap = result.appearance as Record<string, unknown>;
+    const features = ap.themeFeatures as Record<string, unknown>;
+    expect(features.customTheme).toEqual({ option: "yes" });
+  });
+});
+
 describe("mergePreferences", () => {
   it("merges appearance patch without erasing unrelated fields", () => {
     const current = { appearance: { themeMode: "dark" as const, uiFont: "Roboto", monoFont: "Fira Code" } };
@@ -108,5 +187,69 @@ describe("resolvedPreferences", () => {
   it("preserves saved values over defaults", () => {
     const result = resolvedPreferences({ appearance: { themeMode: "dark" } });
     expect(result.appearance?.themeMode).toBe("dark");
+  });
+});
+
+describe("resolveThemeSlots", () => {
+  it("returns defaults when no appearance prefs", () => {
+    const result = resolveThemeSlots({});
+    expect(result.lightTheme).toBe("catppuccin-latte");
+    expect(result.darkTheme).toBe("catppuccin-macchiato");
+  });
+
+  it("returns saved valid light theme", () => {
+    const result = resolveThemeSlots({ appearance: { lightTheme: "github-light" } });
+    expect(result.lightTheme).toBe("github-light");
+  });
+
+  it("falls back lightTheme if invalid", () => {
+    const result = resolveThemeSlots({ appearance: { lightTheme: "catppuccin-mocha" } });
+    expect(result.lightTheme).toBe("catppuccin-latte");
+  });
+});
+
+describe("resolveTheme", () => {
+  it("light mode resolves to lightTheme with brightness light", () => {
+    const result = resolveTheme({ appearance: { themeMode: "light", lightTheme: "github-light" } }, false);
+    expect(result.themeId).toBe("github-light");
+    expect(result.brightness).toBe("light");
+  });
+
+  it("dark mode resolves to darkTheme with brightness dark", () => {
+    const result = resolveTheme({ appearance: { themeMode: "dark", darkTheme: "dracula" } }, false);
+    expect(result.themeId).toBe("dracula");
+    expect(result.brightness).toBe("dark");
+  });
+
+  it("system mode with prefersDark=true resolves to darkTheme", () => {
+    const result = resolveTheme({ appearance: { themeMode: "system", darkTheme: "catppuccin-mocha" } }, true);
+    expect(result.themeId).toBe("catppuccin-mocha");
+    expect(result.brightness).toBe("dark");
+  });
+
+  it("system mode with prefersDark=false resolves to lightTheme", () => {
+    const result = resolveTheme({ appearance: { themeMode: "system" } }, false);
+    expect(result.themeId).toBe("catppuccin-latte");
+    expect(result.brightness).toBe("light");
+  });
+
+  it("defaults themeMode to system when missing", () => {
+    const result = resolveTheme({}, false);
+    expect(result.themeId).toBe("catppuccin-latte");
+    expect(result.brightness).toBe("light");
+  });
+});
+
+describe("resolveCatppuccinAccent", () => {
+  it("returns saved valid accent", () => {
+    expect(resolveCatppuccinAccent({ appearance: { themeFeatures: { catppuccin: { accent: "green" } } } })).toBe("green");
+  });
+
+  it("returns sapphire as default when missing", () => {
+    expect(resolveCatppuccinAccent({})).toBe("sapphire");
+  });
+
+  it("returns sapphire for invalid accent", () => {
+    expect(resolveCatppuccinAccent({ appearance: { themeFeatures: { catppuccin: { accent: "rainbow" as never } } } })).toBe("sapphire");
   });
 });

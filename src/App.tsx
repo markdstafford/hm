@@ -1,8 +1,8 @@
 import { Settings } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { commands, type AppStatus } from "./bindings";
-import { type AppPreferences, DEFAULT_PREFERENCES } from "./preferences";
-import { applyTheme, applyFonts, getSystemPrefersDark } from "./theme";
+import { type AppPreferences, DEFAULT_PREFERENCES, resolveTheme, resolveCatppuccinAccent } from "./preferences";
+import { applyColorScheme, applyFonts, getSystemPrefersDark } from "./theme";
 import { loadPreferences, savePreferences } from "./settings/settingsStorage";
 import { restoreWindowState, registerWindowListeners } from "./windowState";
 import { SettingsPanel } from "./settings/SettingsPanel";
@@ -12,16 +12,14 @@ function App() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [prefersDark, setPrefersDark] = useState(getSystemPrefersDark);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
 
-  // Always-current copy of prefs for use in window event callbacks, which
-  // cannot close over React state directly without becoming stale.
   const prefsRef = useRef<AppPreferences>(DEFAULT_PREFERENCES);
   useEffect(() => {
     prefsRef.current = prefs;
   }, [prefs]);
 
-  // Load preferences on mount
   useEffect(() => {
     loadPreferences().then((loaded) => {
       setPrefs(loaded);
@@ -29,20 +27,39 @@ function App() {
     });
   }, []);
 
-  // Apply theme whenever themeMode changes
+  // Keep prefersDark in sync with OS for downstream consumers (e.g. settings preview)
   useEffect(() => {
-    const mode = prefs.appearance?.themeMode ?? "system";
-    applyTheme(mode, getSystemPrefersDark());
-
-    if (mode !== "system") return;
-    // Listen for system theme changes while in system mode
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => applyTheme("system", mq.matches);
+    const handler = () => setPrefersDark(mq.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
-  }, [prefs.appearance?.themeMode]);
+  }, []);
 
-  // Apply fonts whenever font prefs change
+  // Apply color scheme whenever appearance preferences change
+  useEffect(() => {
+    const prefersDark = getSystemPrefersDark();
+    const resolved = resolveTheme(prefs, prefersDark);
+    const accent = resolveCatppuccinAccent(prefs);
+    applyColorScheme({ ...resolved, accent });
+
+    const mode = prefs.appearance?.themeMode ?? "system";
+    if (mode !== "system") return;
+
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => {
+      const r = resolveTheme(prefs, mq.matches);
+      const a = resolveCatppuccinAccent(prefs);
+      applyColorScheme({ ...r, accent: a });
+    };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [
+    prefs.appearance?.themeMode,
+    prefs.appearance?.lightTheme,
+    prefs.appearance?.darkTheme,
+    prefs.appearance?.themeFeatures,
+  ]);
+
   useEffect(() => {
     applyFonts(
       prefs.appearance?.uiFont ?? DEFAULT_PREFERENCES.appearance!.uiFont!,
@@ -50,15 +67,12 @@ function App() {
     );
   }, [prefs.appearance?.uiFont, prefs.appearance?.monoFont]);
 
-  // Load app status
   useEffect(() => {
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       commands.appStatus().then(setStatus).catch(console.error);
     }
   }, []);
 
-  // Register Tauri window move/resize listeners so window state persists whenever
-  // the user moves or resizes the window, not only when settings change.
   useEffect(() => {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
 
@@ -102,7 +116,7 @@ function App() {
       </p>
 
       <div className="flex items-center gap-3">
-        <div className="h-control-base px-4 rounded bg-primary text-background text-sm flex items-center">
+        <div className="h-control-base px-4 rounded bg-primary text-on-primary text-sm flex items-center">
           Primary button
         </div>
         <div className="h-control-base px-4 rounded border border-border text-sm flex items-center">
@@ -137,6 +151,7 @@ function App() {
         onClose={handleSettingsClose}
         prefs={prefs}
         onUpdatePreferences={updatePreferences}
+        prefersDark={prefersDark}
       />
     </main>
   );
