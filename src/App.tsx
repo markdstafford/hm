@@ -1,8 +1,8 @@
 import { Settings } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { commands, type AppStatus } from "./bindings";
-import { type AppPreferences, DEFAULT_PREFERENCES } from "./preferences";
-import { applyTheme, applyFonts, getSystemPrefersDark } from "./theme";
+import { type AppPreferences, DEFAULT_PREFERENCES, resolveTheme, resolveCatppuccinAccent } from "./preferences";
+import { applyColorScheme, applyFonts, getSystemPrefersDark } from "./theme";
 import { loadPreferences, savePreferences } from "./settings/settingsStorage";
 import { restoreWindowState, registerWindowListeners } from "./windowState";
 import { SettingsPanel } from "./settings/SettingsPanel";
@@ -14,14 +14,11 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
 
-  // Always-current copy of prefs for use in window event callbacks, which
-  // cannot close over React state directly without becoming stale.
   const prefsRef = useRef<AppPreferences>(DEFAULT_PREFERENCES);
   useEffect(() => {
     prefsRef.current = prefs;
   }, [prefs]);
 
-  // Load preferences on mount
   useEffect(() => {
     loadPreferences().then((loaded) => {
       setPrefs(loaded);
@@ -29,20 +26,31 @@ function App() {
     });
   }, []);
 
-  // Apply theme whenever themeMode changes
+  // Apply color scheme whenever appearance preferences change
   useEffect(() => {
-    const mode = prefs.appearance?.themeMode ?? "system";
-    applyTheme(mode, getSystemPrefersDark());
+    const prefersDark = getSystemPrefersDark();
+    const resolved = resolveTheme(prefs, prefersDark);
+    const accent = resolveCatppuccinAccent(prefs);
+    applyColorScheme({ ...resolved, accent });
 
+    const mode = prefs.appearance?.themeMode ?? "system";
     if (mode !== "system") return;
-    // Listen for system theme changes while in system mode
+
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = () => applyTheme("system", mq.matches);
+    const handler = () => {
+      const r = resolveTheme(prefs, mq.matches);
+      const a = resolveCatppuccinAccent(prefs);
+      applyColorScheme({ ...r, accent: a });
+    };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
-  }, [prefs.appearance?.themeMode]);
+  }, [
+    prefs.appearance?.themeMode,
+    prefs.appearance?.lightTheme,
+    prefs.appearance?.darkTheme,
+    prefs.appearance?.themeFeatures,
+  ]);
 
-  // Apply fonts whenever font prefs change
   useEffect(() => {
     applyFonts(
       prefs.appearance?.uiFont ?? DEFAULT_PREFERENCES.appearance!.uiFont!,
@@ -50,15 +58,12 @@ function App() {
     );
   }, [prefs.appearance?.uiFont, prefs.appearance?.monoFont]);
 
-  // Load app status
   useEffect(() => {
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       commands.appStatus().then(setStatus).catch(console.error);
     }
   }, []);
 
-  // Register Tauri window move/resize listeners so window state persists whenever
-  // the user moves or resizes the window, not only when settings change.
   useEffect(() => {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
 
