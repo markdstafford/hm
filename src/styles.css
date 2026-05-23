@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 /* ─── Catppuccin Latte (light) ─────────────────────────────────────────── */
+/* ─── Catppuccin on-primary override for Latte (light theme) ───────────── */
+/* Latte sapphire #209fb5 on bg #eff1f5: 2.78:1 (fails) — on-primary uses dark text instead */
+/* #1e2030 (Macchiato mantle) on #209fb5: 5.13:1 ✓ WCAG AA */
 :root,
 [data-theme="catppuccin-latte"] {
+  --color-on-primary: #1e2030;
   --ctp-rosewater: #dc8a78;
   --ctp-flamingo:  #dd7878;
   --ctp-pink:      #ea76cb;
@@ -154,6 +158,7 @@
 
 /* ─── GitHub Light ──────────────────────────────────────────────────────── */
 /* Source: github/github-vscode-theme (MIT) */
+/* Contrast on #0969da: white 5.19:1 ✓ WCAG AA */
 [data-theme="github-light"] {
   --color-background: #ffffff;
   --color-mantle:     #f6f8fa;
@@ -168,6 +173,7 @@
   --color-primary:    #0969da;
   --color-border:     #d0d7de;
   --color-focus:      #0969da;
+  --color-on-primary: var(--color-background);
   --color-green:      #1a7f37;
   --color-red:        #d1242f;
   --color-yellow:     #9a6700;
@@ -177,6 +183,7 @@
 
 /* ─── GitHub Dark ───────────────────────────────────────────────────────── */
 /* Source: github/github-vscode-theme (MIT) */
+/* Contrast on #2f81f7: bg #0d1117 5.05:1 ✓ WCAG AA */
 [data-theme="github-dark"] {
   --color-background: #0d1117;
   --color-mantle:     #161b22;
@@ -191,6 +198,7 @@
   --color-primary:    #2f81f7;
   --color-border:     #30363d;
   --color-focus:      #2f81f7;
+  --color-on-primary: var(--color-background);
   --color-green:      #3fb950;
   --color-red:        #f85149;
   --color-yellow:     #d29922;
@@ -200,6 +208,7 @@
 
 /* ─── Solarized Light ───────────────────────────────────────────────────── */
 /* Source: Ethan Schoonover Solarized palette (MIT) */
+/* Contrast on #fdf6e3: text #073642 12.05:1, subtext #586e75 4.99:1, primary #1770b8 4.81:1 ✓ WCAG AA */
 [data-theme="solarized-light"] {
   --color-background: #fdf6e3;
   --color-mantle:     #eee8d5;
@@ -208,12 +217,13 @@
   --color-surface-1:  #e7ddc8;
   --color-surface-2:  #d0c9b5;
   --color-overlay:    #93a1a1;
-  --color-text:       #657b83;
-  --color-subtext:    #839496;
-  --color-subtext-1:  #93a1a1;
-  --color-primary:    #268bd2;
+  --color-text:       #073642;
+  --color-subtext:    #586e75;
+  --color-subtext-1:  #586e75;
+  --color-primary:    #1770b8;
   --color-border:     #d0c9b5;
-  --color-focus:      #268bd2;
+  --color-focus:      #1770b8;
+  --color-on-primary: var(--color-background);
   --color-green:      #859900;
   --color-red:        #dc322f;
   --color-yellow:     #b58900;
@@ -223,6 +233,7 @@
 
 /* ─── Dracula ───────────────────────────────────────────────────────────── */
 /* Source: Dracula Theme (MIT) */
+/* Contrast on #282a36: subtext #9ba5c9 5.84:1, subtext-1 #b3b8cc 7.22:1 ✓ WCAG AA */
 [data-theme="dracula"] {
   --color-background: #282a36;
   --color-mantle:     #21222c;
@@ -232,11 +243,12 @@
   --color-surface-2:  #373a49;
   --color-overlay:    #6272a4;
   --color-text:       #f8f8f2;
-  --color-subtext:    #6272a4;
-  --color-subtext-1:  #7b8db5;
+  --color-subtext:    #9ba5c9;
+  --color-subtext-1:  #b3b8cc;
   --color-primary:    #bd93f9;
   --color-border:     #44475a;
   --color-focus:      #bd93f9;
+  --color-on-primary: var(--color-background);
   --color-green:      #50fa7b;
   --color-red:        #ff5555;
   --color-yellow:     #f1fa8c;
@@ -272,6 +284,8 @@
   --color-subtext-1:  var(--ctp-subtext1);
   /* primary/focus: accent override → fallback to sapphire */
   --color-primary:    var(--hm-accent, var(--ctp-sapphire));
+  /* on-primary: text color on primary-colored backgrounds; non-Catppuccin themes override directly */
+  --color-on-primary: var(--ctp-crust);
   --color-border:     var(--ctp-surface2);
   --color-focus:      var(--hm-accent, var(--ctp-sapphire));
   --color-green:      var(--ctp-green);

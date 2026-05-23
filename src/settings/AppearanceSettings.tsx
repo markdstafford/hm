@@ -9,12 +9,12 @@ import {
   LIGHT_THEMES,
   DARK_THEMES,
   themeSupportsFeature,
-  getSystemPrefersDark,
 } from "../theme";
 
 interface AppearanceSettingsProps {
   prefs: AppPreferences;
   onUpdatePreferences: (patch: Partial<AppPreferences>) => Promise<void>;
+  prefersDark: boolean;
 }
 
 function SettingRow({ label, description, children }: {
@@ -82,11 +82,10 @@ const THEME_MODE_OPTIONS: { value: ThemeMode; label: string; description: string
   { value: "dark", label: "Dark", description: "Always dark" },
 ];
 
-export function AppearanceSettings({ prefs, onUpdatePreferences }: AppearanceSettingsProps) {
+export function AppearanceSettings({ prefs, onUpdatePreferences, prefersDark }: AppearanceSettingsProps) {
   const themeMode: ThemeMode = prefs.appearance?.themeMode ?? DEFAULT_PREFERENCES.appearance!.themeMode!;
   const { lightTheme, darkTheme } = resolveThemeSlots(prefs);
   const accent = resolveCatppuccinAccent(prefs);
-  const prefersDark = getSystemPrefersDark();
   const resolved = resolveTheme(prefs, prefersDark);
   const resolvedThemeMeta = THEME_CATALOG.find((t) => t.id === resolved.themeId);
   const showCatppuccinAccent =
@@ -236,7 +235,7 @@ export function AppearanceSettings({ prefs, onUpdatePreferences }: AppearanceSet
               <p className="text-xs text-subtext">Subtext label</p>
             </div>
             <div className="flex items-center gap-2 mt-2">
-              <div className="h-control-sm px-3 rounded bg-primary text-background text-xs flex items-center">
+              <div className="h-control-sm px-3 rounded bg-primary text-on-primary text-xs flex items-center">
                 Primary action
               </div>
               <span className="text-xs text-primary underline">Link</span>

@@ -42,6 +42,7 @@ function renderPanel(props?: Partial<Parameters<typeof SettingsPanel>[0]>) {
       onClose={onClose}
       prefs={defaultPrefs}
       onUpdatePreferences={onUpdatePreferences}
+      prefersDark={false}
       {...props}
     />
   );

@@ -12,6 +12,7 @@ function App() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [prefersDark, setPrefersDark] = useState(getSystemPrefersDark);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
 
   const prefsRef = useRef<AppPreferences>(DEFAULT_PREFERENCES);
@@ -24,6 +25,14 @@ function App() {
       setPrefs(loaded);
       restoreWindowState(loaded);
     });
+  }, []);
+
+  // Keep prefersDark in sync with OS for downstream consumers (e.g. settings preview)
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = () => setPrefersDark(mq.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
   }, []);
 
   // Apply color scheme whenever appearance preferences change
@@ -107,7 +116,7 @@ function App() {
       </p>
 
       <div className="flex items-center gap-3">
-        <div className="h-control-base px-4 rounded bg-primary text-background text-sm flex items-center">
+        <div className="h-control-base px-4 rounded bg-primary text-on-primary text-sm flex items-center">
           Primary button
         </div>
         <div className="h-control-base px-4 rounded border border-border text-sm flex items-center">
@@ -142,6 +151,7 @@ function App() {
         onClose={handleSettingsClose}
         prefs={prefs}
         onUpdatePreferences={updatePreferences}
+        prefersDark={prefersDark}
       />
     </main>
   );

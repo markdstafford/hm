@@ -45,12 +45,13 @@ test("settings theme persists across app restart — requires tauri-driver with 
   test.skip(true, "Requires tauri-driver with isolated app data; not available in Vite dev-server environment.");
 });
 
-// UI-side smoke: validates data-theme attribute updates immediately on theme change.
+// UI-side smoke: validates data-theme and data-theme-mode attributes update immediately on theme change.
 // Full persistence verification (change persists after app restart) requires tauri-driver.
-test("changing theme mode in settings updates data-theme immediately", async ({ page }) => {
+test("changing theme mode in Appearance settings updates data-theme immediately", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /open settings/i }).click();
-  await page.getByRole("combobox", { name: /theme mode/i }).click();
-  await page.getByRole("option", { name: /dark/i }).click();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "macchiato");
+  await page.getByRole("button", { name: /appearance/i }).click();
+  await page.getByRole("radio", { name: /^dark$/i }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "catppuccin-macchiato");
+  await expect(page.locator("html")).toHaveAttribute("data-theme-mode", "dark");
 });

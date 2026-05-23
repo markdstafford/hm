@@ -12,9 +12,10 @@ interface SettingsPanelProps {
   onClose: () => void;
   prefs: AppPreferences;
   onUpdatePreferences: (patch: Partial<AppPreferences>) => Promise<void>;
+  prefersDark: boolean;
 }
 
-export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences }: SettingsPanelProps) {
+export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences, prefersDark }: SettingsPanelProps) {
   const [category, setCategory] = useState<SettingsCategory>("general");
 
   return (
@@ -64,7 +65,7 @@ export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences }: Set
               {category === "general" ? (
                 <GeneralSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} />
               ) : (
-                <AppearanceSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} />
+                <AppearanceSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} prefersDark={prefersDark} />
               )}
             </div>
 
