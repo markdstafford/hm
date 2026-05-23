@@ -2,7 +2,7 @@
 
 /* ─── Catppuccin Latte (light) ─────────────────────────────────────────── */
 :root,
-[data-theme="latte"] {
+[data-theme="catppuccin-latte"] {
   --ctp-rosewater: #dc8a78;
   --ctp-flamingo:  #dd7878;
   --ctp-pink:      #ea76cb;
@@ -29,6 +29,36 @@
   --ctp-base:      #eff1f5;
   --ctp-mantle:    #e6e9ef;
   --ctp-crust:     #dce0e8;
+}
+
+/* ─── Catppuccin Frappé (dark) ──────────────────────────────────────────── */
+[data-theme="catppuccin-frappe"] {
+  --ctp-rosewater: #f2d5cf;
+  --ctp-flamingo:  #eebebe;
+  --ctp-pink:      #f4b8e4;
+  --ctp-mauve:     #ca9ee6;
+  --ctp-red:       #e78284;
+  --ctp-maroon:    #ea999c;
+  --ctp-peach:     #ef9f76;
+  --ctp-yellow:    #e5c890;
+  --ctp-green:     #a6d189;
+  --ctp-teal:      #81c8be;
+  --ctp-sky:       #99d1db;
+  --ctp-sapphire:  #85c1dc;
+  --ctp-blue:      #8caaee;
+  --ctp-lavender:  #babbf1;
+  --ctp-text:      #c6d0f5;
+  --ctp-subtext1:  #b5bfe2;
+  --ctp-subtext0:  #a5adce;
+  --ctp-overlay2:  #949cbb;
+  --ctp-overlay1:  #838ba7;
+  --ctp-overlay0:  #737994;
+  --ctp-surface2:  #626880;
+  --ctp-surface1:  #51576d;
+  --ctp-surface0:  #414559;
+  --ctp-base:      #303446;
+  --ctp-mantle:    #292c3c;
+  --ctp-crust:     #232634;
 }
 
 /* ─── Catppuccin Macchiato (dark) ───────────────────────────────────────── */
@@ -63,7 +93,7 @@
   }
 }
 
-[data-theme="macchiato"] {
+[data-theme="catppuccin-macchiato"] {
   --ctp-rosewater: #f4dbd6;
   --ctp-flamingo:  #f0c6c6;
   --ctp-pink:      #f5bde6;
@@ -92,6 +122,128 @@
   --ctp-crust:     #181926;
 }
 
+/* ─── Catppuccin Mocha (dark) ───────────────────────────────────────────── */
+[data-theme="catppuccin-mocha"] {
+  --ctp-rosewater: #f5e0dc;
+  --ctp-flamingo:  #f2cdcd;
+  --ctp-pink:      #f5c2e7;
+  --ctp-mauve:     #cba6f7;
+  --ctp-red:       #f38ba8;
+  --ctp-maroon:    #eba0ac;
+  --ctp-peach:     #fab387;
+  --ctp-yellow:    #f9e2af;
+  --ctp-green:     #a6e3a1;
+  --ctp-teal:      #94e2d5;
+  --ctp-sky:       #89dceb;
+  --ctp-sapphire:  #74c7ec;
+  --ctp-blue:      #89b4fa;
+  --ctp-lavender:  #b4befe;
+  --ctp-text:      #cdd6f4;
+  --ctp-subtext1:  #bac2de;
+  --ctp-subtext0:  #a6adc8;
+  --ctp-overlay2:  #9399b2;
+  --ctp-overlay1:  #7f849c;
+  --ctp-overlay0:  #6c7086;
+  --ctp-surface2:  #585b70;
+  --ctp-surface1:  #45475a;
+  --ctp-surface0:  #313244;
+  --ctp-base:      #1e1e2e;
+  --ctp-mantle:    #181825;
+  --ctp-crust:     #11111b;
+}
+
+/* ─── GitHub Light ──────────────────────────────────────────────────────── */
+/* Source: github/github-vscode-theme (MIT) */
+[data-theme="github-light"] {
+  --color-background: #ffffff;
+  --color-mantle:     #f6f8fa;
+  --color-crust:      #eaeef2;
+  --color-surface:    #f6f8fa;
+  --color-surface-1:  #eaeef2;
+  --color-surface-2:  #d0d7de;
+  --color-overlay:    #8c959f;
+  --color-text:       #1f2328;
+  --color-subtext:    #636c76;
+  --color-subtext-1:  #57606a;
+  --color-primary:    #0969da;
+  --color-border:     #d0d7de;
+  --color-focus:      #0969da;
+  --color-green:      #1a7f37;
+  --color-red:        #d1242f;
+  --color-yellow:     #9a6700;
+  --color-mauve:      #8250df;
+  --color-peach:      #bc4c00;
+}
+
+/* ─── GitHub Dark ───────────────────────────────────────────────────────── */
+/* Source: github/github-vscode-theme (MIT) */
+[data-theme="github-dark"] {
+  --color-background: #0d1117;
+  --color-mantle:     #161b22;
+  --color-crust:      #21262d;
+  --color-surface:    #161b22;
+  --color-surface-1:  #21262d;
+  --color-surface-2:  #30363d;
+  --color-overlay:    #6e7681;
+  --color-text:       #e6edf3;
+  --color-subtext:    #8d96a0;
+  --color-subtext-1:  #7d8590;
+  --color-primary:    #2f81f7;
+  --color-border:     #30363d;
+  --color-focus:      #2f81f7;
+  --color-green:      #3fb950;
+  --color-red:        #f85149;
+  --color-yellow:     #d29922;
+  --color-mauve:      #d2a8ff;
+  --color-peach:      #ffa657;
+}
+
+/* ─── Solarized Light ───────────────────────────────────────────────────── */
+/* Source: Ethan Schoonover Solarized palette (MIT) */
+[data-theme="solarized-light"] {
+  --color-background: #fdf6e3;
+  --color-mantle:     #eee8d5;
+  --color-crust:      #e7ddc8;
+  --color-surface:    #eee8d5;
+  --color-surface-1:  #e7ddc8;
+  --color-surface-2:  #d0c9b5;
+  --color-overlay:    #93a1a1;
+  --color-text:       #657b83;
+  --color-subtext:    #839496;
+  --color-subtext-1:  #93a1a1;
+  --color-primary:    #268bd2;
+  --color-border:     #d0c9b5;
+  --color-focus:      #268bd2;
+  --color-green:      #859900;
+  --color-red:        #dc322f;
+  --color-yellow:     #b58900;
+  --color-mauve:      #6c71c4;
+  --color-peach:      #cb4b16;
+}
+
+/* ─── Dracula ───────────────────────────────────────────────────────────── */
+/* Source: Dracula Theme (MIT) */
+[data-theme="dracula"] {
+  --color-background: #282a36;
+  --color-mantle:     #21222c;
+  --color-crust:      #191a21;
+  --color-surface:    #44475a;
+  --color-surface-1:  #3d4051;
+  --color-surface-2:  #373a49;
+  --color-overlay:    #6272a4;
+  --color-text:       #f8f8f2;
+  --color-subtext:    #6272a4;
+  --color-subtext-1:  #7b8db5;
+  --color-primary:    #bd93f9;
+  --color-border:     #44475a;
+  --color-focus:      #bd93f9;
+  --color-green:      #50fa7b;
+  --color-red:        #ff5555;
+  --color-yellow:     #f1fa8c;
+  --color-mauve:      #ff79c6;
+  --color-peach:      #ffb86c;
+}
+
 /* ─── Tailwind v4 theme tokens ──────────────────────────────────────────── */
 @theme {
   /* Typography */
@@ -107,7 +259,7 @@
   /* 4px base spacing scale */
   --spacing: 0.25rem; /* 1 unit = 4px */
 
-  /* Semantic colors */
+  /* Semantic colors — resolved from theme variables */
   --color-background: var(--ctp-base);
   --color-mantle:     var(--ctp-mantle);
   --color-crust:      var(--ctp-crust);
@@ -118,9 +270,10 @@
   --color-text:       var(--ctp-text);
   --color-subtext:    var(--ctp-subtext0);
   --color-subtext-1:  var(--ctp-subtext1);
-  --color-primary:    var(--ctp-sapphire);
+  /* primary/focus: accent override → fallback to sapphire */
+  --color-primary:    var(--hm-accent, var(--ctp-sapphire));
   --color-border:     var(--ctp-surface2);
-  --color-focus:      var(--ctp-sapphire);
+  --color-focus:      var(--hm-accent, var(--ctp-sapphire));
   --color-green:      var(--ctp-green);
   --color-red:        var(--ctp-red);
   --color-yellow:     var(--ctp-yellow);
