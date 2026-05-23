@@ -5,11 +5,9 @@ import { vi, beforeAll } from "vitest";
 import { SettingsPanel } from "./SettingsPanel";
 import type { AppPreferences } from "../preferences";
 
-// Radix Select uses PointerEvent and scrollIntoView internally; jsdom doesn't implement them.
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).PointerEvent = window.MouseEvent;
-  // Radix also checks hasPointerCapture / releasePointerCapture on elements
   if (!window.HTMLElement.prototype.hasPointerCapture) {
     window.HTMLElement.prototype.hasPointerCapture = () => false;
   }
@@ -19,7 +17,6 @@ beforeAll(() => {
   if (!window.HTMLElement.prototype.setPointerCapture) {
     window.HTMLElement.prototype.setPointerCapture = () => {};
   }
-  // jsdom doesn't implement scrollIntoView
   if (!window.HTMLElement.prototype.scrollIntoView) {
     window.HTMLElement.prototype.scrollIntoView = () => {};
   }
@@ -28,6 +25,9 @@ beforeAll(() => {
 const defaultPrefs: AppPreferences = {
   appearance: {
     themeMode: "system",
+    lightTheme: "catppuccin-latte",
+    darkTheme: "catppuccin-macchiato",
+    themeFeatures: { catppuccin: { accent: "sapphire" } },
     uiFont: "Inter Variable",
     monoFont: "Fira Code",
   },
@@ -59,9 +59,36 @@ describe("SettingsPanel", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows General as the active category", () => {
+  it("shows General as the active category by default", () => {
     renderPanel();
-    expect(screen.getByRole("button", { name: /general/i })).toBeInTheDocument();
+    const generalBtn = screen.getByRole("button", { name: /general/i });
+    expect(generalBtn).toHaveAttribute("aria-current", "page");
+  });
+
+  it("renders Appearance category button in sidebar", () => {
+    renderPanel();
+    expect(screen.getByRole("button", { name: /^appearance$/i })).toBeInTheDocument();
+  });
+
+  it("switches to Appearance when Appearance button is clicked", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: /^appearance$/i }));
+    expect(screen.getByRole("heading", { name: /^appearance$/i })).toBeInTheDocument();
+  });
+
+  it("Appearance button becomes active after click", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: /^appearance$/i }));
+    expect(screen.getByRole("button", { name: /^appearance$/i })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("General button loses active state after switching to Appearance", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: /^appearance$/i }));
+    expect(screen.getByRole("button", { name: /general/i })).not.toHaveAttribute("aria-current", "page");
   });
 
   it("calls onClose when close button is clicked", async () => {
@@ -78,29 +105,14 @@ describe("SettingsPanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("renders theme mode control", () => {
-    renderPanel();
-    expect(screen.getByRole("combobox", { name: /theme mode/i })).toBeInTheDocument();
-  });
-
-  it("renders UI font control", () => {
+  it("renders UI font control in General", () => {
     renderPanel();
     expect(screen.getByRole("combobox", { name: /ui font/i })).toBeInTheDocument();
   });
 
-  it("renders monospace font control", () => {
+  it("renders monospace font control in General", () => {
     renderPanel();
     expect(screen.getByRole("combobox", { name: /monospace font/i })).toBeInTheDocument();
-  });
-
-  it("calls onUpdatePreferences with theme patch when theme changes", async () => {
-    const user = userEvent.setup();
-    const { onUpdatePreferences } = renderPanel();
-    await user.click(screen.getByRole("combobox", { name: /theme mode/i }));
-    await user.click(await screen.findByRole("option", { name: /light/i }));
-    expect(onUpdatePreferences).toHaveBeenCalledWith(
-      expect.objectContaining({ appearance: expect.objectContaining({ themeMode: "light" }) })
-    );
   });
 
   it("renders UI font options with their own fontFamily style when dropdown is open", async () => {
@@ -121,7 +133,141 @@ describe("SettingsPanel", () => {
     expect(styledSpan?.style.fontFamily).toContain("Fira Code");
   });
 
-  it("has no accessibility violations when open", async () => {
+  // Appearance tab tests
+  describe("Appearance tab", () => {
+    async function openAppearance(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole("button", { name: /^appearance$/i }));
+    }
+
+    it("renders theme mode radio group in Appearance", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openAppearance(user);
+      expect(screen.getByRole("radiogroup", { name: /theme mode/i })).toBeInTheDocument();
+    });
+
+    it("renders System, Light, Dark mode options", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openAppearance(user);
+      expect(screen.getByRole("radio", { name: /system/i })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: /light/i })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: /dark/i })).toBeInTheDocument();
+    });
+
+    it("System mode is checked by default", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openAppearance(user);
+      expect(screen.getByRole("radio", { name: /system/i })).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("calls onUpdatePreferences with themeMode patch when mode changes", async () => {
+      const user = userEvent.setup();
+      const { onUpdatePreferences } = renderPanel();
+      await openAppearance(user);
+      await user.click(screen.getByRole("radio", { name: /^light$/i }));
+      expect(onUpdatePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ appearance: expect.objectContaining({ themeMode: "light" }) })
+      );
+    });
+
+    it("renders Light theme control", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openAppearance(user);
+      expect(screen.getByRole("combobox", { name: /light theme/i })).toBeInTheDocument();
+    });
+
+    it("renders Dark theme control", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openAppearance(user);
+      expect(screen.getByRole("combobox", { name: /dark theme/i })).toBeInTheDocument();
+    });
+
+    it("calls onUpdatePreferences with lightTheme patch when light theme changes", async () => {
+      const user = userEvent.setup();
+      const { onUpdatePreferences } = renderPanel();
+      await openAppearance(user);
+      await user.click(screen.getByRole("combobox", { name: /light theme/i }));
+      const githubLightOption = await screen.findByRole("option", { name: /github light/i });
+      await user.click(githubLightOption);
+      expect(onUpdatePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ appearance: expect.objectContaining({ lightTheme: "github-light" }) })
+      );
+    });
+
+    it("calls onUpdatePreferences with darkTheme patch when dark theme changes", async () => {
+      const user = userEvent.setup();
+      const { onUpdatePreferences } = renderPanel();
+      await openAppearance(user);
+      await user.click(screen.getByRole("combobox", { name: /dark theme/i }));
+      const draculaOption = await screen.findByRole("option", { name: /dracula/i });
+      await user.click(draculaOption);
+      expect(onUpdatePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({ appearance: expect.objectContaining({ darkTheme: "dracula" }) })
+      );
+    });
+
+    it("renders Catppuccin accent control when a Catppuccin theme is selected", async () => {
+      const user = userEvent.setup();
+      renderPanel(); // defaultPrefs uses catppuccin-latte / catppuccin-macchiato
+      await openAppearance(user);
+      expect(screen.getByRole("combobox", { name: /accent/i })).toBeInTheDocument();
+    });
+
+    it("calls onUpdatePreferences with accent patch when accent changes", async () => {
+      const user = userEvent.setup();
+      const { onUpdatePreferences } = renderPanel();
+      await openAppearance(user);
+      await user.click(screen.getByRole("combobox", { name: /accent/i }));
+      const greenOption = await screen.findByRole("option", { name: /^green$/i });
+      await user.click(greenOption);
+      expect(onUpdatePreferences).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appearance: expect.objectContaining({
+            themeFeatures: expect.objectContaining({
+              catppuccin: expect.objectContaining({ accent: "green" }),
+            }),
+          }),
+        })
+      );
+    });
+
+    it("hides Catppuccin accent when non-Catppuccin themes are selected", async () => {
+      const user = userEvent.setup();
+      renderPanel({
+        prefs: {
+          ...defaultPrefs,
+          appearance: {
+            ...defaultPrefs.appearance,
+            lightTheme: "github-light",
+            darkTheme: "github-dark",
+          },
+        },
+      });
+      await openAppearance(user);
+      expect(screen.queryByRole("combobox", { name: /accent/i })).not.toBeInTheDocument();
+    });
+
+    it("renders preview section with resolver label", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      await openAppearance(user);
+      expect(screen.getByText(/system →/i)).toBeInTheDocument();
+    });
+
+    it("has no accessibility violations on Appearance tab", async () => {
+      const user = userEvent.setup();
+      const { container } = renderPanel();
+      await openAppearance(user);
+      const results = await axe(container);
+      expect(results).toHaveNoViolations();
+    });
+  });
+
+  it("has no accessibility violations on General tab", async () => {
     const { container } = renderPanel();
     const results = await axe(container);
     expect(results).toHaveNoViolations();
