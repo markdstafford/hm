@@ -8,7 +8,7 @@ use crate::settings::{keys, preferences, secrets::ManagedSecretStore, shared};
 // that impl is infinitely recursive at binding-generation time (specta rc.25 bug).
 // `JsonValue` is a transparent newtype that serialises/deserialises identically to
 // `serde_json::Value` but emits TypeScript `unknown` using `specta_typescript::define`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JsonValue(pub serde_json::Value);
 
 impl specta::Type for JsonValue {
