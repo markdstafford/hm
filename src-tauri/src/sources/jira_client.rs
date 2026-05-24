@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::sources::jira_errors::JiraApiError;
+use crate::sources::jira_types::{JiraIssue, JiraProject};
 
 // ── Secret string ─────────────────────────────────────────────────────────────
 
@@ -157,10 +158,74 @@ impl JiraApiClient {
         })
     }
 
+    /// Make a single authenticated GET request. No retry.
+    fn send_get_once<T: serde::de::DeserializeOwned>(
+        &self,
+        path_and_query: &str,
+    ) -> Result<T, JiraApiError> {
+        let url = join_api_path(&self.base_url, path_and_query);
+        match self
+            .http
+            .get(&url)
+            .set("Authorization", &format!("Bearer {}", self.pat.expose()))
+            .set("Accept", "application/json")
+            .set("User-Agent", &self.user_agent)
+            .call()
+        {
+            Ok(resp) => resp.into_json::<T>().map_err(|_| JiraApiError::Decode),
+            Err(ureq::Error::Status(status, resp)) => {
+                let retry_after = parse_retry_after_header(resp.header("Retry-After"));
+                Err(JiraApiError::from_status(status, retry_after))
+            }
+            Err(ureq::Error::Transport(_)) => Err(JiraApiError::Network),
+        }
+    }
+
+    /// GET request with retry (currently just calls send_get_once; Task 6 adds retry loop).
+    fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        path_and_query: &str,
+    ) -> Result<T, JiraApiError> {
+        self.send_get_once(path_and_query)
+    }
+
+    /// Fetch one issue by key or id with embedded changelog.
+    pub fn get_issue_with_changelog(
+        &self,
+        issue_id_or_key: &str,
+    ) -> Result<JiraIssue, JiraApiError> {
+        let issue = encode_path_segment(issue_id_or_key)?;
+        self.get_json(&format!("/rest/api/2/issue/{issue}?expand=changelog"))
+    }
+
+    /// List accessible projects.
+    pub fn list_projects(&self) -> Result<Vec<JiraProject>, JiraApiError> {
+        self.get_json("/rest/api/2/project")
+    }
+
     #[cfg(test)]
     pub fn base_url_for_tests(&self) -> &str {
         &self.base_url
     }
+}
+
+// ── Path segment helpers ──────────────────────────────────────────────────────
+
+pub(crate) fn encode_path_segment(segment: &str) -> Result<String, JiraApiError> {
+    if segment.trim().is_empty() || segment.contains('/') || segment.contains("..") {
+        return Err(JiraApiError::InvalidRequest {
+            message: "invalid Jira path segment".into(),
+        });
+    }
+    Ok(url::form_urlencoded::byte_serialize(segment.as_bytes()).collect())
+}
+
+fn join_api_path(base_url: &str, path_and_query: &str) -> String {
+    format!("{base_url}{path_and_query}")
+}
+
+fn parse_retry_after_header(value: Option<&str>) -> Option<u64> {
+    value.and_then(|raw| raw.trim().parse::<u64>().ok())
 }
 
 // ── URL normalization ──────────────────────────────────────────────────────────
@@ -207,6 +272,34 @@ fn normalize_base_url(input: &str) -> Result<String, JiraApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use tiny_http::{Header, Method, Response, Server, StatusCode};
+
+    fn spawn_json_server<F>(handler: F) -> String
+    where
+        F: Fn(tiny_http::Request) + Send + 'static,
+    {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            if let Ok(request) = server.recv() {
+                handler(request);
+            }
+        });
+        base_url
+    }
+
+    fn json_response(
+        status: u16,
+        body: &'static str,
+    ) -> Response<std::io::Cursor<Vec<u8>>> {
+        Response::from_string(body)
+            .with_status_code(StatusCode(status))
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+            )
+    }
 
     pub(super) fn config(base_url: &str, pat: &str) -> JiraApiClientConfig {
         JiraApiClientConfig {
@@ -272,6 +365,100 @@ mod tests {
                 "expected InvalidBaseUrl for {url}, got {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn list_projects_sends_auth_accept_and_user_agent_headers() {
+        let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen_clone = Arc::clone(&seen);
+        let base_url = spawn_json_server(move |request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(request.url(), "/rest/api/2/project");
+            for header in request.headers() {
+                seen_clone.lock().unwrap().push((
+                    header.field.as_str().to_string(),
+                    header.value.as_str().to_string(),
+                ));
+            }
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_projects.json"),
+                ))
+                .unwrap();
+        });
+        let projects = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 2);
+        let headers = seen.lock().unwrap();
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k.eq_ignore_ascii_case("Authorization")
+                    && v == "Bearer secret-jira-pat-123"),
+            "Authorization header missing or wrong"
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k.eq_ignore_ascii_case("Accept") && v == "application/json"),
+            "Accept header missing"
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k.eq_ignore_ascii_case("User-Agent") && v == "hm-test/0.1.0"),
+            "User-Agent header missing"
+        );
+    }
+
+    #[test]
+    fn get_issue_with_changelog_uses_expand_query_and_decodes_fixture() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(request.url(), "/rest/api/2/issue/HM-1?expand=changelog");
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_issue_with_changelog.json"),
+                ))
+                .unwrap();
+        });
+        let issue = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .get_issue_with_changelog("HM-1")
+            .unwrap();
+        assert_eq!(issue.key, "HM-1");
+        assert!(issue.changelog.is_some());
+    }
+
+    #[test]
+    fn http_failures_map_to_safe_jira_api_errors() {
+        let base_url = spawn_json_server(|request| {
+            request
+                .respond(json_response(
+                    401,
+                    r#"{"errorMessages":["Authorization: Bearer secret-jira-pat-123"]}"#,
+                ))
+                .unwrap();
+        });
+        let err = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .list_projects()
+            .unwrap_err();
+        assert_eq!(err, JiraApiError::Unauthorized);
+        assert!(!format!("{err}").contains("secret-jira-pat-123"));
+    }
+
+    #[test]
+    fn encode_path_segment_rejects_slash_and_dotdot() {
+        assert!(encode_path_segment("").is_err());
+        assert!(encode_path_segment("a/b").is_err());
+        assert!(encode_path_segment("../etc").is_err());
+        assert!(encode_path_segment("HM-1").is_ok());
+        assert!(encode_path_segment("HM 1").is_ok()); // spaces are URL-encoded
     }
 }
 
