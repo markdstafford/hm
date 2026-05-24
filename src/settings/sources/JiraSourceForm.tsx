@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { JiraSourceConfig, SourcesConfig, JiraConnectionTestResult, JiraConnectionProject } from "../../sources/types";
 import { validateJiraDraft, normalizeJiraServerUrl, dedupeAndSortProjects } from "../../sources/validation";
-import { setSourceCredentialSecret, saveSourcesConfig, testJiraSourceConnection } from "../../sources/storage";
+import { setSourceCredentialSecret, deleteSourceCredential, saveSourcesConfig, testJiraSourceConnection } from "../../sources/storage";
 import { newJiraSourceDraft } from "../../sources/defaults";
 import { ConnectionTestStatus } from "./ConnectionTestStatus";
 import { ProjectMultiSelect } from "./ProjectMultiSelect";
@@ -72,6 +72,9 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
     setSaveError(null);
     try {
       let credentialRef = draft.auth.credential_ref;
+      // Track whether we created a new credential that needs rollback if save fails.
+      // Edit mode overwrites the same ref (source still references it), so only new sources need cleanup.
+      let newCredentialRef: string | null = null;
 
       if (pendingPat.trim()) {
         const credResult = await setSourceCredentialSecret(draft.id, "JiraPat", pendingPat);
@@ -80,6 +83,9 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
           return;
         }
         credentialRef = credResult.credentialRef;
+        if (mode === "new") {
+          newCredentialRef = credentialRef;
+        }
       }
 
       let serverUrl = draft.server_url;
@@ -111,6 +117,10 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
 
       const saveResult = await saveSourcesConfig(updatedConfig);
       if (!saveResult.ok) {
+        // Roll back the newly written credential for new sources to avoid an orphaned keychain entry.
+        if (newCredentialRef) {
+          await deleteSourceCredential(newCredentialRef);
+        }
         setSaveError(saveResult.error);
         return;
       }

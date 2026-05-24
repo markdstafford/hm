@@ -291,6 +291,32 @@ describe("Sources settings", () => {
     expect(patInput.value).toBe("");
   });
 
+  it("rolls back credential write when source_config_save fails for a new source", async () => {
+    vi.mocked(commands.sourceCredentialSecretSet).mockResolvedValue({
+      status: "ok",
+      data: "source.jira.src_new.pat",
+    });
+    vi.mocked(commands.sourceConfigSave).mockResolvedValue({
+      status: "error",
+      error: "Database write failed",
+    });
+    const user = userEvent.setup();
+    renderPanel();
+    await openSources(user);
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: /jira data center/i }));
+    await user.type(screen.getByLabelText(/server url/i), "https://jira.example.com");
+    await user.type(screen.getByLabelText(/personal access token/i), "my-token");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => {
+      expect(vi.mocked(commands.sourceCredentialSecretSet)).toHaveBeenCalled();
+      expect(vi.mocked(commands.sourceConfigSave)).toHaveBeenCalled();
+      // Credential must be cleaned up since save failed for a new source
+      expect(vi.mocked(commands.sourceCredentialDelete)).toHaveBeenCalledWith("source.jira.src_new.pat");
+    });
+    expect(screen.getByText(/Database write failed/i)).toBeInTheDocument();
+  });
+
   it("shows unavailable state from Jira connection test and names issue #9", async () => {
     const user = userEvent.setup();
     renderPanel();
