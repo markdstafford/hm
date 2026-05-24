@@ -5,6 +5,7 @@ import type { AppPreferences } from "../preferences";
 import { GeneralSettings } from "./GeneralSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { AiProvidersSettings } from "./AiProvidersSettings";
+import { SourcesSettings } from "./sources/SourcesSettings";
 import type { SettingsCategory } from "./settingsTypes";
 
 interface SettingsPanelProps {
@@ -59,6 +60,17 @@ export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences, prefe
                 Appearance
               </button>
               <button
+                aria-current={category === "sources" ? "page" : undefined}
+                onClick={() => setCategory("sources")}
+                className={`flex items-center px-2 py-1.5 rounded text-sm font-medium text-left transition-colors ${
+                  category === "sources"
+                    ? "text-text bg-surface"
+                    : "text-subtext hover:text-text hover:bg-surface/50"
+                }`}
+              >
+                Sources
+              </button>
+              <button
                 aria-current={category === "ai-providers" ? "page" : undefined}
                 onClick={() => setCategory("ai-providers")}
                 className={`flex items-center px-2 py-1.5 rounded text-sm font-medium text-left transition-colors ${
@@ -77,6 +89,8 @@ export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences, prefe
                 <GeneralSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} />
               ) : category === "appearance" ? (
                 <AppearanceSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} prefersDark={prefersDark} />
+              ) : category === "sources" ? (
+                <SourcesSettings />
               ) : (
                 <AiProvidersSettings />
               )}

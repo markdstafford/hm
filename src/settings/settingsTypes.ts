@@ -1,4 +1,4 @@
-export type SettingsCategory = "general" | "appearance" | "ai-providers";
+export type SettingsCategory = "general" | "appearance" | "sources" | "ai-providers";
 
 export interface SettingsPanelProps {
   open: boolean;
