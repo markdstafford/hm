@@ -2,6 +2,7 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 pub mod settings;
+pub mod sources;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
