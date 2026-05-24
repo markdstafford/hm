@@ -148,6 +148,45 @@ Use `globalThis` (not `global`) — TypeScript in this project doesn't have the 
 
 Full cross-session preference persistence (change → close → reopen → verify) requires a compiled Tauri `.app` binary and `tauri-driver` with an isolated app-data directory. The current Playwright config targets the Vite dev server only (`http://localhost:1420`), where Tauri IPC commands (`preferencesWrite` / `preferencesRead`) are unavailable. The persistence smoke in `e2e/hello.spec.ts` verifies the UI side (data-theme attribute update) but not file I/O. A `test.todo()` placeholder marks the pending coverage. Document this limitation in any CI configuration that runs `npm run test:e2e`.
 
+## Source configuration tests (added 2026-05-24, issue #8)
+
+### Rust tests
+
+- All Rust source tests use `crate::settings::secrets::InMemorySecretStore`; no OS keychain is touched in automated tests.
+- `jira_source_test_connection_with_store` returns `Unavailable` and must not perform any network calls before issue #9 lands.
+- `map_client_error` in `jira.rs` is unit-tested with fake `JiraClientError` variants to verify safe category mapping.
+- Live Jira connection tests are skipped until the Jira API client (issue #9) exists.
+
+### Frontend sources tests
+
+- `src/sources/validation.test.ts` — pure unit tests for URL normalization, PAT gating, and secret-key detection.
+- `src/settings/SourcesSettings.test.tsx` — component tests mock `src/bindings.ts` and set `window.__TAURI_INTERNALS__ = {}` to exercise the Tauri code paths.
+- Use `vi.mocked(commands.sourceConfigGet).mockResolvedValue(...)` to control what sources are returned per-test.
+
+### Mock pattern for sources tests
+
+```typescript
+vi.mock("../bindings", () => ({
+  commands: {
+    sourceConfigGet: vi.fn().mockResolvedValue({ status: "ok", data: { version: 1, sources: [] } }),
+    sourceConfigSave: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    sourceCredentialSecretSet: vi.fn().mockResolvedValue({ status: "ok", data: "source.jira.src_x.pat" }),
+    sourceCredentialDelete: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    sourceConfigRemove: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    jiraSourceTestConnection: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: { status: "Unavailable", tested_at: "...", message: "...issue #9...", ... },
+    }),
+  },
+}));
+```
+
+### E2E smoke path
+
+`e2e/sources.spec.ts` covers: Settings → Sources → Add source → Jira Data Center → fill URL + PAT → Test connection → verify "issue #9" message visible. This test requires a Vite dev server for this workspace (`npm run tauri dev`) — it cannot run against a dev server for another workspace.
+
+---
+
 ## AI provider testing (added 2026-05-24)
 
 ### Rust tests

@@ -138,6 +138,51 @@ App.tsx owns `AppPreferences` state. On mount: `loadPreferences()` → `setPrefs
 - `prefsRef` in App.tsx keeps an always-current copy of `prefs` for the window listener callback, avoiding stale-closure issues with debounced async writes.
 - Saved positions outside [-2000, 10000] in either axis are ignored to prevent off-screen windows.
 
+## Source configuration (added 2026-05-24, issue #8)
+
+- **Shared setting key**: `sources.config`
+- **Credential-ref format**: `source.jira.<source_id>.pat`
+
+### Rust modules (`src-tauri/src/sources/`)
+
+| File | Responsibility |
+|------|----------------|
+| `mod.rs` | Re-exports `config`, `credentials`, `errors`, `jira` |
+| `errors.rs` | `SourceError` enum with redacting `Display`; `is_secret_shaped()` and `redact()` helpers shared by config and credentials |
+| `config.rs` | Versioned source config schema (`SourcesConfig`, `SourceConfig::Jira`, `JiraSourceConfig`, `JiraAuthConfig`, `JiraProjectFilter`, `ConnectionTestSummary`, `ConnectionTestStatus`); URL normalization; secret-shaped metadata rejection; `load_sources_config` / `save_sources_config` over shared settings |
+| `credentials.rs` | `SourceCredentialKind`; deterministic ref builder; `set_source_credential_secret` / `load_source_credential_secret` / `delete_source_credential` over `SecretStore` trait; `remove_source_config_and_credentials` deletion helper |
+| `jira.rs` | `JiraConnectionTestResult`, `JiraConnectionTestStatus`, `JiraConnectionErrorCategory`, `JiraConnectionProject`; `jira_source_test_connection_with_store` adapter (returns `Unavailable` until issue #9); `JiraProjectClient` trait seam; `map_client_error` for safe error mapping |
+
+### Tauri commands
+
+| Command | Notes |
+|---------|-------|
+| `source_config_get` | Reads `sources.config` from SQLite; empty default if absent |
+| `source_config_save` | Validates and writes to SQLite |
+| `source_config_remove` | Deletes metadata + keychain credential atomically |
+| `source_credential_secret_set` | Stores PAT in keychain; returns credential_ref |
+| `source_credential_delete` | Removes keychain entry; missing = no-op |
+| `jira_source_test_connection` | Does NOT take DB state — no lock held during keychain/future network calls |
+
+All commands appear in both `collect_commands!` invocations in `src-tauri/src/lib.rs`.
+
+### React modules
+
+**Data layer** (`src/sources/`): `types.ts`, `defaults.ts`, `validation.ts`, `storage.ts`
+
+**UI** (`src/settings/sources/`): `SourcesSettings.tsx`, `SourceList.tsx`, `AddSourceFlow.tsx`, `JiraSourceForm.tsx`, `ConnectionTestStatus.tsx`, `ProjectMultiSelect.tsx`
+
+**Settings wiring**: `settingsTypes.ts` includes `"sources"`; `SettingsPanel.tsx` inserts Sources between Appearance and AI providers.
+
+### Security policy for sources
+
+- Jira PATs live only in transient React state and OS keychain
+- SQLite stores only credential refs (`source.jira.<id>.pat`), never PAT values
+- `source_config_remove` deletes the owned keychain credential when a source is removed
+- `jira_source_test_connection` command has no DB state parameter to prevent lock contention during future network calls
+
+---
+
 ## AI provider configuration module (added 2026-05-24)
 
 - Shared setting key: `ai.providers.config` stores versioned non-secret provider config only.
