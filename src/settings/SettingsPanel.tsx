@@ -5,8 +5,7 @@ import type { AppPreferences } from "../preferences";
 import { GeneralSettings } from "./GeneralSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { AiProvidersSettings } from "./AiProvidersSettings";
-
-type SettingsCategory = "general" | "appearance" | "ai-providers";
+import type { SettingsCategory } from "./settingsTypes";
 
 interface SettingsPanelProps {
   open: boolean;
