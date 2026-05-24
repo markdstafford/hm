@@ -25,7 +25,7 @@ export function ConnectionTestStatus({ result, isTesting }: ConnectionTestStatus
   if (result.status === "Unavailable") {
     return (
       <p className="text-sm text-subtext" role="status">
-        Live connection testing depends on issue #9. The source can be saved, but projects must wait for the Jira API client.
+        {result.message}
       </p>
     );
   }

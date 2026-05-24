@@ -3,7 +3,7 @@ import type { SourcesConfig, JiraSourceConfig } from "./types";
 export const EMPTY_SOURCES_CONFIG: SourcesConfig = { version: 1, sources: [] };
 
 export const JIRA_UNAVAILABLE_MESSAGE =
-  "Live connection testing depends on issue #9. The source can be saved, but projects must wait for the Jira API client.";
+  "Live connection testing is not available in this environment. Use the desktop app to test this connection.";
 
 export function newJiraSourceDraft(now = new Date()): JiraSourceConfig {
   const id = generateSourceId();

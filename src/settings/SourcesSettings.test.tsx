@@ -42,7 +42,7 @@ vi.mock("../bindings", () => ({
       data: {
         status: "Unavailable",
         tested_at: "2024-01-01T00:00:00Z",
-        message: "Live connection testing depends on issue #9. The source can be saved, but projects must wait for the Jira API client.",
+        message: "Live connection testing is not available in this environment. Use the desktop app to test this connection.",
         suggested_fix: null,
         projects: [],
         category: "Unavailable",
@@ -317,7 +317,7 @@ describe("Sources settings", () => {
     expect(screen.getByText(/Database write failed/i)).toBeInTheDocument();
   });
 
-  it("shows unavailable state from Jira connection test and names issue #9", async () => {
+  it("shows unavailable state message from Jira connection test", async () => {
     const user = userEvent.setup();
     renderPanel();
     await openSources(user);
@@ -327,7 +327,7 @@ describe("Sources settings", () => {
     await user.type(screen.getByLabelText(/personal access token/i), "my-token");
     await user.click(screen.getByRole("button", { name: /test connection/i }));
     await waitFor(() => {
-      expect(screen.getByText(/issue #9/i)).toBeInTheDocument();
+      expect(screen.getByText(/Live connection testing is not available in this environment/i)).toBeInTheDocument();
     });
   });
 
