@@ -33,12 +33,25 @@ impl std::error::Error for AiError {}
 
 pub(crate) fn redact(input: &str) -> String {
     let lower = input.to_ascii_lowercase();
-    if ["sk-", "bearer ", "authorization", "api_key", "token", "secret", "password", "x-api-key"]
+    if ["sk-", "bearer ", "authorization", "api_key", "token", "secret", "password", "x-api-key", "api-key"]
         .iter()
         .any(|needle| lower.contains(needle))
     {
         "[redacted]".into()
     } else {
         input.into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact;
+
+    #[test]
+    fn redact_covers_api_key_header_name() {
+        assert_eq!(redact("header api-key: somevalue"), "[redacted]");
+        assert_eq!(redact("header API-Key: somevalue"), "[redacted]");
+        assert_eq!(redact("header x-api-key: somevalue"), "[redacted]");
+        assert_eq!(redact("safe message about temperature"), "safe message about temperature");
     }
 }

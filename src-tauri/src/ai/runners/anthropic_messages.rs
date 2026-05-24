@@ -157,9 +157,11 @@ mod tests {
             let req = server.recv().unwrap();
             // Verify path
             assert_eq!(req.url(), "/v1/messages");
-            // Verify x-api-key header is present (not logging value)
-            let has_api_key = req.headers().iter().any(|h| h.field.as_str().to_ascii_lowercase() == "x-api-key");
-            assert!(has_api_key, "x-api-key header must be present");
+            // Verify both x-api-key and api-key headers are present (not logging values)
+            let has_x_api_key = req.headers().iter().any(|h| h.field.as_str().to_ascii_lowercase() == "x-api-key");
+            assert!(has_x_api_key, "x-api-key header must be present");
+            let has_api_key = req.headers().iter().any(|h| h.field.as_str().to_ascii_lowercase() == "api-key");
+            assert!(has_api_key, "api-key header must be present for Azure APIM compatibility");
             let body = r#"{"model":"claude-test","usage":{"input_tokens":3,"output_tokens":1},"content":[{"type":"text","text":"ok"}]}"#;
             let resp = tiny_http::Response::from_string(body)
                 .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
