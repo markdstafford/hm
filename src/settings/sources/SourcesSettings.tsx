@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { loadSourcesConfig, removeSource } from "../../sources/storage";
-import type { SourcesConfig } from "../../sources/types";
+import type { SourcesConfig, JiraSourceConfig } from "../../sources/types";
 import { SourceList } from "./SourceList";
+import { AddSourceFlow } from "./AddSourceFlow";
+import { JiraSourceForm } from "./JiraSourceForm";
 
-type Mode = "list" | "add" | "edit";
+type Mode = "list" | "choose-kind" | "new-jira" | "edit-jira";
 
 export function SourcesSettings() {
   const [config, setConfig] = useState<SourcesConfig>({ version: 1, sources: [] });
@@ -34,40 +36,50 @@ export function SourcesSettings() {
 
   function handleEdit(sourceId: string) {
     setEditingSourceId(sourceId);
-    setMode("edit");
+    setMode("edit-jira");
   }
 
-  // Editing a source — show a placeholder (edit form comes in Task 9)
-  if (mode === "edit" && editingSourceId) {
-    const source = config.sources.find((s) => s.id === editingSourceId);
+  function handleSaved(updatedConfig: SourcesConfig) {
+    setConfig(updatedConfig);
+    setEditingSourceId(null);
+    setMode("list");
+  }
+
+  function handleCancel() {
+    setEditingSourceId(null);
+    setMode("list");
+  }
+
+  if (mode === "choose-kind") {
     return (
-      <section aria-labelledby="sources-heading" className="space-y-6">
-        <h1 id="sources-heading" className="text-2xl font-semibold text-text">Edit Source</h1>
-        {/* Minimal shell for Task 8 — full form in Task 9 */}
-        <div>
-          <label htmlFor="server-url-edit" className="block text-sm font-medium text-text mb-1">Server URL</label>
-          <input
-            id="server-url-edit"
-            type="url"
-            defaultValue={source?.server_url ?? ""}
-            className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
-          />
-          <label htmlFor="pat-edit" className="block text-sm font-medium text-text mb-1 mt-3">Personal access token</label>
-          <input
-            id="pat-edit"
-            type="password"
-            defaultValue=""
-            placeholder="Leave blank to keep existing token"
-            aria-label="Personal access token"
-            className="w-full rounded border border-border bg-surface px-2 py-1 text-sm text-text"
-          />
-        </div>
-        <div className="flex gap-2">
-          <button type="button" onClick={() => setMode("list")} className="px-3 py-1.5 rounded text-sm font-medium text-subtext hover:text-text">
-            Cancel
-          </button>
-        </div>
-      </section>
+      <AddSourceFlow
+        onSelectJira={() => setMode("new-jira")}
+        onCancel={handleCancel}
+      />
+    );
+  }
+
+  if (mode === "new-jira") {
+    return (
+      <JiraSourceForm
+        mode="new"
+        config={config}
+        onSaved={handleSaved}
+        onCancel={handleCancel}
+      />
+    );
+  }
+
+  if (mode === "edit-jira" && editingSourceId) {
+    const source = config.sources.find((s) => s.id === editingSourceId) as JiraSourceConfig | undefined;
+    return (
+      <JiraSourceForm
+        mode="edit"
+        existingSource={source}
+        config={config}
+        onSaved={handleSaved}
+        onCancel={handleCancel}
+      />
     );
   }
 
@@ -84,7 +96,7 @@ export function SourcesSettings() {
         <>
           <button
             type="button"
-            onClick={() => setMode("add")}
+            onClick={() => setMode("choose-kind")}
             className="rounded bg-blue px-3 py-1.5 text-sm font-medium text-crust"
           >
             Add source

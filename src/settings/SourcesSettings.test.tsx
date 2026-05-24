@@ -197,4 +197,97 @@ describe("Sources settings", () => {
       expect(patInput.value).toBe("");
     }
   });
+
+  it("shows Jira enabled and GitHub/Documents coming later in add flow", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await openSources(user);
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    expect(screen.getByRole("button", { name: /jira data center/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/coming later/i).length).toBeGreaterThan(0);
+  });
+
+  it("requires server URL and PAT for a new source — Save is disabled until both provided", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await openSources(user);
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: /jira data center/i }));
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    expect(saveBtn).toBeDisabled();
+    await user.type(screen.getByLabelText(/server url/i), "https://jira.example.com");
+    expect(saveBtn).toBeDisabled();
+    await user.type(screen.getByLabelText(/personal access token/i), "my-token");
+    expect(saveBtn).not.toBeDisabled();
+  });
+
+  it("stores PAT, saves metadata, and PAT input clears after save", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await openSources(user);
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: /jira data center/i }));
+    await user.type(screen.getByLabelText(/server url/i), "https://jira.example.com");
+    await user.type(screen.getByLabelText(/personal access token/i), "my-token");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => {
+      expect(vi.mocked(commands.sourceCredentialSecretSet)).toHaveBeenCalled();
+      expect(vi.mocked(commands.sourceConfigSave)).toHaveBeenCalled();
+    });
+    // After save, should return to list view
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /^sources$/i })).toBeInTheDocument();
+    });
+  });
+
+  it("editing allows saving without replacing PAT — no sourceCredentialSecretSet call", async () => {
+    const user = userEvent.setup();
+    vi.mocked(commands.sourceConfigGet).mockResolvedValue({
+      status: "ok",
+      data: {
+        version: 1,
+        sources: [{
+          kind: "Jira",
+          id: "src_team",
+          name: "Team Jira",
+          enabled: true,
+          server_url: "https://jira.internal.example.com",
+          auth: { type: "Pat", credential_ref: "source.jira.src_team.pat" },
+          projects: [],
+          last_connection_test: null,
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+        }],
+      },
+    });
+    renderPanel();
+    await openSources(user);
+    await screen.findByText(/Team Jira/i);
+    await user.click(screen.getByRole("button", { name: /^edit$/i }));
+    await waitFor(() => screen.getByDisplayValue(/jira\.internal\.example\.com/i));
+    const saveBtn = screen.getByRole("button", { name: /^save$/i });
+    expect(saveBtn).not.toBeDisabled();
+    await user.click(saveBtn);
+    await waitFor(() => {
+      expect(vi.mocked(commands.sourceConfigSave)).toHaveBeenCalled();
+      expect(vi.mocked(commands.sourceCredentialSecretSet)).not.toHaveBeenCalled();
+    });
+  });
+
+  it("cancel clears transient PAT state", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await openSources(user);
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: /jira data center/i }));
+    await user.type(screen.getByLabelText(/personal access token/i), "my-token");
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+    // Back to list
+    await waitFor(() => screen.getByRole("button", { name: /add source/i }));
+    // Open add flow again — PAT should be empty
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: /jira data center/i }));
+    const patInput = screen.getByLabelText(/personal access token/i) as HTMLInputElement;
+    expect(patInput.value).toBe("");
+  });
 });
