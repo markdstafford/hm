@@ -215,6 +215,17 @@ impl JiraApiClient {
     }
 
     /// Make a single authenticated GET request. No retry.
+    ///
+    /// Rate-limit behavior on success:
+    /// - If the response carries `X-RateLimit-NearLimit: true` or
+    ///   `X-RateLimit-Remaining: 0`, a proactive sleep using the
+    ///   configured `fallback_delay_ms` is inserted before the data is
+    ///   returned to reduce the chance of immediately hitting the limit.
+    ///
+    /// Rate-limit behavior on 429:
+    /// - `Retry-After` is honored when present.
+    /// - If `Retry-After` is absent, `X-RateLimit-Reset` is used as
+    ///   a fallback seconds value (parsed defensively; ignored if unparseable).
     fn send_get_once<T: serde::de::DeserializeOwned>(
         &self,
         path_and_query: &str,
@@ -229,11 +240,29 @@ impl JiraApiClient {
             .call()
         {
             Ok(resp) => {
-                let _rate_limit_headers = parse_rate_limit_headers(&resp);
-                resp.into_json::<T>().map_err(|_| JiraApiError::Decode)
+                let rate_limit = parse_rate_limit_headers(&resp);
+                let data = resp.into_json::<T>().map_err(|_| JiraApiError::Decode)?;
+                // Proactive backoff: if the server signals we are near or at the
+                // rate limit on a successful response, sleep before returning so
+                // subsequent calls are less likely to hit a hard 429.
+                let near_limit =
+                    rate_limit.near_limit == Some(true) || rate_limit.remaining == Some(0);
+                if near_limit {
+                    self.sleeper.sleep_ms(self.rate_limit_policy.fallback_delay_ms);
+                }
+                Ok(data)
             }
             Err(ureq::Error::Status(status, resp)) => {
-                let retry_after = parse_retry_after_header(resp.header("Retry-After"));
+                // Try Retry-After first; fall back to X-RateLimit-Reset for 429 responses.
+                let retry_after = parse_retry_after_header(resp.header("Retry-After"))
+                    .or_else(|| {
+                        if status == 429 {
+                            resp.header("X-RateLimit-Reset")
+                                .and_then(|v| v.trim().parse::<u64>().ok())
+                        } else {
+                            None
+                        }
+                    });
                 Err(JiraApiError::from_status(status, retry_after))
             }
             Err(ureq::Error::Transport(_)) => Err(JiraApiError::Network),
@@ -981,6 +1010,124 @@ mod tests {
         let sleeps = recorded_sleeps.lock().unwrap().clone();
         // Should sleep for 1000ms (Retry-After: 1 second)
         assert_eq!(sleeps, vec![1_000], "expected one sleep of 1000ms for Retry-After: 1");
+    }
+
+    #[test]
+    fn uses_x_rate_limit_reset_on_429_when_retry_after_is_absent() {
+        // When a 429 response has X-RateLimit-Reset but no Retry-After, the client
+        // must use the X-RateLimit-Reset value as the retry delay (in seconds).
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let response_429 = Response::from_string(r#"{"errorMessages":["rate limited"]}"#)
+                .with_status_code(StatusCode(429))
+                // No Retry-After — only X-RateLimit-Reset
+                .with_header(
+                    Header::from_bytes(&b"X-RateLimit-Reset"[..], &b"3"[..]).unwrap(),
+                );
+            server.recv().unwrap().respond(response_429).unwrap();
+            server
+                .recv()
+                .unwrap()
+                .respond(json_response(200, include_str!("fixtures/jira_projects.json")))
+                .unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let mut cfg = config(&base_url, "secret-jira-pat-123");
+        cfg.retry_policy = RetryPolicy {
+            max_attempts: 2,
+            base_delay_ms: 5,
+            max_delay_ms: 10,
+        };
+        cfg.rate_limit_policy = RateLimitPolicy {
+            fallback_delay_ms: 500,
+            max_retry_after_seconds: 60,
+        };
+        let projects = JiraApiClient::new_with_sleeper(cfg, Arc::new(sleeper))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 2);
+        let sleeps = recorded_sleeps.lock().unwrap().clone();
+        // X-RateLimit-Reset: 3 should be treated as 3 seconds = 3000ms
+        assert_eq!(
+            sleeps,
+            vec![3_000],
+            "X-RateLimit-Reset: 3 (no Retry-After) should produce a 3000ms delay"
+        );
+    }
+
+    #[test]
+    fn near_limit_response_triggers_proactive_delay_before_returning_data() {
+        // When a successful response carries X-RateLimit-NearLimit: true,
+        // the client must sleep with fallback_delay_ms before returning data,
+        // so subsequent calls are less likely to immediately hit a hard 429.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let response = Response::from_string(include_str!("fixtures/jira_projects.json"))
+                .with_status_code(StatusCode(200))
+                .with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                )
+                .with_header(
+                    Header::from_bytes(&b"X-RateLimit-NearLimit"[..], &b"true"[..]).unwrap(),
+                );
+            server.recv().unwrap().respond(response).unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let mut cfg = config(&base_url, "secret-jira-pat-123");
+        cfg.rate_limit_policy = RateLimitPolicy {
+            fallback_delay_ms: 750,
+            max_retry_after_seconds: 60,
+        };
+        let projects = JiraApiClient::new_with_sleeper(cfg, Arc::new(sleeper))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 2, "should still return data after near-limit delay");
+        let sleeps = recorded_sleeps.lock().unwrap().clone();
+        assert_eq!(
+            sleeps,
+            vec![750],
+            "near-limit (X-RateLimit-NearLimit: true) should trigger fallback_delay_ms=750"
+        );
+    }
+
+    #[test]
+    fn near_limit_via_remaining_zero_triggers_proactive_delay() {
+        // When X-RateLimit-Remaining: 0 is returned on a 200 response,
+        // the client should also sleep proactively.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let response = Response::from_string(include_str!("fixtures/jira_projects.json"))
+                .with_status_code(StatusCode(200))
+                .with_header(
+                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                )
+                .with_header(
+                    Header::from_bytes(&b"X-RateLimit-Remaining"[..], &b"0"[..]).unwrap(),
+                );
+            server.recv().unwrap().respond(response).unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let mut cfg = config(&base_url, "secret-jira-pat-123");
+        cfg.rate_limit_policy = RateLimitPolicy {
+            fallback_delay_ms: 400,
+            max_retry_after_seconds: 60,
+        };
+        let projects = JiraApiClient::new_with_sleeper(cfg, Arc::new(sleeper))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 2, "should still return data after near-limit delay");
+        let sleeps = recorded_sleeps.lock().unwrap().clone();
+        assert_eq!(
+            sleeps,
+            vec![400],
+            "X-RateLimit-Remaining: 0 should trigger fallback_delay_ms=400"
+        );
     }
 }
 

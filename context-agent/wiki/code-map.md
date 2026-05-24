@@ -151,7 +151,7 @@ App.tsx owns `AppPreferences` state. On mount: `loadPreferences()` → `setPrefs
 | `errors.rs` | `SourceError` enum with redacting `Display`; `is_secret_shaped()` and `redact()` helpers shared by config and credentials |
 | `config.rs` | Versioned source config schema (`SourcesConfig`, `SourceConfig::Jira`, `JiraSourceConfig`, `JiraAuthConfig`, `JiraProjectFilter`, `ConnectionTestSummary`, `ConnectionTestStatus`); URL normalization; secret-shaped metadata rejection; `load_sources_config` / `save_sources_config` over shared settings |
 | `credentials.rs` | `SourceCredentialKind`; deterministic ref builder; `set_source_credential_secret` / `load_source_credential_secret` / `delete_source_credential` over `SecretStore` trait; `remove_source_config_and_credentials` deletion helper |
-| `jira.rs` | `JiraConnectionTestResult`, `JiraConnectionTestStatus`, `JiraConnectionErrorCategory`, `JiraConnectionProject`; `jira_source_test_connection_with_store` adapter (returns `Unavailable` until issue #9); `JiraProjectClient` trait seam; `map_client_error` for safe error mapping |
+| `jira.rs` | `JiraConnectionTestResult`, `JiraConnectionTestStatus`, `JiraConnectionErrorCategory`, `JiraConnectionProject`; `jira_source_test_connection_with_store` adapter — resolves PAT, calls `RealJiraProjectClient`, deduplicates/sorts projects, maps errors via `map_client_error`; `JiraProjectClient` trait seam for test injection |
 
 ### Tauri commands
 

@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum JiraApiError {
     InvalidBaseUrl,
     InvalidRequest { message: String },
@@ -75,6 +75,36 @@ impl fmt::Display for JiraApiError {
 
 impl std::error::Error for JiraApiError {}
 
+/// Custom Debug implementation that redacts the `message` field in `InvalidRequest`
+/// so that arbitrary upstream request details (including any token-shaped or
+/// header-shaped content passed by callers) never appear in debug output.
+impl fmt::Debug for JiraApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JiraApiError::InvalidBaseUrl => write!(f, "InvalidBaseUrl"),
+            JiraApiError::InvalidRequest { .. } => {
+                // Redact the message — it may contain upstream request details.
+                f.debug_struct("InvalidRequest")
+                    .field("message", &"[redacted]")
+                    .finish()
+            }
+            JiraApiError::Unauthorized => write!(f, "Unauthorized"),
+            JiraApiError::Forbidden => write!(f, "Forbidden"),
+            JiraApiError::NotFound => write!(f, "NotFound"),
+            JiraApiError::BadRequest => write!(f, "BadRequest"),
+            JiraApiError::RateLimited { retry_after_seconds } => f
+                .debug_struct("RateLimited")
+                .field("retry_after_seconds", retry_after_seconds)
+                .finish(),
+            JiraApiError::Server { status } => {
+                f.debug_struct("Server").field("status", status).finish()
+            }
+            JiraApiError::Network => write!(f, "Network"),
+            JiraApiError::Decode => write!(f, "Decode"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +133,53 @@ mod tests {
             assert!(!rendered.to_ascii_lowercase().contains("authorization"));
             assert!(!rendered.to_ascii_lowercase().contains("response body"));
         }
+    }
+
+    #[test]
+    fn debug_is_safe_for_all_error_variants() {
+        // InvalidRequest.message must not appear in Debug output even when it contains
+        // token-shaped or header-shaped strings (e.g. upstream request details).
+        let sensitive_message =
+            "Authorization: Bearer secret-token raw-response-body".to_string();
+        let errors: Vec<JiraApiError> = vec![
+            JiraApiError::InvalidBaseUrl,
+            JiraApiError::InvalidRequest {
+                message: sensitive_message.clone(),
+            },
+            JiraApiError::Unauthorized,
+            JiraApiError::Forbidden,
+            JiraApiError::NotFound,
+            JiraApiError::BadRequest,
+            JiraApiError::RateLimited {
+                retry_after_seconds: Some(30),
+            },
+            JiraApiError::Server { status: 503 },
+            JiraApiError::Network,
+            JiraApiError::Decode,
+        ];
+        for err in &errors {
+            let debug_str = format!("{err:?}");
+            assert!(
+                !debug_str.contains("secret-token"),
+                "Debug output leaked secret-token for variant: {err:?}"
+            );
+            assert!(
+                !debug_str.to_ascii_lowercase().contains("authorization"),
+                "Debug output leaked Authorization for variant: {err:?}"
+            );
+            assert!(
+                !debug_str.to_ascii_lowercase().contains("raw-response-body"),
+                "Debug output leaked raw-response-body for variant: {err:?}"
+            );
+        }
+        // The redacted placeholder must appear in the InvalidRequest variant's Debug output.
+        let invalid_req = JiraApiError::InvalidRequest {
+            message: sensitive_message,
+        };
+        assert!(
+            format!("{invalid_req:?}").contains("[redacted]"),
+            "InvalidRequest Debug must show [redacted] in place of message"
+        );
     }
 
     #[test]

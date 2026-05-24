@@ -153,9 +153,9 @@ Full cross-session preference persistence (change → close → reopen → verif
 ### Rust tests
 
 - All Rust source tests use `crate::settings::secrets::InMemorySecretStore`; no OS keychain is touched in automated tests.
-- `jira_source_test_connection_with_store` returns `Unavailable` and must not perform any network calls before issue #9 lands.
+- `jira_source_test_connection_with_store` uses the real `JiraApiClient` (via `RealJiraProjectClient`) when a PAT is available; tests inject a fake `JiraProjectClient` via the trait seam.
 - `map_client_error` in `jira.rs` is unit-tested with fake `JiraClientError` variants to verify safe category mapping.
-- Live Jira connection tests are skipped until the Jira API client (issue #9) exists.
+- Live network calls are never made in automated tests; mock-server integration tests use `tiny_http::Server::http("127.0.0.1:0")`.
 
 ### Frontend sources tests
 
@@ -173,9 +173,16 @@ vi.mock("../bindings", () => ({
     sourceCredentialSecretSet: vi.fn().mockResolvedValue({ status: "ok", data: "source.jira.src_x.pat" }),
     sourceCredentialDelete: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     sourceConfigRemove: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    // In browser-only tests, mock the browser fallback (no Tauri keychain/network)
     jiraSourceTestConnection: vi.fn().mockResolvedValue({
       status: "ok",
-      data: { status: "Unavailable", tested_at: "...", message: "...issue #9...", ... },
+      data: {
+        status: "Unavailable",
+        tested_at: "...",
+        message: "Live connection testing is not available in this environment. Use the desktop app to test this connection.",
+        category: "Unavailable",
+        projects: [],
+      },
     }),
   },
 }));
@@ -183,7 +190,7 @@ vi.mock("../bindings", () => ({
 
 ### E2E smoke path
 
-`e2e/sources.spec.ts` covers: Settings → Sources → Add source → Jira Data Center → fill URL + PAT → Test connection → verify "issue #9" message visible. This test requires a Vite dev server for this workspace (`npm run tauri dev`) — it cannot run against a dev server for another workspace.
+`e2e/sources.spec.ts` covers: Settings → Sources → Add source → Jira Data Center → fill URL + PAT → Test connection → verify the browser-only unavailable message ("Live connection testing is not available…") is visible → Save → source appears in list. This test requires a Vite dev server for this workspace (`npm run tauri dev`) — it cannot run against a dev server for another workspace. Full keychain and live-network behavior requires a real Tauri build and `tauri-driver`.
 
 ## Jira API client tests (added 2026-05-24, issue #9)
 
