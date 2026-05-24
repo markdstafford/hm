@@ -4,9 +4,11 @@
 /* ─── Catppuccin on-primary override for Latte (light theme) ───────────── */
 /* Latte sapphire #209fb5 on bg #eff1f5: 2.78:1 (fails) — on-primary uses dark text instead */
 /* #1e2030 (Macchiato mantle) on #209fb5: 5.13:1 ✓ WCAG AA */
+/* on-destructive: #ffffff on Latte red #d20f39: 5.43:1 ✓ WCAG AA */
 :root,
 [data-theme="catppuccin-latte"] {
   --color-on-primary: #1e2030;
+  --color-on-destructive: #ffffff;
   --ctp-rosewater: #dc8a78;
   --ctp-flamingo:  #dd7878;
   --ctp-pink:      #ea76cb;
@@ -209,8 +211,10 @@
 /* ─── Solarized Light ───────────────────────────────────────────────────── */
 /* Source: Ethan Schoonover Solarized palette (MIT) */
 /* Contrast on #fdf6e3: text #073642 12.05:1, subtext #586e75 4.99:1, primary #1770b8 4.81:1 ✓ WCAG AA */
+/* on-destructive: #ffffff on Solarized red #dc322f: 4.63:1 ✓ WCAG AA */
 [data-theme="solarized-light"] {
   --color-background: #fdf6e3;
+  --color-on-destructive: #ffffff;
   --color-mantle:     #eee8d5;
   --color-crust:      #e7ddc8;
   --color-surface:    #eee8d5;
@@ -286,6 +290,8 @@
   --color-primary:    var(--hm-accent, var(--ctp-sapphire));
   /* on-primary: text color on primary-colored backgrounds; non-Catppuccin themes override directly */
   --color-on-primary: var(--ctp-crust);
+  /* on-destructive: text color on destructive (red) backgrounds; light themes override to #ffffff */
+  --color-on-destructive: var(--color-on-primary);
   --color-border:     var(--ctp-surface2);
   --color-focus:      var(--hm-accent, var(--ctp-sapphire));
   --color-green:      var(--ctp-green);

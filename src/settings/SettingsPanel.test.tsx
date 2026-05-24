@@ -5,6 +5,27 @@ import { vi, beforeAll } from "vitest";
 import { SettingsPanel } from "./SettingsPanel";
 import type { AppPreferences } from "../preferences";
 
+vi.mock("../bindings", () => ({
+  commands: {
+    sourceConfigGet: vi.fn().mockResolvedValue({ status: "ok", data: { version: 1, sources: [] } }),
+    sourceConfigSave: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    sourceCredentialSecretSet: vi.fn().mockResolvedValue({ status: "ok", data: "source.jira.test.pat" }),
+    sourceCredentialDelete: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    sourceConfigRemove: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    jiraSourceTestConnection: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        status: "Unavailable",
+        tested_at: "2024-01-01T00:00:00Z",
+        message: "Live connection testing depends on issue #9. The source can be saved, but projects must wait for the Jira API client.",
+        suggested_fix: null,
+        projects: [],
+        category: "Unavailable",
+      },
+    }),
+  },
+}));
+
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).PointerEvent = window.MouseEvent;
@@ -272,5 +293,21 @@ describe("SettingsPanel", () => {
     const { container } = renderPanel();
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it("renders Sources category between Appearance and AI providers", () => {
+    renderPanel();
+    const buttons = screen.getAllByRole("button").map(button => button.textContent?.trim()).filter(Boolean);
+    expect(buttons).toEqual(expect.arrayContaining(["General", "Appearance", "Sources", "AI providers"]));
+    expect(buttons.indexOf("Sources")).toBeGreaterThan(buttons.indexOf("Appearance"));
+    expect(buttons.indexOf("Sources")).toBeLessThan(buttons.indexOf("AI providers"));
+  });
+
+  it("clicking Sources shows accessible heading and storage split description", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByRole("button", { name: /^sources$/i }));
+    expect(screen.getByRole("heading", { name: /^sources$/i })).toBeInTheDocument();
+    expect(screen.getByText(/Secrets are stored in the OS keychain/i)).toBeInTheDocument();
   });
 });

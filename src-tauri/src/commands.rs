@@ -117,8 +117,19 @@ pub fn shared_settings_set(
 }
 
 use crate::ai::config::{load_ai_provider_config, save_ai_provider_config, AiProviderConfig};
+use crate::sources::config::{
+    load_sources_config, save_sources_config, ConnectionTestStatus, ConnectionTestSummary,
+    JiraAuthConfig, JiraProjectFilter, JiraSourceConfig, SourceConfig, SourcesConfig,
+};
 use crate::ai::credentials::{delete_keychain_credential_secret, set_keychain_credential_secret};
+use crate::sources::credentials::{
+    set_source_credential_secret, delete_source_credential, remove_source_config_and_credentials, SourceCredentialKind,
+};
 use crate::ai::service::{smoke_test_profile_with_config, SmokeTestResult};
+use crate::sources::jira::{
+    jira_source_test_connection_with_store, JiraConnectionTestResult,
+    JiraConnectionTestStatus, JiraConnectionErrorCategory, JiraConnectionProject,
+};
 
 #[tauri::command]
 #[specta::specta]
@@ -174,3 +185,82 @@ pub fn ai_profile_smoke_test(
     };
     Ok(smoke_test_profile_with_config(config, store.0.as_ref(), &profile_name))
 }
+
+#[tauri::command]
+#[specta::specta]
+pub fn source_config_get(db: tauri::State<'_, Mutex<rusqlite::Connection>>) -> Result<SourcesConfig, String> {
+    let conn = db.lock().unwrap();
+    load_sources_config(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn source_config_save(config: SourcesConfig, db: tauri::State<'_, Mutex<rusqlite::Connection>>) -> Result<(), String> {
+    let conn = db.lock().unwrap();
+    save_sources_config(&conn, &config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn source_credential_secret_set(
+    source_id: String,
+    kind: SourceCredentialKind,
+    value: String,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<String, String> {
+    set_source_credential_secret(&source_id, kind, &value, store.0.as_ref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn source_credential_delete(
+    credential_ref: String,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<(), String> {
+    delete_source_credential(&credential_ref, store.0.as_ref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn source_config_remove(
+    source_id: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<(), String> {
+    let conn = db.lock().unwrap();
+    remove_source_config_and_credentials(&conn, store.0.as_ref(), &source_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn jira_source_test_connection(
+    source: JiraSourceConfig,
+    pending_pat: Option<String>,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<JiraConnectionTestResult, String> {
+    jira_source_test_connection_with_store(source, pending_pat, store.0.as_ref())
+        .map_err(|e| e.to_string())
+}
+
+// Ensure specta sees all source config types for TypeScript binding generation.
+// These types are used in the commands above but referenced here explicitly so
+// the specta type registry picks them up even if inference misses a variant.
+const _: () = {
+    fn _assert_specta<T: specta::Type>() {}
+    fn _check() {
+        _assert_specta::<SourceConfig>();
+        _assert_specta::<JiraSourceConfig>();
+        _assert_specta::<JiraAuthConfig>();
+        _assert_specta::<JiraProjectFilter>();
+        _assert_specta::<ConnectionTestSummary>();
+        _assert_specta::<ConnectionTestStatus>();
+        _assert_specta::<SourceCredentialKind>();
+        _assert_specta::<JiraConnectionTestResult>();
+        _assert_specta::<JiraConnectionTestStatus>();
+        _assert_specta::<JiraConnectionErrorCategory>();
+        _assert_specta::<JiraConnectionProject>();
+    }
+};

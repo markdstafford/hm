@@ -2,6 +2,7 @@ pub mod ai;
 pub mod commands;
 pub mod db;
 pub mod settings;
+pub mod sources;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -26,6 +27,12 @@ pub fn run() {
         commands::ai_credential_secret_set,
         commands::ai_credential_secret_delete,
         commands::ai_profile_smoke_test,
+        commands::source_config_get,
+        commands::source_config_save,
+        commands::source_credential_secret_set,
+        commands::source_credential_delete,
+        commands::source_config_remove,
+        commands::jira_source_test_connection,
     ]);
 
     #[cfg(debug_assertions)]
@@ -89,6 +96,12 @@ mod tests {
                     commands::ai_credential_secret_set,
                     commands::ai_credential_secret_delete,
                     commands::ai_profile_smoke_test,
+                    commands::source_config_get,
+                    commands::source_config_save,
+                    commands::source_credential_secret_set,
+                    commands::source_credential_delete,
+                    commands::source_config_remove,
+                    commands::jira_source_test_connection,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)
