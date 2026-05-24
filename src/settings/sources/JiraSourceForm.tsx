@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import type { JiraSourceConfig, SourcesConfig } from "../../sources/types";
-import { validateJiraDraft, normalizeJiraServerUrl } from "../../sources/validation";
-import { setSourceCredentialSecret, saveSourcesConfig } from "../../sources/storage";
+import type { JiraSourceConfig, SourcesConfig, JiraConnectionTestResult, JiraConnectionProject } from "../../sources/types";
+import { validateJiraDraft, normalizeJiraServerUrl, dedupeAndSortProjects } from "../../sources/validation";
+import { setSourceCredentialSecret, saveSourcesConfig, testJiraSourceConnection } from "../../sources/storage";
 import { newJiraSourceDraft } from "../../sources/defaults";
+import { ConnectionTestStatus } from "./ConnectionTestStatus";
+import { ProjectMultiSelect } from "./ProjectMultiSelect";
 
 interface JiraSourceFormProps {
   mode: "new" | "edit";
@@ -19,6 +21,12 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
   const [pendingPat, setPendingPat] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<JiraConnectionTestResult | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+  const [availableProjects, setAvailableProjects] = useState<JiraConnectionProject[]>(
+    // Pre-populate from existing saved projects
+    existingSource?.projects.map((p) => ({ key: p.key, name: p.name ?? null, id: p.id ?? null })) ?? []
+  );
 
   // Clear PAT on unmount
   useEffect(() => {
@@ -28,13 +36,43 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
   const errors = validateJiraDraft(draft, pendingPat, mode);
   const canSave = errors.length === 0;
 
+  // Can test if URL is valid (PAT required for new, optional for edit if already saved)
+  const canTest = (() => {
+    try { normalizeJiraServerUrl(draft.server_url); return true; } catch { return false; }
+  })() && (mode === "new" ? pendingPat.trim().length > 0 : true);
+
+  // Projects are selectable after successful test OR if there are already saved projects
+  const projectsEnabled = testResult?.status === "Success" || (mode === "edit" && draft.projects.length > 0);
+
+  async function handleTestConnection() {
+    setIsTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testJiraSourceConnection(draft, pendingPat.trim() || null);
+      setTestResult(result);
+      if (result.status === "Success" && result.projects.length > 0) {
+        setAvailableProjects(result.projects);
+      }
+    } catch (e) {
+      setTestResult({
+        status: "Error",
+        tested_at: new Date().toISOString(),
+        message: e instanceof Error ? e.message : "Connection test failed.",
+        suggested_fix: null,
+        projects: [],
+        category: "Network",
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaveError(null);
     try {
       let credentialRef = draft.auth.credential_ref;
 
-      // Store PAT in keychain if provided
       if (pendingPat.trim()) {
         const credResult = await setSourceCredentialSecret(draft.id, "JiraPat", pendingPat);
         if (!credResult.ok) {
@@ -44,25 +82,23 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
         credentialRef = credResult.credentialRef;
       }
 
-      // Normalize URL
       let serverUrl = draft.server_url;
-      try {
-        serverUrl = normalizeJiraServerUrl(serverUrl);
-      } catch {
-        // validation already caught this
-      }
+      try { serverUrl = normalizeJiraServerUrl(serverUrl); } catch { /* validation already caught */ }
 
       const now = new Date().toISOString();
       const updatedSource: JiraSourceConfig = {
         ...draft,
         server_url: serverUrl,
-        name: draft.name || new URL(serverUrl).hostname,
+        name: draft.name || (() => { try { return new URL(serverUrl).hostname; } catch { return serverUrl; } })(),
         auth: { type: "Pat", credential_ref: credentialRef },
+        projects: dedupeAndSortProjects(draft.projects),
+        last_connection_test: testResult
+          ? { status: testResult.status === "Success" ? "Success" : testResult.status === "Unavailable" ? "Unavailable" : "Error", tested_at: testResult.tested_at, message: testResult.message }
+          : draft.last_connection_test,
         updated_at: now,
         created_at: mode === "new" ? now : draft.created_at,
       };
 
-      // Build updated config
       let updatedSources;
       if (mode === "new") {
         updatedSources = [...config.sources, { kind: "Jira" as const, ...updatedSource }];
@@ -79,7 +115,6 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
         return;
       }
 
-      // Clear PAT after successful save
       setPendingPat("");
       onSaved(updatedConfig);
     } catch (e) {
@@ -120,11 +155,7 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
             value={draft.server_url}
             onChange={(e) => setDraft((d) => ({ ...d, server_url: e.target.value }))}
             onBlur={(e) => {
-              try {
-                setDraft((d) => ({ ...d, server_url: normalizeJiraServerUrl(e.target.value) }));
-              } catch {
-                // keep as-is; validation will surface the error
-              }
+              try { setDraft((d) => ({ ...d, server_url: normalizeJiraServerUrl(e.target.value) })); } catch { /* keep */ }
             }}
             placeholder="https://jira.example.com"
             aria-label="Server URL"
@@ -133,14 +164,8 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
         </div>
 
         <div>
-          <label htmlFor="auth-method" className="block text-sm font-medium text-text mb-1">
-            Auth method
-          </label>
-          <select
-            id="auth-method"
-            disabled
-            className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-text opacity-70"
-          >
+          <label htmlFor="auth-method" className="block text-sm font-medium text-text mb-1">Auth method</label>
+          <select id="auth-method" disabled className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-text opacity-70">
             <option>Personal access token (PAT)</option>
           </select>
         </div>
@@ -163,6 +188,25 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
             The token is stored in your OS keychain. Server URL and project choices are stored in hm's local database.
           </p>
         </div>
+
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={handleTestConnection}
+            disabled={!canTest || isTesting}
+            className="px-3 py-1.5 rounded border border-border text-sm font-medium text-text hover:bg-surface disabled:opacity-50"
+          >
+            Test connection
+          </button>
+          <ConnectionTestStatus result={testResult} isTesting={isTesting} />
+        </div>
+
+        <ProjectMultiSelect
+          availableProjects={availableProjects}
+          selectedProjects={draft.projects}
+          disabled={!projectsEnabled}
+          onChange={(selected) => setDraft((d) => ({ ...d, projects: selected }))}
+        />
       </div>
 
       {saveError && <p className="text-sm text-red">{saveError}</p>}
@@ -178,10 +222,7 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
         </button>
         <button
           type="button"
-          onClick={() => {
-            setPendingPat("");
-            onCancel();
-          }}
+          onClick={() => { setPendingPat(""); onCancel(); }}
           className="px-3 py-1.5 rounded text-sm font-medium text-subtext hover:text-text"
         >
           Cancel

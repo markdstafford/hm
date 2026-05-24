@@ -290,4 +290,83 @@ describe("Sources settings", () => {
     const patInput = screen.getByLabelText(/personal access token/i) as HTMLInputElement;
     expect(patInput.value).toBe("");
   });
+
+  it("shows unavailable state from Jira connection test and names issue #9", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await openSources(user);
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: /jira data center/i }));
+    await user.type(screen.getByLabelText(/server url/i), "https://jira.example.com");
+    await user.type(screen.getByLabelText(/personal access token/i), "my-token");
+    await user.click(screen.getByRole("button", { name: /test connection/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/issue #9/i)).toBeInTheDocument();
+    });
+  });
+
+  it("safe error test: 401 shows suggested fix without token", async () => {
+    vi.mocked(commands.jiraSourceTestConnection).mockResolvedValue({
+      status: "ok",
+      data: {
+        status: "Error",
+        tested_at: "2024-01-01T00:00:00Z",
+        message: "Jira returned 401. Replace the token or check project permissions.",
+        suggested_fix: "Replace the token or check that this PAT can read projects.",
+        projects: [],
+        category: "AuthFailed",
+      },
+    });
+    const user = userEvent.setup();
+    renderPanel();
+    await openSources(user);
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: /jira data center/i }));
+    await user.type(screen.getByLabelText(/server url/i), "https://jira.example.com");
+    await user.type(screen.getByLabelText(/personal access token/i), "my-token");
+    await user.click(screen.getByRole("button", { name: /test connection/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Jira returned 401/i)).toBeInTheDocument();
+    });
+    // No PAT value in error output
+    expect(screen.queryByText(/my-token/i)).not.toBeInTheDocument();
+  });
+
+  it("project selector is disabled until test succeeds", async () => {
+    vi.mocked(commands.jiraSourceTestConnection).mockResolvedValue({
+      status: "ok",
+      data: {
+        status: "Success",
+        tested_at: "2024-01-01T00:00:00Z",
+        message: "Connected to Jira. Select projects to ingest.",
+        suggested_fix: null,
+        projects: [
+          { key: "HM", name: "HM Project", id: "10001" },
+          { key: "OPS", name: "Operations", id: "10002" },
+        ],
+        category: null,
+      },
+    });
+    const user = userEvent.setup();
+    renderPanel();
+    await openSources(user);
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: /jira data center/i }));
+    // Before test: project fieldset should be disabled
+    await waitFor(() => {
+      const fieldset = screen.queryByRole("group", { name: /projects/i });
+      if (fieldset) {
+        expect(fieldset).toBeDisabled();
+      }
+    });
+    await user.type(screen.getByLabelText(/server url/i), "https://jira.example.com");
+    await user.type(screen.getByLabelText(/personal access token/i), "my-token");
+    await user.click(screen.getByRole("button", { name: /test connection/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Connected to Jira/i)).toBeInTheDocument();
+      // Project checkboxes should now be enabled
+      expect(screen.getByRole("checkbox", { name: /HM/i })).not.toBeDisabled();
+      expect(screen.getByRole("checkbox", { name: /OPS/i })).not.toBeDisabled();
+    });
+  });
 });
