@@ -174,6 +174,7 @@ Everything that floats above content.
 | --- | --- | --- |
 | `Breadcrumb` | layout | Page identity trail. |
 | `Tabs` | `@radix-ui/react-tabs` | In-page section switching. |
+| `KeyboardShortcut` | layout | Render a key binding (or sequence) as `<kbd>` glyphs, using `formatBinding` from `src/shell/keys.ts`. |
 
 **`Breadcrumb` contract:**
 
@@ -183,6 +184,16 @@ Everything that floats above content.
 | `className` | `string` | `""` | Extra utility classes. |
 
 Separator is an 11px `ChevronRight` at `opacity-50`.
+
+**`KeyboardShortcut` contract:**
+
+| Prop | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `binding` | `string \| string[]` | required | A single binding (e.g. `"⌘+shift+d"`) or a sequence (e.g. `["g", "i"]`). Strings pass through `formatBinding`. |
+| `platform` | `Platform` (`"mac" \| "other"`) | `detectPlatform()` | Forces glyph (mac) or spelled (other) rendering. |
+| `className` | `string` | `""` | Extra utility classes on the wrapping `<span>`. |
+
+Each binding renders as a `<kbd>` with `rounded border border-border bg-surface px-1 text-xs text-subtext font-mono`. Sequences are joined with a small `then` label between segments.
 
 ### Sidebar — `src/ui/sidebar/`
 
