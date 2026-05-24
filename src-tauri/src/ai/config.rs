@@ -185,21 +185,29 @@ fn validate_task_name(task_name: &str) -> Result<(), AiError> {
 }
 
 fn validate_url(base_url: &str) -> Result<(), AiError> {
-    let lower = base_url.to_ascii_lowercase();
-    let rest = if lower.starts_with("https://") {
-        &base_url[8..]
-    } else if lower.starts_with("http://") {
-        &base_url[7..]
-    } else {
+    let parsed = url::Url::parse(base_url).map_err(|e| {
+        AiError::InvalidConfig(format!(
+            "endpoint base_url is not a valid URL ({e}): {base_url:?}"
+        ))
+    })?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err(AiError::InvalidConfig(format!(
-            "endpoint base_url must start with http:// or https://: {base_url:?}"
+            "endpoint base_url must use http or https scheme: {base_url:?}"
         )));
-    };
-    // rest is "host" or "host/path" — host must be non-empty
-    let host = rest.split('/').next().unwrap_or("");
-    if host.is_empty() {
+    }
+    if parsed.host_str().map_or(true, |h| h.is_empty()) {
         return Err(AiError::InvalidConfig(format!(
             "endpoint base_url must have a non-empty host: {base_url:?}"
+        )));
+    }
+    if parsed.query().is_some() {
+        return Err(AiError::InvalidConfig(format!(
+            "endpoint base_url must not include a query string: {base_url:?}"
+        )));
+    }
+    if parsed.fragment().is_some() {
+        return Err(AiError::InvalidConfig(format!(
+            "endpoint base_url must not include a fragment: {base_url:?}"
         )));
     }
     Ok(())
@@ -272,8 +280,20 @@ impl AiProviderConfig {
         validate_unique_names(&cred_names, "credential")?;
         for cred in &self.credentials {
             validate_name(&cred.name, "credential")?;
-            if let CredentialSource::Env { var_name } = &cred.source {
-                validate_env_name(var_name)?;
+            match &cred.source {
+                CredentialSource::Keychain { key_ref } => {
+                    let expected = format!("ai.credentials.{}", cred.name);
+                    if *key_ref != expected {
+                        return Err(AiError::InvalidConfig(format!(
+                            "credential {:?} keychain key_ref must be {:?} but got {:?}; \
+                             the key must match the deterministic ai.credentials.<name> format",
+                            cred.name, expected, key_ref
+                        )));
+                    }
+                }
+                CredentialSource::Env { var_name } => {
+                    validate_env_name(var_name)?;
+                }
             }
         }
 
@@ -447,6 +467,29 @@ mod tests {
     }
 
     #[test]
+    fn rejects_keychain_key_ref_not_matching_deterministic_format() {
+        let mut cfg = sample_config();
+        // Set key_ref to something other than ai.credentials.<name>
+        cfg.credentials[0].source = CredentialSource::Keychain {
+            key_ref: "custom.key.ref".into(),
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, AiError::InvalidConfig(_)));
+        if let AiError::InvalidConfig(msg) = err {
+            assert!(
+                msg.contains("ai.credentials."),
+                "expected deterministic key format in error: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_keychain_key_ref_matching_deterministic_format() {
+        // sample_config already has the correct key_ref — just confirm it passes
+        sample_config().validate().unwrap();
+    }
+
+    #[test]
     fn rejects_duplicate_credential_names() {
         let mut cfg = sample_config();
         cfg.credentials.push(AiCredentialConfig {
@@ -494,10 +537,58 @@ mod tests {
         assert!(matches!(err, AiError::InvalidConfig(_)));
         if let AiError::InvalidConfig(msg) = err {
             assert!(
-                msg.contains("http://") || msg.contains("https://"),
+                msg.contains("http") || msg.contains("https"),
                 "expected url scheme error in: {msg}"
             );
         }
+    }
+
+    #[test]
+    fn rejects_url_with_query_string() {
+        let mut cfg = sample_config();
+        cfg.endpoints[0].base_url = "https://api.anthropic.com/v1?key=value".into();
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, AiError::InvalidConfig(_)));
+        if let AiError::InvalidConfig(msg) = err {
+            assert!(msg.contains("query"), "expected query error in: {msg}");
+        }
+    }
+
+    #[test]
+    fn rejects_url_with_fragment() {
+        let mut cfg = sample_config();
+        cfg.endpoints[0].base_url = "https://api.anthropic.com/v1#section".into();
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, AiError::InvalidConfig(_)));
+        if let AiError::InvalidConfig(msg) = err {
+            assert!(msg.contains("fragment"), "expected fragment error in: {msg}");
+        }
+    }
+
+    #[test]
+    fn rejects_url_with_space_in_host() {
+        // The old string-prefix validator would miss this; the url crate rejects it at parse
+        let mut cfg = sample_config();
+        cfg.endpoints[0].base_url = "https://bad host.com/v1".into();
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, AiError::InvalidConfig(_)));
+    }
+
+    #[test]
+    fn rejects_url_with_invalid_port() {
+        // The old string-prefix validator would miss this; the url crate rejects it at parse
+        let mut cfg = sample_config();
+        cfg.endpoints[0].base_url = "https://api.example.com:notaport/v1".into();
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, AiError::InvalidConfig(_)));
+    }
+
+    #[test]
+    fn rejects_malformed_url() {
+        let mut cfg = sample_config();
+        cfg.endpoints[0].base_url = "not-a-url-at-all".into();
+        let err = cfg.validate().unwrap_err();
+        assert!(matches!(err, AiError::InvalidConfig(_)));
     }
 
     #[test]

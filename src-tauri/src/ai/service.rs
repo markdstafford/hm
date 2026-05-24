@@ -1,6 +1,6 @@
-use crate::ai::config::{AiExecutionMode, AiRunner};
+use crate::ai::config::{AiExecutionMode, AiProviderConfig, AiRunner};
 use crate::ai::errors::AiError;
-use crate::ai::resolver::{resolve_for_profile, resolve_for_task};
+use crate::ai::resolver::{resolve_for_profile, resolve_for_profile_from_config, resolve_for_task};
 use crate::ai::runners::AiRunnerClient;
 use crate::settings::secrets::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -88,9 +88,36 @@ pub fn smoke_test_profile(
     store: &dyn SecretStore,
     profile_name: &str,
 ) -> SmokeTestResult {
+    use crate::ai::config::load_ai_provider_config;
+    let config = match load_ai_provider_config(conn) {
+        Ok(c) => c,
+        Err(e) => {
+            return SmokeTestResult {
+                status: SmokeTestStatus::Error,
+                profile: profile_name.into(),
+                runner: AiRunner::OpenAiChatCompletions,
+                execution_mode: AiExecutionMode::DirectApi,
+                model: "".into(),
+                elapsed_ms: 0,
+                preview: None,
+                error: Some(e.to_string()),
+                suggested_fix: Some("Review the AI provider configuration.".into()),
+            };
+        }
+    };
+    smoke_test_profile_with_config(config, store, profile_name)
+}
+
+/// Run a smoke test using a pre-loaded config. The DB lock must already be released before
+/// calling this — secret loading and the HTTP request happen entirely outside SQLite.
+pub fn smoke_test_profile_with_config(
+    config: AiProviderConfig,
+    store: &dyn SecretStore,
+    profile_name: &str,
+) -> SmokeTestResult {
     let started = std::time::Instant::now();
     let runner = crate::ai::runners::DirectApiRunner;
-    match resolve_for_profile(conn, store, profile_name)
+    match resolve_for_profile_from_config(config.clone(), store, profile_name)
         .and_then(|resolved| runner.run(&resolved, AiRequest::smoke_test()))
     {
         Ok(response) => SmokeTestResult {
@@ -106,14 +133,15 @@ pub fn smoke_test_profile(
         },
         Err(err) => {
             let fix = suggested_fix(&err);
-            // Get runner/mode from profile if possible, fallback to defaults
-            let (runner, execution_mode, model) = resolve_for_profile(conn, store, profile_name)
-                .map(|r| (r.profile.runner.clone(), r.profile.execution_mode.clone(), r.profile.model.clone()))
-                .unwrap_or((AiRunner::OpenAiChatCompletions, AiExecutionMode::DirectApi, "".into()));
+            // Profile metadata for the result (no DB or HTTP, just config lookup)
+            let (runner_val, execution_mode, model) =
+                resolve_for_profile_from_config(config, store, profile_name)
+                    .map(|r| (r.profile.runner.clone(), r.profile.execution_mode.clone(), r.profile.model.clone()))
+                    .unwrap_or((AiRunner::OpenAiChatCompletions, AiExecutionMode::DirectApi, "".into()));
             SmokeTestResult {
                 status: SmokeTestStatus::Error,
                 profile: profile_name.into(),
-                runner,
+                runner: runner_val,
                 execution_mode,
                 model,
                 elapsed_ms: started.elapsed().as_millis() as u32,

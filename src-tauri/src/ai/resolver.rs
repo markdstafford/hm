@@ -30,7 +30,17 @@ pub fn resolve_for_profile(
     store: &dyn SecretStore,
     profile_name: &str,
 ) -> Result<ResolvedAiProvider, AiError> {
-    resolve_loaded(load_ai_provider_config(conn)?, store, profile_name)
+    resolve_for_profile_from_config(load_ai_provider_config(conn)?, store, profile_name)
+}
+
+/// Resolve a profile without touching the database. Use this when the config has already been
+/// loaded and the DB lock has been released (e.g. in the smoke-test command path).
+pub fn resolve_for_profile_from_config(
+    config: AiProviderConfig,
+    store: &dyn SecretStore,
+    profile_name: &str,
+) -> Result<ResolvedAiProvider, AiError> {
+    resolve_loaded(config, store, profile_name)
 }
 
 fn resolve_loaded(
