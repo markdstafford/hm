@@ -60,6 +60,16 @@ pub enum ConnectionTestStatus {
     Unavailable,
 }
 
+// ── SourceConfig accessors ────────────────────────────────────────────────────
+
+impl SourceConfig {
+    pub fn id(&self) -> &str {
+        match self {
+            SourceConfig::Jira(j) => j.id.as_str(),
+        }
+    }
+}
+
 // ── Default ───────────────────────────────────────────────────────────────────
 
 impl Default for SourcesConfig {

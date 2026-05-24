@@ -85,6 +85,47 @@ pub fn load_source_credential_secret(
     Ok(SourceSecretValue(value))
 }
 
+/// Remove a source from config and delete all credentials it owns.
+///
+/// Loads the current config, deletes each credential ref owned by the source,
+/// removes the source from config, and saves the updated config.
+/// Treats missing credentials as a safe no-op.
+pub fn remove_source_config_and_credentials(
+    conn: &rusqlite::Connection,
+    store: &dyn crate::settings::secrets::SecretStore,
+    source_id: &str,
+) -> Result<(), crate::sources::errors::SourceError> {
+    use crate::sources::config::{load_sources_config, save_sources_config};
+
+    // 1. Load current config
+    let mut config = load_sources_config(conn)?;
+
+    // 2. Find the source and extract its credential refs
+    let credential_refs: Vec<String> = config.sources.iter()
+        .filter(|s| s.id() == source_id)
+        .flat_map(|s| match s {
+            crate::sources::config::SourceConfig::Jira(jira) => {
+                match &jira.auth {
+                    crate::sources::config::JiraAuthConfig::Pat { credential_ref } => {
+                        vec![credential_ref.clone()]
+                    }
+                }
+            }
+        })
+        .collect();
+
+    // 3. Delete credential refs (treat missing as no-op)
+    for cref in &credential_refs {
+        delete_source_credential(cref, store)?;
+    }
+
+    // 4. Remove the source from config
+    config.sources.retain(|s| s.id() != source_id);
+
+    // 5. Save updated config
+    save_sources_config(conn, &config)
+}
+
 /// Delete a source credential from the secret store.
 ///
 /// Treats "not found" as a safe no-op.
@@ -101,6 +142,47 @@ pub fn delete_source_credential(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::secrets::SecretStore as _;
+
+    fn sample_jira_config(id: &str) -> crate::sources::config::JiraSourceConfig {
+        crate::sources::config::JiraSourceConfig {
+            id: id.to_string(),
+            name: "Test Jira".into(),
+            enabled: true,
+            server_url: "https://jira.example.com".into(),
+            auth: crate::sources::config::JiraAuthConfig::Pat {
+                credential_ref: format!("source.jira.{id}.pat"),
+            },
+            projects: vec![],
+            last_connection_test: None,
+            created_at: "2024-01-01T00:00:00Z".into(),
+            updated_at: "2024-01-01T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn remove_jira_source_deletes_metadata_and_owned_credential_only() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let store = crate::settings::secrets::InMemorySecretStore::new();
+        let cfg = crate::sources::config::SourcesConfig {
+            version: 1,
+            sources: vec![
+                crate::sources::config::SourceConfig::Jira(sample_jira_config("src_remove")),
+                crate::sources::config::SourceConfig::Jira(sample_jira_config("src_keep")),
+            ],
+        };
+        crate::sources::config::save_sources_config(&conn, &cfg).unwrap();
+        store.set("source.jira.src_remove.pat", "remove-secret").unwrap();
+        store.set("source.jira.src_keep.pat", "keep-secret").unwrap();
+
+        remove_source_config_and_credentials(&conn, &store, "src_remove").unwrap();
+
+        let next = crate::sources::config::load_sources_config(&conn).unwrap();
+        assert_eq!(next.sources.len(), 1);
+        assert!(next.sources.iter().any(|s| s.id() == "src_keep"));
+        assert_eq!(store.get("source.jira.src_remove.pat").unwrap(), None);
+        assert_eq!(store.get("source.jira.src_keep.pat").unwrap(), Some("keep-secret".into()));
+    }
 
     #[test]
     fn jira_pat_credential_ref_is_deterministic() {

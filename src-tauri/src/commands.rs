@@ -123,7 +123,7 @@ use crate::sources::config::{
 };
 use crate::ai::credentials::{delete_keychain_credential_secret, set_keychain_credential_secret};
 use crate::sources::credentials::{
-    set_source_credential_secret, delete_source_credential, SourceCredentialKind,
+    set_source_credential_secret, delete_source_credential, remove_source_config_and_credentials, SourceCredentialKind,
 };
 use crate::ai::service::{smoke_test_profile_with_config, SmokeTestResult};
 
@@ -215,6 +215,18 @@ pub fn source_credential_delete(
     store: tauri::State<'_, ManagedSecretStore>,
 ) -> Result<(), String> {
     delete_source_credential(&credential_ref, store.0.as_ref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn source_config_remove(
+    source_id: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<(), String> {
+    let conn = db.lock().unwrap();
+    remove_source_config_and_credentials(&conn, store.0.as_ref(), &source_id)
         .map_err(|e| e.to_string())
 }
 

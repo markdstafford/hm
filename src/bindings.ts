@@ -21,6 +21,7 @@ export const commands = {
 	sourceConfigSave: (config: SourcesConfig) => typedError<null, string>(__TAURI_INVOKE("source_config_save", { config })),
 	sourceCredentialSecretSet: (sourceId: string, kind: SourceCredentialKind, value: string) => typedError<string, string>(__TAURI_INVOKE("source_credential_secret_set", { sourceId, kind, value })),
 	sourceCredentialDelete: (credentialRef: string) => typedError<null, string>(__TAURI_INVOKE("source_credential_delete", { credentialRef })),
+	sourceConfigRemove: (sourceId: string) => typedError<null, string>(__TAURI_INVOKE("source_config_remove", { sourceId })),
 };
 
 /* Types */
