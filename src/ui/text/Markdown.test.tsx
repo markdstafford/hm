@@ -13,6 +13,16 @@ describe("Markdown", () => {
     render(<Markdown source={"![A cat](https://example.com/cat.png)"} />);
     expect(screen.getByText(/\[image: A cat\]/)).toBeInTheDocument();
   });
+  it("renders external links with target and rel", () => {
+    render(<Markdown source={"Visit [site](https://example.com)."} />);
+    const a = screen.getByRole("link", { name: "site" });
+    expect(a).toHaveAttribute("target", "_blank");
+    expect(a).toHaveAttribute("rel", "noreferrer noopener");
+  });
+  it("treats single newlines as paragraph continuations (no <br>)", () => {
+    const { container } = render(<Markdown source={"line one\nline two"} />);
+    expect(container.querySelector("br")).toBeNull();
+  });
   it("has no axe violations", async () => {
     const { container } = render(<Markdown source={"# Title\n\nText."} />);
     expect(await axe(container)).toHaveNoViolations();
