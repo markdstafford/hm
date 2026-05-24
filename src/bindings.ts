@@ -17,6 +17,8 @@ export const commands = {
 	aiCredentialSecretSet: (credentialName: string, value: string) => typedError<null, string>(__TAURI_INVOKE("ai_credential_secret_set", { credentialName, value })),
 	aiCredentialSecretDelete: (credentialName: string) => typedError<null, string>(__TAURI_INVOKE("ai_credential_secret_delete", { credentialName })),
 	aiProfileSmokeTest: (profileName: string) => typedError<SmokeTestResult, string>(__TAURI_INVOKE("ai_profile_smoke_test", { profileName })),
+	sourceConfigGet: () => typedError<SourcesConfig, string>(__TAURI_INVOKE("source_config_get")),
+	sourceConfigSave: (config: SourcesConfig) => typedError<null, string>(__TAURI_INVOKE("source_config_save", { config })),
 };
 
 /* Types */
@@ -63,7 +65,35 @@ export type AppStatus = {
 	ready: boolean,
 };
 
+export type ConnectionTestStatus = "NotTested" | "Success" | "Error" | "Unavailable";
+
+export type ConnectionTestSummary = {
+	status: ConnectionTestStatus,
+	tested_at: string,
+	message: string,
+};
+
 export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
+
+export type JiraAuthConfig = { type: "Pat"; credential_ref: string };
+
+export type JiraProjectFilter = {
+	key: string,
+	name: string | null,
+	id: string | null,
+};
+
+export type JiraSourceConfig = {
+	id: string,
+	name: string,
+	enabled: boolean,
+	server_url: string,
+	auth: JiraAuthConfig,
+	projects: JiraProjectFilter[],
+	last_connection_test: ConnectionTestSummary | null,
+	created_at: string,
+	updated_at: string,
+};
 
 export type SmokeTestResult = {
 	status: SmokeTestStatus,
@@ -78,6 +108,15 @@ export type SmokeTestResult = {
 };
 
 export type SmokeTestStatus = "NotRun" | "Running" | "Success" | "Error";
+
+export type SourceConfig = {
+	kind: "Jira",
+} & JiraSourceConfig;
+
+export type SourcesConfig = {
+	version: number,
+	sources: SourceConfig[],
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
