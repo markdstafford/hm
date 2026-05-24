@@ -137,3 +137,45 @@ App.tsx owns `AppPreferences` state. On mount: `loadPreferences()` → `setPrefs
 - Window state is captured automatically on Tauri `onMoved` and `onResized` events, debounced 500ms. Listeners are registered in a `useEffect` on App mount and cleaned up on unmount.
 - `prefsRef` in App.tsx keeps an always-current copy of `prefs` for the window listener callback, avoiding stale-closure issues with debounced async writes.
 - Saved positions outside [-2000, 10000] in either axis are ignored to prevent off-screen windows.
+
+## AI provider configuration module (added 2026-05-24)
+
+- Shared setting key: `ai.providers.config` stores versioned non-secret provider config only.
+- Keychain account format: `ai.credentials.<credential-name>` for AI keychain-backed credentials.
+- Rust module: `src-tauri/src/ai/` contains config validation, safe errors, credential loading, resolver, service API, and direct runners.
+- Tauri commands: `ai_provider_config_get`, `ai_provider_config_save`, `ai_credential_secret_set`, `ai_credential_secret_delete`, `ai_profile_smoke_test`.
+- Internal API: future features call `ai::service::ai_call(conn, secret_store, task_name, request)` and do not inspect storage details.
+- Naming: `runner` names wire/request behavior; `execution_mode` names how hm executes the call. This feature implements `DirectApi`; future agent modes should add new execution modes without renaming direct runners.
+
+### AI module layout
+
+```
+src-tauri/src/ai/
+  mod.rs                module re-exports
+  config.rs             AiProviderConfig schema, validation, load/save helpers
+  errors.rs             AiError enum, safe Display, redact() helper
+  credentials.rs        SecretValue (Debug-redacting), LoadedCredentialSecret, keychain/env secret loading
+  resolver.rs           ResolvedAiProvider, resolve_for_task, resolve_for_profile
+  service.rs            AiRequest, AiResponse, AiUsage, SmokeTestResult, ai_call, smoke_test_profile
+  runners/mod.rs        AiRunnerClient trait, DirectApiRunner dispatcher
+  runners/anthropic_messages.rs     AnthropicMessages direct API runner
+  runners/openai_chat_completions.rs OpenAI-compatible Chat Completions direct API runner
+```
+
+### Settings UI layout
+
+```
+src/aiProviders/
+  types.ts              domain type aliases from generated bindings
+  defaults.ts           EMPTY_AI_PROVIDER_CONFIG, RUNNER_LABELS, EMPTY_STATES
+  validation.ts         validateAiProviderConfig() — client-side validation mirrors Rust rules
+  storage.ts            async command wrappers with Tauri env guard
+
+src/settings/
+  AiProvidersSettings.tsx      container: loads config, auto-saves on each change
+  aiProviders/
+    CredentialsSection.tsx     credentials CRUD + keychain secret set (secret never enters config)
+    EndpointsSection.tsx       endpoint CRUD with credential picker
+    ProfilesSection.tsx        profile CRUD + per-row smoke test with NotRun/Running/Success/Error states
+    RoutingSection.tsx         task-to-profile routing CRUD with dotted-name validation
+```
