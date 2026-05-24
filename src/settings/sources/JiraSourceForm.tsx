@@ -216,7 +216,7 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
           type="button"
           onClick={handleSave}
           disabled={!canSave || saving}
-          className="px-3 py-1.5 rounded bg-blue text-crust text-sm font-medium disabled:opacity-50"
+          className="px-3 py-1.5 rounded bg-primary text-on-primary text-sm font-medium disabled:opacity-50"
         >
           {saving ? "Saving..." : "Save"}
         </button>

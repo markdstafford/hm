@@ -77,7 +77,7 @@ export function SourceList({
                   <button
                     type="button"
                     onClick={() => onRemoveConfirm(jira.id)}
-                    className="px-3 py-1 rounded bg-red text-crust text-xs font-medium"
+                    className="px-3 py-1 rounded bg-red text-on-primary text-xs font-medium"
                   >
                     Remove source
                   </button>
