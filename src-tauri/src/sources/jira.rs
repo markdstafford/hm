@@ -49,11 +49,13 @@ pub struct JiraConnectionTestResult {
 // ── Internal Jira client trait seam ──────────────────────────────────────────
 
 pub(crate) enum JiraClientError {
+    InvalidUrl,
     Unauthorized,
     Forbidden,
-    Network(String),
+    Network,
     RateLimited,
-    Server(String),
+    Server,
+    Decode,
 }
 
 pub(crate) trait JiraProjectClient {
@@ -68,6 +70,14 @@ pub(crate) trait JiraProjectClient {
 
 pub(crate) fn map_client_error(err: JiraClientError) -> JiraConnectionTestResult {
     match err {
+        JiraClientError::InvalidUrl => JiraConnectionTestResult {
+            status: JiraConnectionTestStatus::Error,
+            tested_at: now_utc_string(),
+            message: "Check the Jira server URL and try again.".into(),
+            suggested_fix: Some("Verify the Jira server URL and test again.".into()),
+            projects: vec![],
+            category: Some(JiraConnectionErrorCategory::InvalidUrl),
+        },
         JiraClientError::Unauthorized => JiraConnectionTestResult {
             status: JiraConnectionTestStatus::Error,
             tested_at: now_utc_string(),
@@ -84,7 +94,7 @@ pub(crate) fn map_client_error(err: JiraClientError) -> JiraConnectionTestResult
             projects: vec![],
             category: Some(JiraConnectionErrorCategory::Forbidden),
         },
-        JiraClientError::Network(_) => JiraConnectionTestResult {
+        JiraClientError::Network => JiraConnectionTestResult {
             status: JiraConnectionTestStatus::Error,
             tested_at: now_utc_string(),
             message: "Network error connecting to Jira. Check the server URL and your network connection.".into(),
@@ -100,7 +110,7 @@ pub(crate) fn map_client_error(err: JiraClientError) -> JiraConnectionTestResult
             projects: vec![],
             category: Some(JiraConnectionErrorCategory::RateLimited),
         },
-        JiraClientError::Server(_) => JiraConnectionTestResult {
+        JiraClientError::Server => JiraConnectionTestResult {
             status: JiraConnectionTestStatus::Error,
             tested_at: now_utc_string(),
             message: "Jira server returned an error. Check the server status.".into(),
@@ -108,52 +118,115 @@ pub(crate) fn map_client_error(err: JiraClientError) -> JiraConnectionTestResult
             projects: vec![],
             category: Some(JiraConnectionErrorCategory::Server),
         },
+        JiraClientError::Decode => JiraConnectionTestResult {
+            status: JiraConnectionTestStatus::Error,
+            tested_at: now_utc_string(),
+            message: "Jira returned a response this version cannot read.".into(),
+            suggested_fix: Some("Check the Jira server version and try again.".into()),
+            projects: vec![],
+            category: Some(JiraConnectionErrorCategory::Unsupported),
+        },
     }
 }
 
-// ── Adapter: connection test ──────────────────────────────────────────────────
+// ── Real client adapter ───────────────────────────────────────────────────────
 
-/// Test a Jira source connection.
-///
-/// If `pending_pat` is `Some(pat)`, the provided value is used for the test
-/// without consulting the secret store. If `None`, the stored credential is
-/// loaded from `store`.
-///
-/// This is the unavailable adapter: the Jira API client does not exist yet
-/// (see issue #9). The function validates credentials but always returns
-/// `Unavailable` rather than making a live network call.
-///
-/// # Returns
-/// Always returns `Ok(result)`. Credential errors are surfaced as
-/// `JiraConnectionTestResult` with `status: Error`, not as `Err(...)`.
-pub fn jira_source_test_connection_with_store(
+struct RealJiraProjectClient;
+
+impl JiraProjectClient for RealJiraProjectClient {
+    fn list_projects(
+        &self,
+        server_url: &str,
+        pat: &str,
+    ) -> Result<Vec<JiraConnectionProject>, JiraClientError> {
+        let client = crate::sources::jira_client::JiraApiClient::new(
+            crate::sources::jira_client::JiraApiClientConfig {
+                base_url: server_url.to_string(),
+                pat: pat.to_string(),
+                user_agent: format!("hm/{}", env!("CARGO_PKG_VERSION")),
+                retry_policy: crate::sources::jira_client::RetryPolicy::default(),
+                rate_limit_policy: crate::sources::jira_client::RateLimitPolicy::default(),
+            },
+        )
+        .map_err(map_api_error_to_client_error)?;
+        client
+            .list_projects()
+            .map(|projects| {
+                projects
+                    .into_iter()
+                    .map(|p| JiraConnectionProject {
+                        key: p.key,
+                        name: Some(p.name),
+                        id: p.id,
+                    })
+                    .collect()
+            })
+            .map_err(map_api_error_to_client_error)
+    }
+}
+
+fn map_api_error_to_client_error(
+    err: crate::sources::jira_errors::JiraApiError,
+) -> JiraClientError {
+    use crate::sources::jira_errors::JiraApiError;
+    match err {
+        JiraApiError::InvalidBaseUrl | JiraApiError::InvalidRequest { .. } => {
+            JiraClientError::InvalidUrl
+        }
+        JiraApiError::Unauthorized => JiraClientError::Unauthorized,
+        JiraApiError::Forbidden => JiraClientError::Forbidden,
+        JiraApiError::RateLimited { .. } => JiraClientError::RateLimited,
+        JiraApiError::Server { .. } => JiraClientError::Server,
+        JiraApiError::Network => JiraClientError::Network,
+        JiraApiError::Decode => JiraClientError::Decode,
+        JiraApiError::NotFound | JiraApiError::BadRequest => JiraClientError::Server,
+    }
+}
+
+fn success_result(projects: Vec<JiraConnectionProject>) -> JiraConnectionTestResult {
+    let mut seen = std::collections::HashSet::new();
+    let mut deduped: Vec<JiraConnectionProject> = projects
+        .into_iter()
+        .filter(|project| seen.insert(project.key.clone()))
+        .collect();
+    deduped.sort_by(|a, b| a.key.cmp(&b.key));
+    JiraConnectionTestResult {
+        status: JiraConnectionTestStatus::Success,
+        tested_at: now_utc_string(),
+        message: "Connected to Jira. Select projects to ingest.".into(),
+        suggested_fix: None,
+        projects: deduped,
+        category: None,
+    }
+}
+
+/// Connection test with injected client (for testing).
+pub(crate) fn jira_source_test_connection_with_client(
     source: JiraSourceConfig,
     pending_pat: Option<String>,
     store: &dyn SecretStore,
+    client: &dyn JiraProjectClient,
 ) -> Result<JiraConnectionTestResult, SourceError> {
-    // Resolve the credential ref from the source auth config.
     let credential_ref = match &source.auth {
         JiraAuthConfig::Pat { credential_ref } => credential_ref.clone(),
     };
 
-    // When no pending PAT is provided, try to load the saved credential.
-    // Missing credential → return an error result (not a Rust Err).
-    if pending_pat.is_none() {
-        match load_source_credential_secret(&credential_ref, store) {
-            Ok(_) => {
-                // Credential exists — fall through to Unavailable result below.
-            }
+    let pat = match pending_pat {
+        Some(pat) => pat,
+        None => match load_source_credential_secret(&credential_ref, store) {
+            Ok(secret) => secret.expose_for_jira_client().to_string(),
             Err(SourceError::MissingCredential(_)) => {
                 return Ok(JiraConnectionTestResult {
                     status: JiraConnectionTestStatus::Error,
                     tested_at: now_utc_string(),
-                    message: "Jira credential is missing. Replace the token and test again.".into(),
+                    message: "Jira credential is missing. Replace the token and test again."
+                        .into(),
                     suggested_fix: Some("Add a PAT for this source and test again.".into()),
                     projects: vec![],
                     category: Some(JiraConnectionErrorCategory::MissingCredential),
                 });
             }
-            Err(_other) => {
+            Err(_) => {
                 return Ok(JiraConnectionTestResult {
                     status: JiraConnectionTestStatus::Error,
                     tested_at: now_utc_string(),
@@ -163,19 +236,30 @@ pub fn jira_source_test_connection_with_store(
                     category: Some(JiraConnectionErrorCategory::MissingCredential),
                 });
             }
-        }
-    }
+        },
+    };
 
-    // Either we have a pending PAT, or the stored credential is valid.
-    // Either way, live testing depends on the Jira client (issue #9).
-    Ok(JiraConnectionTestResult {
-        status: JiraConnectionTestStatus::Unavailable,
-        tested_at: now_utc_string(),
-        message: "Live connection testing depends on issue #9. The source can be saved, but projects must wait for the Jira API client.".into(),
-        suggested_fix: None,
-        projects: vec![],
-        category: Some(JiraConnectionErrorCategory::Unavailable),
-    })
+    match client.list_projects(&source.server_url, &pat) {
+        Ok(projects) => Ok(success_result(projects)),
+        Err(err) => Ok(map_client_error(err)),
+    }
+}
+
+/// Test a Jira source connection.
+///
+/// If `pending_pat` is `Some(pat)`, the provided value is used for the test
+/// without consulting the secret store. If `None`, the stored credential is
+/// loaded from `store`.
+///
+/// # Returns
+/// Always returns `Ok(result)`. Credential errors are surfaced as
+/// `JiraConnectionTestResult` with `status: Error`, not as `Err(...)`.
+pub fn jira_source_test_connection_with_store(
+    source: JiraSourceConfig,
+    pending_pat: Option<String>,
+    store: &dyn SecretStore,
+) -> Result<JiraConnectionTestResult, SourceError> {
+    jira_source_test_connection_with_client(source, pending_pat, store, &RealJiraProjectClient)
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
@@ -213,14 +297,69 @@ mod tests {
     }
 
     #[test]
-    fn returns_unavailable_before_jira_client_exists() {
+    fn pending_pat_uses_real_client_seam_and_returns_sorted_success() {
+        struct CapturingClient;
+        impl JiraProjectClient for CapturingClient {
+            fn list_projects(
+                &self,
+                server_url: &str,
+                pat: &str,
+            ) -> Result<Vec<JiraConnectionProject>, JiraClientError> {
+                assert_eq!(server_url, "https://jira.example.com");
+                assert_eq!(pat, "pending-pat");
+                Ok(vec![
+                    JiraConnectionProject {
+                        key: "ZAP".into(),
+                        name: Some("Zap".into()),
+                        id: Some("2".into()),
+                    },
+                    JiraConnectionProject {
+                        key: "HM".into(),
+                        name: Some("Home Map".into()),
+                        id: Some("1".into()),
+                    },
+                    JiraConnectionProject {
+                        key: "HM".into(),
+                        name: Some("Duplicate".into()),
+                        id: Some("3".into()),
+                    },
+                ])
+            }
+        }
         let store = crate::settings::secrets::InMemorySecretStore::new();
-        let source = sample_jira_source("src_unavailable");
-        let result = jira_source_test_connection_with_store(source, Some("pending-pat".into()), &store).unwrap();
-        assert_eq!(result.status, JiraConnectionTestStatus::Unavailable);
-        assert!(result.message.contains("issue #9"));
-        assert!(result.projects.is_empty());
+        let source = sample_jira_source("src_pending");
+        let result =
+            jira_source_test_connection_with_client(source, Some("pending-pat".into()), &store, &CapturingClient)
+                .unwrap();
+        assert_eq!(result.status, JiraConnectionTestStatus::Success);
+        assert_eq!(result.message, "Connected to Jira. Select projects to ingest.");
+        assert_eq!(
+            result.projects.iter().map(|p| p.key.as_str()).collect::<Vec<_>>(),
+            vec!["HM", "ZAP"]
+        );
+        // PAT must not appear in result debug
         assert!(!format!("{result:?}").contains("pending-pat"));
+    }
+
+    #[test]
+    fn stored_pat_loaded_when_pending_absent() {
+        struct PassingClient;
+        impl JiraProjectClient for PassingClient {
+            fn list_projects(
+                &self,
+                _server_url: &str,
+                pat: &str,
+            ) -> Result<Vec<JiraConnectionProject>, JiraClientError> {
+                assert_eq!(pat, "stored-pat");
+                Ok(vec![])
+            }
+        }
+        let store = crate::settings::secrets::InMemorySecretStore::new();
+        store.set("source.jira.src_stored.pat", "stored-pat").unwrap();
+        let source = sample_jira_source("src_stored");
+        let result =
+            jira_source_test_connection_with_client(source, None, &store, &PassingClient).unwrap();
+        assert_eq!(result.status, JiraConnectionTestStatus::Success);
     }
 
     #[test]
@@ -234,24 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_pat_with_no_pending_returns_unavailable() {
-        let store = crate::settings::secrets::InMemorySecretStore::new();
-        store.set("source.jira.src_stored.pat", "my-saved-pat").unwrap();
-        let source = sample_jira_source("src_stored");
-        let result = jira_source_test_connection_with_store(source, None, &store).unwrap();
-        assert_eq!(result.status, JiraConnectionTestStatus::Unavailable);
-        assert!(result.message.contains("issue #9"));
-        assert!(!format!("{result:?}").contains("my-saved-pat"));
-    }
-
-    #[test]
     fn fake_client_maps_error_categories() {
-        struct FailingClient(JiraClientError);
-        impl JiraProjectClient for FailingClient {
-            fn list_projects(&self, _url: &str, _pat: &str) -> Result<Vec<JiraConnectionProject>, JiraClientError> {
-                Err(JiraClientError::Unauthorized)
-            }
-        }
         let result = map_client_error(JiraClientError::Unauthorized);
         assert_eq!(result.status, JiraConnectionTestStatus::Error);
         assert_eq!(result.category, Some(JiraConnectionErrorCategory::AuthFailed));
@@ -262,10 +384,10 @@ mod tests {
         let result3 = map_client_error(JiraClientError::RateLimited);
         assert_eq!(result3.category, Some(JiraConnectionErrorCategory::RateLimited));
 
-        let result4 = map_client_error(JiraClientError::Network("timeout".into()));
+        let result4 = map_client_error(JiraClientError::Network);
         assert_eq!(result4.category, Some(JiraConnectionErrorCategory::Network));
 
-        let result5 = map_client_error(JiraClientError::Server("500".into()));
+        let result5 = map_client_error(JiraClientError::Server);
         assert_eq!(result5.category, Some(JiraConnectionErrorCategory::Server));
     }
 
@@ -291,9 +413,9 @@ mod tests {
         let cases = vec![
             (JiraClientError::Unauthorized, JiraConnectionErrorCategory::AuthFailed),
             (JiraClientError::Forbidden, JiraConnectionErrorCategory::Forbidden),
-            (JiraClientError::Network("timeout".into()), JiraConnectionErrorCategory::Network),
+            (JiraClientError::Network, JiraConnectionErrorCategory::Network),
             (JiraClientError::RateLimited, JiraConnectionErrorCategory::RateLimited),
-            (JiraClientError::Server("500".into()), JiraConnectionErrorCategory::Server),
+            (JiraClientError::Server, JiraConnectionErrorCategory::Server),
         ];
         for (err, expected_category) in cases {
             let result = map_client_error(err);
@@ -313,37 +435,6 @@ mod tests {
     }
 
     #[test]
-    fn client_errors_with_unsafe_upstream_details_do_not_leak_to_message() {
-        // Raw upstream strings (stack traces, response bodies, credential-shaped text)
-        // must never appear in the user-visible message field.
-        let unsafe_msgs = vec![
-            "at com.sun.jira.JiraService.authenticate(JiraService.java:42)\n\tat ...".to_string(),
-            "Authorization: Bearer super-secret-token-abc123".to_string(),
-            "HTTP/1.1 500 Internal Server Error\nX-Internal-Error: db locked".to_string(),
-        ];
-        for msg in unsafe_msgs {
-            let network_result = map_client_error(JiraClientError::Network(msg.clone()));
-            assert!(
-                !network_result.message.contains("at com.sun") &&
-                !network_result.message.contains("Authorization") &&
-                !network_result.message.contains("X-Internal-Error") &&
-                !network_result.message.contains(&msg),
-                "Network: unsafe upstream detail leaked into message: {}",
-                network_result.message
-            );
-            let server_result = map_client_error(JiraClientError::Server(msg.clone()));
-            assert!(
-                !server_result.message.contains("at com.sun") &&
-                !server_result.message.contains("Authorization") &&
-                !server_result.message.contains("X-Internal-Error") &&
-                !server_result.message.contains(&msg),
-                "Server: unsafe upstream detail leaked into message: {}",
-                server_result.message
-            );
-        }
-    }
-
-    #[test]
     fn fake_client_success_with_projects_deduplicates_and_sorts() {
         let projects = vec![
             JiraConnectionProject { key: "ZAP".into(), name: Some("Zap".into()), id: None },
@@ -354,5 +445,23 @@ mod tests {
         assert_eq!(result.status, JiraConnectionTestStatus::Success);
         let keys: Vec<_> = result.projects.iter().map(|p| p.key.as_str()).collect();
         assert_eq!(keys, vec!["HM", "ZAP"], "projects should be deduplicated and sorted");
+    }
+
+    #[test]
+    fn client_errors_map_to_safe_categories() {
+        assert_eq!(
+            map_client_error(JiraClientError::InvalidUrl).category,
+            Some(JiraConnectionErrorCategory::InvalidUrl)
+        );
+        assert_eq!(
+            map_client_error(JiraClientError::Decode).category,
+            Some(JiraConnectionErrorCategory::Unsupported)
+        );
+        assert!(
+            !map_client_error(JiraClientError::Decode)
+                .message
+                .to_ascii_lowercase()
+                .contains("response body")
+        );
     }
 }

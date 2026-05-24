@@ -17,7 +17,7 @@ vi.mock("../bindings", () => ({
       data: {
         status: "Unavailable",
         tested_at: "2024-01-01T00:00:00Z",
-        message: "Live connection testing depends on issue #9. The source can be saved, but projects must wait for the Jira API client.",
+        message: "Live connection testing is not available in this environment.",
         suggested_fix: null,
         projects: [],
         category: "Unavailable",

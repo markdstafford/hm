@@ -153,9 +153,9 @@ Full cross-session preference persistence (change → close → reopen → verif
 ### Rust tests
 
 - All Rust source tests use `crate::settings::secrets::InMemorySecretStore`; no OS keychain is touched in automated tests.
-- `jira_source_test_connection_with_store` returns `Unavailable` and must not perform any network calls before issue #9 lands.
+- `jira_source_test_connection_with_store` uses the real `JiraApiClient` (via `RealJiraProjectClient`) when a PAT is available; tests inject a fake `JiraProjectClient` via the trait seam.
 - `map_client_error` in `jira.rs` is unit-tested with fake `JiraClientError` variants to verify safe category mapping.
-- Live Jira connection tests are skipped until the Jira API client (issue #9) exists.
+- Live network calls are never made in automated tests; mock-server integration tests use `tiny_http::Server::http("127.0.0.1:0")`.
 
 ### Frontend sources tests
 
@@ -173,9 +173,16 @@ vi.mock("../bindings", () => ({
     sourceCredentialSecretSet: vi.fn().mockResolvedValue({ status: "ok", data: "source.jira.src_x.pat" }),
     sourceCredentialDelete: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     sourceConfigRemove: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    // In browser-only tests, mock the browser fallback (no Tauri keychain/network)
     jiraSourceTestConnection: vi.fn().mockResolvedValue({
       status: "ok",
-      data: { status: "Unavailable", tested_at: "...", message: "...issue #9...", ... },
+      data: {
+        status: "Unavailable",
+        tested_at: "...",
+        message: "Live connection testing is not available in this environment. Use the desktop app to test this connection.",
+        category: "Unavailable",
+        projects: [],
+      },
     }),
   },
 }));
@@ -183,7 +190,26 @@ vi.mock("../bindings", () => ({
 
 ### E2E smoke path
 
-`e2e/sources.spec.ts` covers: Settings → Sources → Add source → Jira Data Center → fill URL + PAT → Test connection → verify "issue #9" message visible. This test requires a Vite dev server for this workspace (`npm run tauri dev`) — it cannot run against a dev server for another workspace.
+`e2e/sources.spec.ts` covers: Settings → Sources → Add source → Jira Data Center → fill URL + PAT → Test connection → verify the browser-only unavailable message ("Live connection testing is not available…") is visible → Save → source appears in list. This test requires a Vite dev server for this workspace (`npm run tauri dev`) — it cannot run against a dev server for another workspace. Full keychain and live-network behavior requires a real Tauri build and `tauri-driver`.
+
+## Jira API client tests (added 2026-05-24, issue #9)
+
+### Rust tests
+
+- Synthetic JSON fixtures live in `src-tauri/src/sources/fixtures/`. All files contain only `*.example.invalid` URLs, fake names (`Elena Example`, `Tarek Example`), and invented project keys. Do not copy real Jira responses or real project data into fixtures.
+- Run Jira client tests: `cd src-tauri && cargo test sources::jira_client::tests -- --nocapture`
+- Run Jira types tests: `cd src-tauri && cargo test sources::jira_types::tests -- --nocapture`
+- Run Jira errors tests: `cd src-tauri && cargo test sources::jira_errors::tests -- --nocapture`
+- Run source adapter tests: `cd src-tauri && cargo test sources::jira -- --nocapture`
+- Mock-server tests use `tiny_http::Server::http("127.0.0.1:0")` — no real Jira server or PAT needed.
+- Retry and rate-limit tests inject `RecordingSleeper` so delays are asserted without real waits.
+- `MAX_PAGINATION_PAGES = 200` prevents infinite loops; the `search_issues_all_terminates_when_server_omits_total_and_returns_full_pages` test verifies this guard.
+
+### Frontend tests
+
+- `src/sources/defaults.ts` exports `JIRA_UNAVAILABLE_MESSAGE` used by `storage.ts` as the browser-only fallback when `isTauri()` is false.
+- `src/settings/SourcesSettings.test.tsx` mocks `jiraSourceTestConnection` to return `Unavailable` with the browser fallback message. The `ConnectionTestStatus` component renders `result.message`, so the test exercises the browser-side rendering path.
+- Real Jira network and keychain behavior cannot be tested in the browser (Vitest jsdom). Full round-trip connection tests require the desktop app and a real Jira server — this is intentional.
 
 ---
 

@@ -151,7 +151,7 @@ App.tsx owns `AppPreferences` state. On mount: `loadPreferences()` → `setPrefs
 | `errors.rs` | `SourceError` enum with redacting `Display`; `is_secret_shaped()` and `redact()` helpers shared by config and credentials |
 | `config.rs` | Versioned source config schema (`SourcesConfig`, `SourceConfig::Jira`, `JiraSourceConfig`, `JiraAuthConfig`, `JiraProjectFilter`, `ConnectionTestSummary`, `ConnectionTestStatus`); URL normalization; secret-shaped metadata rejection; `load_sources_config` / `save_sources_config` over shared settings |
 | `credentials.rs` | `SourceCredentialKind`; deterministic ref builder; `set_source_credential_secret` / `load_source_credential_secret` / `delete_source_credential` over `SecretStore` trait; `remove_source_config_and_credentials` deletion helper |
-| `jira.rs` | `JiraConnectionTestResult`, `JiraConnectionTestStatus`, `JiraConnectionErrorCategory`, `JiraConnectionProject`; `jira_source_test_connection_with_store` adapter (returns `Unavailable` until issue #9); `JiraProjectClient` trait seam; `map_client_error` for safe error mapping |
+| `jira.rs` | `JiraConnectionTestResult`, `JiraConnectionTestStatus`, `JiraConnectionErrorCategory`, `JiraConnectionProject`; `jira_source_test_connection_with_store` adapter — resolves PAT, calls `RealJiraProjectClient`, deduplicates/sorts projects, maps errors via `map_client_error`; `JiraProjectClient` trait seam for test injection |
 
 ### Tauri commands
 
@@ -180,6 +180,16 @@ All commands appear in both `collect_commands!` invocations in `src-tauri/src/li
 - SQLite stores only credential refs (`source.jira.<id>.pat`), never PAT values
 - `source_config_remove` deletes the owned keychain credential when a source is removed
 - `jira_source_test_connection` command has no DB state parameter to prevent lock contention during future network calls
+
+## Jira API client (added 2026-05-24, issue #9)
+
+- `src-tauri/src/sources/jira_client.rs` — Reusable blocking Jira Data Center REST client. Normalizes server URLs, holds PATs in a `SecretString` redacting wrapper, sends bearer-authenticated `ureq` GET requests with bounded retry/rate-limit logic, and exposes page-level and all-pages helpers for issue fetch, JQL search, and changelog pagination. All calls are synchronous (blocking) to keep the architecture simple until a background sync scheduler is added.
+  - Public methods: `new`, `new_with_sleeper`, `get_issue_with_changelog`, `search_issues_page`, `search_issues_all`, `get_issue_changelog_page`, `get_issue_changelog_all`, `list_projects`
+  - `Sleeper` trait injected for tests — use `RecordingSleeper` in tests to assert retry delays without real waits.
+  - `MAX_PAGINATION_PAGES = 200` caps all-pages helpers against infinite loops.
+- `src-tauri/src/sources/jira_types.rs` — Typed serde structs for Jira Data Center 10.3 response fields: `JiraIssue`, `JiraIssueFields`, `JiraSearchPage`, `JiraChangelogPage`, `JiraChangelogEntry`, `JiraChangelogItem`, `JiraProject`, `JiraUser`, `JiraNamedValue`. All Jira user identity fields are optional (they vary by DC version and config). Unknown fields are ignored.
+- `src-tauri/src/sources/jira_errors.rs` — Safe public error enum `JiraApiError`. Maps HTTP/network/decode failures to redacted categories. `Display` never includes PATs, auth headers, raw bodies, or upstream stack traces.
+- `src-tauri/src/sources/jira.rs` — Source-settings adapter. Resolves pending or saved PAT, calls `RealJiraProjectClient` (wraps `JiraApiClient::list_projects`), deduplicates and sorts projects by key, and maps `JiraApiError` → `JiraClientError` → `JiraConnectionErrorCategory` for the UI. The `JiraProjectClient` trait seam allows injecting a fake client in Rust tests.
 
 ---
 

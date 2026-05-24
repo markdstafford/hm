@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test("Sources settings add Jira unavailable smoke path", async ({ page }) => {
+test("Sources settings add Jira browser-only unavailable smoke path", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /open settings/i }).click();
   await page.getByRole("button", { name: /^sources$/i }).click();
@@ -10,9 +10,14 @@ test("Sources settings add Jira unavailable smoke path", async ({ page }) => {
   await page.getByLabel(/server url/i).fill("http://localhost:2990/jira");
   await page.getByLabel(/personal access token/i).fill("test-pat-not-secret");
   await page.getByRole("button", { name: /test connection/i }).click();
-  await expect(page.getByText(/issue #9/i)).toBeVisible();
 
-  // Save is enabled because server URL and PAT are valid (issue #9 unavailable
+  // In a browser-only (non-Tauri) environment, the Jira connection test cannot
+  // reach the keychain or network. The browser fallback message is shown instead.
+  await expect(
+    page.getByText(/live connection testing is not available/i),
+  ).toBeVisible();
+
+  // Save is enabled because server URL and PAT are valid (browser-only unavailable
   // state still permits saving metadata without project discovery).
   await page.getByRole("button", { name: /^save$/i }).click();
 

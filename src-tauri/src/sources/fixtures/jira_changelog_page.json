@@ -1,0 +1,22 @@
+{
+  "startAt": 0,
+  "maxResults": 2,
+  "total": 2,
+  "histories": [
+    {
+      "id": "30001",
+      "author": { "accountId": "synthetic-account-1", "displayName": "Elena Example", "active": true },
+      "created": "2026-05-03T11:00:00.000+0000",
+      "items": [
+        { "field": "status", "fieldtype": "jira", "from": "10", "fromString": "Open", "to": "11", "toString": "In Progress" }
+      ]
+    },
+    {
+      "id": "30002",
+      "created": "2026-05-04T12:00:00.000+0000",
+      "items": [
+        { "field": "assignee", "fromString": "Elena Example", "toString": "Tarek Example" }
+      ]
+    }
+  ]
+}
