@@ -19,6 +19,8 @@ export const commands = {
 	aiProfileSmokeTest: (profileName: string) => typedError<SmokeTestResult, string>(__TAURI_INVOKE("ai_profile_smoke_test", { profileName })),
 	sourceConfigGet: () => typedError<SourcesConfig, string>(__TAURI_INVOKE("source_config_get")),
 	sourceConfigSave: (config: SourcesConfig) => typedError<null, string>(__TAURI_INVOKE("source_config_save", { config })),
+	sourceCredentialSecretSet: (sourceId: string, kind: SourceCredentialKind, value: string) => typedError<string, string>(__TAURI_INVOKE("source_credential_secret_set", { sourceId, kind, value })),
+	sourceCredentialDelete: (credentialRef: string) => typedError<null, string>(__TAURI_INVOKE("source_credential_delete", { credentialRef })),
 };
 
 /* Types */
@@ -112,6 +114,8 @@ export type SmokeTestStatus = "NotRun" | "Running" | "Success" | "Error";
 export type SourceConfig = {
 	kind: "Jira",
 } & JiraSourceConfig;
+
+export type SourceCredentialKind = "JiraPat";
 
 export type SourcesConfig = {
 	version: number,

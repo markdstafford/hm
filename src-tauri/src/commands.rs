@@ -122,6 +122,9 @@ use crate::sources::config::{
     JiraAuthConfig, JiraProjectFilter, JiraSourceConfig, SourceConfig, SourcesConfig,
 };
 use crate::ai::credentials::{delete_keychain_credential_secret, set_keychain_credential_secret};
+use crate::sources::credentials::{
+    set_source_credential_secret, delete_source_credential, SourceCredentialKind,
+};
 use crate::ai::service::{smoke_test_profile_with_config, SmokeTestResult};
 
 #[tauri::command]
@@ -193,6 +196,28 @@ pub fn source_config_save(config: SourcesConfig, db: tauri::State<'_, Mutex<rusq
     save_sources_config(&conn, &config).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+#[specta::specta]
+pub fn source_credential_secret_set(
+    source_id: String,
+    kind: SourceCredentialKind,
+    value: String,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<String, String> {
+    set_source_credential_secret(&source_id, kind, &value, store.0.as_ref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn source_credential_delete(
+    credential_ref: String,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<(), String> {
+    delete_source_credential(&credential_ref, store.0.as_ref())
+        .map_err(|e| e.to_string())
+}
+
 // Ensure specta sees all source config types for TypeScript binding generation.
 // These types are used in the commands above but referenced here explicitly so
 // the specta type registry picks them up even if inference misses a variant.
@@ -205,5 +230,6 @@ const _: () = {
         _assert_specta::<JiraProjectFilter>();
         _assert_specta::<ConnectionTestSummary>();
         _assert_specta::<ConnectionTestStatus>();
+        _assert_specta::<SourceCredentialKind>();
     }
 };
