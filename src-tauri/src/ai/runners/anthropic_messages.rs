@@ -59,6 +59,7 @@ impl AiRunnerClient for AnthropicMessagesRunner {
         let result = agent
             .post(&url)
             .set("x-api-key", api_key)
+            .set("api-key", api_key)
             .set("anthropic-version", "2023-06-01")
             .set("content-type", "application/json")
             .send_json(&body);
