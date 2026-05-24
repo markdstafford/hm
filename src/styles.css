@@ -308,6 +308,11 @@
   /* Sidebar */
   --width-sidebar: 15.25rem; /* 244px */
 
+  --height-title-bar:  2rem;     /* 32px */
+  --height-header-bar: 2.5rem;   /* 40px */
+  --height-footer:     1.75rem;  /* 28px */
+  --width-traffic-light: 4.5rem; /* 72px */
+
   /* Motion */
   --duration-hover:  100ms;
   --duration-enter:  150ms;
