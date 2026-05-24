@@ -22,6 +22,7 @@ export const commands = {
 	sourceCredentialSecretSet: (sourceId: string, kind: SourceCredentialKind, value: string) => typedError<string, string>(__TAURI_INVOKE("source_credential_secret_set", { sourceId, kind, value })),
 	sourceCredentialDelete: (credentialRef: string) => typedError<null, string>(__TAURI_INVOKE("source_credential_delete", { credentialRef })),
 	sourceConfigRemove: (sourceId: string) => typedError<null, string>(__TAURI_INVOKE("source_config_remove", { sourceId })),
+	jiraSourceTestConnection: (source: JiraSourceConfig, pendingPat: string | null) => typedError<JiraConnectionTestResult, string>(__TAURI_INVOKE("jira_source_test_connection", { source, pendingPat })),
 };
 
 /* Types */
@@ -79,6 +80,25 @@ export type ConnectionTestSummary = {
 export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
 
 export type JiraAuthConfig = { type: "Pat"; credential_ref: string };
+
+export type JiraConnectionErrorCategory = "InvalidUrl" | "AuthFailed" | "Forbidden" | "Network" | "RateLimited" | "Server" | "Unsupported" | "Unavailable" | "MissingCredential";
+
+export type JiraConnectionProject = {
+	key: string,
+	name: string | null,
+	id: string | null,
+};
+
+export type JiraConnectionTestResult = {
+	status: JiraConnectionTestStatus,
+	tested_at: string,
+	message: string,
+	suggested_fix: string | null,
+	projects: JiraConnectionProject[],
+	category: JiraConnectionErrorCategory | null,
+};
+
+export type JiraConnectionTestStatus = "NotTested" | "Testing" | "Success" | "Error" | "Unavailable";
 
 export type JiraProjectFilter = {
 	key: string,

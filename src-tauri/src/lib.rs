@@ -32,6 +32,7 @@ pub fn run() {
         commands::source_credential_secret_set,
         commands::source_credential_delete,
         commands::source_config_remove,
+        commands::jira_source_test_connection,
     ]);
 
     #[cfg(debug_assertions)]
@@ -100,6 +101,7 @@ mod tests {
                     commands::source_credential_secret_set,
                     commands::source_credential_delete,
                     commands::source_config_remove,
+                    commands::jira_source_test_connection,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)
