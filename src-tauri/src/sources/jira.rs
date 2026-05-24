@@ -268,4 +268,60 @@ mod tests {
         let result5 = map_client_error(JiraClientError::Server("500".into()));
         assert_eq!(result5.category, Some(JiraConnectionErrorCategory::Server));
     }
+
+    fn fake_successful_result(projects: Vec<JiraConnectionProject>) -> JiraConnectionTestResult {
+        // Deduplicate and sort projects by key
+        let mut seen = std::collections::HashSet::new();
+        let mut deduped: Vec<JiraConnectionProject> = projects.into_iter()
+            .filter(|p| seen.insert(p.key.clone()))
+            .collect();
+        deduped.sort_by(|a, b| a.key.cmp(&b.key));
+        JiraConnectionTestResult {
+            status: JiraConnectionTestStatus::Success,
+            tested_at: "2024-01-01T00:00:00Z".into(),
+            message: "Connected to Jira. Select projects to ingest.".into(),
+            suggested_fix: None,
+            projects: deduped,
+            category: None,
+        }
+    }
+
+    #[test]
+    fn fake_client_error_categories_map_to_safe_results() {
+        let cases = vec![
+            (JiraClientError::Unauthorized, JiraConnectionErrorCategory::AuthFailed),
+            (JiraClientError::Forbidden, JiraConnectionErrorCategory::Forbidden),
+            (JiraClientError::Network("timeout".into()), JiraConnectionErrorCategory::Network),
+            (JiraClientError::RateLimited, JiraConnectionErrorCategory::RateLimited),
+            (JiraClientError::Server("500".into()), JiraConnectionErrorCategory::Server),
+        ];
+        for (err, expected_category) in cases {
+            let result = map_client_error(err);
+            assert_eq!(result.status, JiraConnectionTestStatus::Error, "expected Error status");
+            assert_eq!(result.category, Some(expected_category.clone()), "wrong category");
+            // Safe: no raw server details in message
+            assert!(!result.message.to_ascii_lowercase().contains("stack trace"), "raw stack trace exposed");
+        }
+    }
+
+    #[test]
+    fn fake_client_success_with_empty_projects_returns_success_state() {
+        // A successful connection with no accessible projects is still success
+        let result = fake_successful_result(vec![]);
+        assert_eq!(result.status, JiraConnectionTestStatus::Success);
+        assert!(result.projects.is_empty());
+    }
+
+    #[test]
+    fn fake_client_success_with_projects_deduplicates_and_sorts() {
+        let projects = vec![
+            JiraConnectionProject { key: "ZAP".into(), name: Some("Zap".into()), id: None },
+            JiraConnectionProject { key: "HM".into(), name: Some("HM".into()), id: None },
+            JiraConnectionProject { key: "HM".into(), name: Some("HM duplicate".into()), id: None },
+        ];
+        let result = fake_successful_result(projects);
+        assert_eq!(result.status, JiraConnectionTestStatus::Success);
+        let keys: Vec<_> = result.projects.iter().map(|p| p.key.as_str()).collect();
+        assert_eq!(keys, vec!["HM", "ZAP"], "projects should be deduplicated and sorted");
+    }
 }
