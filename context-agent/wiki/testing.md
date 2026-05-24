@@ -185,6 +185,25 @@ vi.mock("../bindings", () => ({
 
 `e2e/sources.spec.ts` covers: Settings → Sources → Add source → Jira Data Center → fill URL + PAT → Test connection → verify "issue #9" message visible. This test requires a Vite dev server for this workspace (`npm run tauri dev`) — it cannot run against a dev server for another workspace.
 
+## Jira API client tests (added 2026-05-24, issue #9)
+
+### Rust tests
+
+- Synthetic JSON fixtures live in `src-tauri/src/sources/fixtures/`. All files contain only `*.example.invalid` URLs, fake names (`Elena Example`, `Tarek Example`), and invented project keys. Do not copy real Jira responses or real project data into fixtures.
+- Run Jira client tests: `cd src-tauri && cargo test sources::jira_client::tests -- --nocapture`
+- Run Jira types tests: `cd src-tauri && cargo test sources::jira_types::tests -- --nocapture`
+- Run Jira errors tests: `cd src-tauri && cargo test sources::jira_errors::tests -- --nocapture`
+- Run source adapter tests: `cd src-tauri && cargo test sources::jira -- --nocapture`
+- Mock-server tests use `tiny_http::Server::http("127.0.0.1:0")` — no real Jira server or PAT needed.
+- Retry and rate-limit tests inject `RecordingSleeper` so delays are asserted without real waits.
+- `MAX_PAGINATION_PAGES = 200` prevents infinite loops; the `search_issues_all_terminates_when_server_omits_total_and_returns_full_pages` test verifies this guard.
+
+### Frontend tests
+
+- `src/sources/defaults.ts` exports `JIRA_UNAVAILABLE_MESSAGE` used by `storage.ts` as the browser-only fallback when `isTauri()` is false.
+- `src/settings/SourcesSettings.test.tsx` mocks `jiraSourceTestConnection` to return `Unavailable` with the browser fallback message. The `ConnectionTestStatus` component renders `result.message`, so the test exercises the browser-side rendering path.
+- Real Jira network and keychain behavior cannot be tested in the browser (Vitest jsdom). Full round-trip connection tests require the desktop app and a real Jira server — this is intentional.
+
 ---
 
 ## AI provider testing (added 2026-05-24)
