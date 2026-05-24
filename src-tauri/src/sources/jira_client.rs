@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::sources::jira_errors::JiraApiError;
-use crate::sources::jira_types::{JiraIssue, JiraProject};
+use crate::sources::jira_types::{JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraProject, JiraSearchPage};
 
 // ── Secret string ─────────────────────────────────────────────────────────────
 
@@ -107,6 +107,62 @@ impl Sleeper for ThreadSleeper {
     }
 }
 
+/// Maximum number of pages fetched by any `*_all` pagination helper.
+/// Prevents infinite loops when a server omits `total` and returns repeating full pages.
+const MAX_PAGINATION_PAGES: usize = 200;
+
+// ── Pagination helpers ────────────────────────────────────────────────────────
+
+fn clamp_page_size(max_results: u32) -> u32 {
+    max_results.clamp(1, 100)
+}
+
+fn should_stop_pagination(
+    start_at: u32,
+    requested: u32,
+    returned: usize,
+    total: Option<u32>,
+) -> bool {
+    if returned == 0 {
+        return true;
+    }
+    let returned_u32 = returned as u32;
+    if let Some(total) = total {
+        return start_at.saturating_add(returned_u32) >= total;
+    }
+    returned_u32 < requested
+}
+
+// ── Search request ────────────────────────────────────────────────────────────
+
+/// Request parameters for a JQL search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JiraSearchRequest {
+    pub jql: String,
+    pub start_at: u32,
+    pub max_results: u32,
+}
+
+impl JiraSearchRequest {
+    pub fn new(jql: impl Into<String>) -> Self {
+        Self {
+            jql: jql.into(),
+            start_at: 0,
+            max_results: 50,
+        }
+    }
+
+    pub fn with_start_at(mut self, start_at: u32) -> Self {
+        self.start_at = start_at;
+        self
+    }
+
+    pub fn with_max_results(mut self, max_results: u32) -> Self {
+        self.max_results = clamp_page_size(max_results);
+        self
+    }
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 pub struct JiraApiClient {
@@ -201,6 +257,98 @@ impl JiraApiClient {
     /// List accessible projects.
     pub fn list_projects(&self) -> Result<Vec<JiraProject>, JiraApiError> {
         self.get_json("/rest/api/2/project")
+    }
+
+    /// Search issues by JQL, one page.
+    pub fn search_issues_page(
+        &self,
+        request: JiraSearchRequest,
+    ) -> Result<JiraSearchPage, JiraApiError> {
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        serializer.append_pair("jql", &request.jql);
+        serializer.append_pair("startAt", &request.start_at.to_string());
+        serializer.append_pair("maxResults", &clamp_page_size(request.max_results).to_string());
+        self.get_json(&format!("/rest/api/2/search?{}", serializer.finish()))
+    }
+
+    /// Search issues by JQL, all pages.
+    pub fn search_issues_all(
+        &self,
+        request: JiraSearchRequest,
+    ) -> Result<Vec<JiraIssue>, JiraApiError> {
+        let page_size = clamp_page_size(request.max_results);
+        let mut start_at = request.start_at;
+        let mut issues = Vec::new();
+        let mut pages_fetched = 0usize;
+        loop {
+            if pages_fetched >= MAX_PAGINATION_PAGES {
+                break;
+            }
+            let page = self.search_issues_page(JiraSearchRequest {
+                start_at,
+                max_results: page_size,
+                jql: request.jql.clone(),
+            })?;
+            let returned = page.issues.len();
+            let stop = should_stop_pagination(page.start_at, page.max_results, returned, page.total);
+            issues.extend(page.issues);
+            pages_fetched += 1;
+            if stop {
+                break;
+            }
+            let next_start = start_at.saturating_add(returned as u32);
+            if next_start <= start_at {
+                break;
+            }
+            start_at = next_start;
+        }
+        Ok(issues)
+    }
+
+    /// Fetch one changelog page.
+    pub fn get_issue_changelog_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraChangelogPage, JiraApiError> {
+        let issue = encode_path_segment(issue_id_or_key)?;
+        let max_results = clamp_page_size(max_results);
+        self.get_json(&format!(
+            "/rest/api/2/issue/{issue}/changelog?startAt={start_at}&maxResults={max_results}"
+        ))
+    }
+
+    /// Fetch all changelog entries, following pagination.
+    pub fn get_issue_changelog_all(
+        &self,
+        issue_id_or_key: &str,
+        max_results: u32,
+    ) -> Result<Vec<JiraChangelogEntry>, JiraApiError> {
+        let page_size = clamp_page_size(max_results);
+        let mut start_at = 0u32;
+        let mut histories = Vec::new();
+        let mut pages_fetched = 0usize;
+        loop {
+            if pages_fetched >= MAX_PAGINATION_PAGES {
+                break;
+            }
+            let page = self.get_issue_changelog_page(issue_id_or_key, start_at, page_size)?;
+            let returned = page.histories.len();
+            let stop =
+                should_stop_pagination(page.start_at, page.max_results, returned, page.total);
+            histories.extend(page.histories);
+            pages_fetched += 1;
+            if stop {
+                break;
+            }
+            let next_start = start_at.saturating_add(returned as u32);
+            if next_start <= start_at {
+                break;
+            }
+            start_at = next_start;
+        }
+        Ok(histories)
     }
 
     #[cfg(test)]
@@ -459,6 +607,155 @@ mod tests {
         assert!(encode_path_segment("../etc").is_err());
         assert!(encode_path_segment("HM-1").is_ok());
         assert!(encode_path_segment("HM 1").is_ok()); // spaces are URL-encoded
+    }
+
+    #[test]
+    fn search_issues_page_url_encodes_jql_and_pagination() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            // JQL "project = HM ORDER BY updated DESC" URL-encoded
+            assert_eq!(
+                request.url(),
+                "/rest/api/2/search?jql=project+%3D+HM+ORDER+BY+updated+DESC&startAt=0&maxResults=50"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_search_page.json"),
+                ))
+                .unwrap();
+        });
+        let page = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .search_issues_page(JiraSearchRequest::new("project = HM ORDER BY updated DESC"))
+            .unwrap();
+        assert_eq!(page.issues.len(), 2);
+    }
+
+    #[test]
+    fn search_issues_all_follows_two_pages_and_stops_on_total() {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let first = server.recv().unwrap();
+            assert!(first.url().contains("startAt=0"));
+            first
+                .respond(json_response(
+                    200,
+                    r#"{"startAt":0,"maxResults":2,"total":3,"issues":[{"id":"1","key":"HM-1","fields":{}},{"id":"2","key":"HM-2","fields":{}}]}"#,
+                ))
+                .unwrap();
+            let second = server.recv().unwrap();
+            assert!(second.url().contains("startAt=2"));
+            second
+                .respond(json_response(
+                    200,
+                    r#"{"startAt":2,"maxResults":2,"total":3,"issues":[{"id":"3","key":"HM-3","fields":{}}]}"#,
+                ))
+                .unwrap();
+        });
+        let issues = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .search_issues_all(JiraSearchRequest::new("project = HM").with_max_results(2))
+            .unwrap();
+        assert_eq!(
+            issues.iter().map(|i| i.key.as_str()).collect::<Vec<_>>(),
+            vec!["HM-1", "HM-2", "HM-3"]
+        );
+    }
+
+    #[test]
+    fn changelog_all_follows_two_pages() {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let first = server.recv().unwrap();
+            assert_eq!(
+                first.url(),
+                "/rest/api/2/issue/HM-1/changelog?startAt=0&maxResults=1"
+            );
+            first
+                .respond(json_response(
+                    200,
+                    r#"{"startAt":0,"maxResults":1,"total":2,"histories":[{"id":"1","created":"2026-05-01T00:00:00.000+0000","items":[]}]}"#,
+                ))
+                .unwrap();
+            let second = server.recv().unwrap();
+            assert_eq!(
+                second.url(),
+                "/rest/api/2/issue/HM-1/changelog?startAt=1&maxResults=1"
+            );
+            second
+                .respond(json_response(
+                    200,
+                    r#"{"startAt":1,"maxResults":1,"total":2,"histories":[{"id":"2","created":"2026-05-02T00:00:00.000+0000","items":[]}]}"#,
+                ))
+                .unwrap();
+        });
+        let histories = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .get_issue_changelog_all("HM-1", 1)
+            .unwrap();
+        assert_eq!(histories.len(), 2);
+        assert_eq!(histories[0].id, "1");
+        assert_eq!(histories[1].id, "2");
+    }
+
+    #[test]
+    fn search_issues_all_terminates_when_server_omits_total_and_returns_full_pages() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        // Server always returns a "full" page of 1 with no total — would loop forever without the cap
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            loop {
+                match server.recv() {
+                    Ok(request) => {
+                        let count = REQUEST_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
+                        request
+                            .respond(json_response(
+                                200,
+                                // No "total" field — short-page heuristic won't fire since page is "full"
+                                r#"{"startAt":0,"maxResults":1,"issues":[{"id":"1","key":"HM-1","fields":{}}]}"#,
+                            ))
+                            .unwrap();
+                        if count >= MAX_PAGINATION_PAGES + 5 {
+                            break; // Allow test to eventually complete even if the guard fails
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let issues = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .search_issues_all(JiraSearchRequest::new("project = HM").with_max_results(1))
+            .unwrap();
+
+        // Should have stopped at MAX_PAGINATION_PAGES (or fewer if stop condition kicked in)
+        assert!(
+            issues.len() <= MAX_PAGINATION_PAGES,
+            "collected {} issues, expected at most {}",
+            issues.len(),
+            MAX_PAGINATION_PAGES
+        );
+    }
+
+    #[test]
+    fn pagination_stop_conditions_are_bounded() {
+        // Empty returned → stop
+        assert!(should_stop_pagination(0, 50, 0, Some(100)));
+        // Total reached → stop
+        assert!(should_stop_pagination(50, 50, 50, Some(100)));
+        // Short page without total → stop
+        assert!(should_stop_pagination(0, 50, 12, None));
+        // Full page without total → continue
+        assert!(!should_stop_pagination(0, 50, 50, None));
+        // Page size 1, partial returns
+        assert!(should_stop_pagination(0, 1, 0, None));
     }
 }
 
