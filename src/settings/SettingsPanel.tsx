@@ -4,8 +4,8 @@ import { useState } from "react";
 import type { AppPreferences } from "../preferences";
 import { GeneralSettings } from "./GeneralSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
-
-type SettingsCategory = "general" | "appearance";
+import { AiProvidersSettings } from "./AiProvidersSettings";
+import type { SettingsCategory } from "./settingsTypes";
 
 interface SettingsPanelProps {
   open: boolean;
@@ -58,14 +58,27 @@ export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences, prefe
               >
                 Appearance
               </button>
+              <button
+                aria-current={category === "ai-providers" ? "page" : undefined}
+                onClick={() => setCategory("ai-providers")}
+                className={`flex items-center px-2 py-1.5 rounded text-sm font-medium text-left transition-colors ${
+                  category === "ai-providers"
+                    ? "text-text bg-surface"
+                    : "text-subtext hover:text-text hover:bg-surface/50"
+                }`}
+              >
+                AI providers
+              </button>
             </nav>
 
             {/* Content area */}
             <div className="flex-1 overflow-y-auto p-6">
               {category === "general" ? (
                 <GeneralSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} />
-              ) : (
+              ) : category === "appearance" ? (
                 <AppearanceSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} prefersDark={prefersDark} />
+              ) : (
+                <AiProvidersSettings />
               )}
             </div>
 

@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod commands;
 pub mod db;
 pub mod settings;
@@ -20,6 +21,11 @@ pub fn run() {
         commands::secret_delete,
         commands::shared_settings_get,
         commands::shared_settings_set,
+        commands::ai_provider_config_get,
+        commands::ai_provider_config_save,
+        commands::ai_credential_secret_set,
+        commands::ai_credential_secret_delete,
+        commands::ai_profile_smoke_test,
     ]);
 
     #[cfg(debug_assertions)]
@@ -78,6 +84,11 @@ mod tests {
                     commands::secret_delete,
                     commands::shared_settings_get,
                     commands::shared_settings_set,
+                    commands::ai_provider_config_get,
+                    commands::ai_provider_config_save,
+                    commands::ai_credential_secret_set,
+                    commands::ai_credential_secret_delete,
+                    commands::ai_profile_smoke_test,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)

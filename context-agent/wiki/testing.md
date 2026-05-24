@@ -147,3 +147,25 @@ Use `globalThis` (not `global`) — TypeScript in this project doesn't have the 
 ### E2E persistence limitation
 
 Full cross-session preference persistence (change → close → reopen → verify) requires a compiled Tauri `.app` binary and `tauri-driver` with an isolated app-data directory. The current Playwright config targets the Vite dev server only (`http://localhost:1420`), where Tauri IPC commands (`preferencesWrite` / `preferencesRead`) are unavailable. The persistence smoke in `e2e/hello.spec.ts` verifies the UI side (data-theme attribute update) but not file I/O. A `test.todo()` placeholder marks the pending coverage. Document this limitation in any CI configuration that runs `npm run test:e2e`.
+
+## AI provider testing (added 2026-05-24)
+
+### Rust tests
+
+- Runner tests use local mock HTTP servers only (`tiny_http::Server::http("127.0.0.1:0")`); no real provider credentials or network calls required.
+- Use fake secrets such as `sk-test-secret` only in in-memory stores and mock server assertions; assert they never appear in `Display` errors, `Debug` output, generated bindings, or UI text.
+- Regenerate bindings after changing AI commands or specta types: `cd src-tauri && cargo test generate_typescript_bindings`.
+- `LoadedCredentialSecret::new_for_test("name", "value")` constructs test secrets without touching the OS keychain.
+
+### Frontend tests
+
+- AI provider tests mock `../bindings` command functions (see `AiProvidersSettings.test.tsx`).
+- `validateAiProviderConfig` is a pure function; `validation.test.ts` tests it without any mocks.
+- `storage.ts` guards all Tauri calls with `isTauri()` check; non-Tauri (Vitest jsdom) returns safe fallbacks.
+
+### E2E limitations
+
+- Browser-only Playwright (`http://localhost:1420`) cannot exercise real Tauri keychain or SQLite commands.
+- AI provider e2e (`e2e/ai-providers.spec.ts`) covers tab navigation and empty-state rendering only.
+- Full credential/profile creation flow requires Tauri IPC — see `tauri-driver` upstream docs if deeper e2e is needed.
+- Run `npm run test:e2e` only when `npm run dev` (Vite) is running in a separate terminal.
