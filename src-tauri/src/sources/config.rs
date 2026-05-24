@@ -41,8 +41,8 @@ pub enum JiraAuthConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct JiraProjectFilter {
     pub key: String,
-    pub name: String,
-    pub id: String,
+    pub name: Option<String>,
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -321,8 +321,8 @@ mod tests {
                 .into_iter()
                 .map(|k| JiraProjectFilter {
                     key: k.to_string(),
-                    name: k.to_string(),
-                    id: k.to_string(),
+                    name: Some(k.to_string()),
+                    id: Some(k.to_string()),
                 })
                 .collect(),
             last_connection_test: None,
