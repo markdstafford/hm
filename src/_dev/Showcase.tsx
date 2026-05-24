@@ -135,7 +135,7 @@ export function Showcase() {
         <Card caption="TextField"><TextField aria-label="Demo" placeholder="Type…" /></Card>
         <Card caption="Field">
           <Field label="Email" help="We never share.">
-            {(id) => <TextField id={id} aria-label="Email" />}
+            {({ id, describedBy }) => <TextField id={id} aria-describedby={describedBy} aria-label="Email" />}
           </Field>
         </Card>
         <Card caption="Checkbox"><Checkbox label="Notify me" /></Card>

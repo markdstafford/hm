@@ -8,7 +8,7 @@ describe("Field", () => {
   it("associates label with control via htmlFor", () => {
     render(
       <Field label="Email">
-        {(id) => <TextField id={id} aria-label="Email" />}
+        {({ id }) => <TextField id={id} aria-label="Email" />}
       </Field>,
     );
     const input = screen.getByRole("textbox", { name: "Email" });
@@ -18,15 +18,31 @@ describe("Field", () => {
   it("renders error text", () => {
     render(
       <Field label="Email" error="Required">
-        {(id) => <TextField id={id} aria-label="Email" />}
+        {({ id }) => <TextField id={id} aria-label="Email" />}
       </Field>,
     );
     expect(screen.getByText("Required")).toBeInTheDocument();
   });
+  it("associates help text via aria-describedby", () => {
+    render(
+      <Field label="Email" help="We never share.">
+        {({ id, describedBy }) => (
+          <TextField id={id} aria-describedby={describedBy} aria-label="Email" />
+        )}
+      </Field>,
+    );
+    const input = screen.getByRole("textbox", { name: "Email" });
+    const describedBy = input.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const help = screen.getByText("We never share.");
+    expect(help.id).toBe(describedBy);
+  });
   it("has no axe violations", async () => {
     const { container } = render(
       <Field label="Email" help="We never share.">
-        {(id) => <TextField id={id} aria-label="Email" />}
+        {({ id, describedBy }) => (
+          <TextField id={id} aria-describedby={describedBy} aria-label="Email" />
+        )}
       </Field>,
     );
     expect(await axe(container)).toHaveNoViolations();
