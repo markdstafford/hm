@@ -112,40 +112,7 @@ The open issue describes flaky behavior in the helper under a specific load patt
 
 ## Design guidance
 
-`hm` adopts Episteme's design system as its starting point (see `wiki/design-system.md` in the Episteme repo) and adapts where the use case calls for it. The full token catalog will live in `hm`'s wiki later; this section records the high-level commitments.
-
-### Typography
-
-- UI text: **Inter Variable** — chrome (sidebar, toolbar, buttons, inputs, menus, dialogs)
-- Code/monospace: **Fira Code** — code blocks, inline code, file paths, identifiers
-- UI type scale: 11 / 12 / 13 / 14 / 16 px (xs / sm / base / md / lg)
-- Fonts are user-configurable post-v1 via per-user preferences (ADR-008)
-
-### Colors
-
-- Color space: **oklch** — perceptually uniform; theme adjustments are predictable
-- Default palette: **Catppuccin** — Latte (light mode) and Macchiato (dark mode)
-- Primary accent: **sapphire** — used for focus rings, selected states, links, primary button backgrounds
-- Both modes ship in v1 with equal design weight; default follows `prefers-color-scheme`, user can override
-- Configurable color schemes ship as a separate feature (see Related features → Configuration); the architecture supports swappable token sets via a `data-theme` attribute
-- WCAG AA contrast verified on all foreground/background pairings
-
-### Spacing
-
-- 4px base unit; discrete spacer set with intentional gaps to discourage over-granular use
-- Control heights: 24 / 28 / 32 px (sm / base / lg)
-- Sidebar fixed at 244px width
-
-### Icons
-
-- **Lucide React** — 16px for standard UI, 14px inline with text
-
-### Component patterns
-
-- **Primitives**: Radix UI (`@radix-ui/*` for dialog, popover, dropdown-menu, context-menu, tooltip, select) — accessibility primitives only; visual styling applied directly from design tokens
-- No shadcn; tokens are the single source of truth for visual styling
-- Tokens encoded as CSS custom properties in a Tailwind v4 `@theme {}` block
-- Motion bias: fewer, faster transitions. ~100ms for hover/active, ~150ms for entrances, ~100ms for exits, ~250ms only for deliberate layout shifts
+The design system — tokens, UI primitives, app shell, and visual patterns — lives in [`context-agent/design-system.md`](../../context-agent/design-system.md). That doc is authoritative for implementation. Default palette is Catppuccin (Latte / Macchiato) with a sapphire accent; default fonts are Inter Variable + Fira Code; both palette and fonts are user-configurable per ADR-008.
 
 ## Related features
 

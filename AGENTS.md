@@ -4,18 +4,21 @@
 
 0. Start from the ticket. Restate the requested outcome and identify the files or docs likely to matter.
 1. Read the context map below before planning. Use the app spec and ADRs to understand why the current shape exists before changing it.
-2. Keep human and agent context separate. Human-facing product and architecture docs live under `context-human/`; durable working notes for agents live under `context-agent/`.
-3. Update `context-agent/` as you learn durable implementation context during a feature, especially decisions, code maps, gotchas, and follow-up notes that future agents should not rediscover.
-4. Use `micromanager` for any document expected to be human-facing, including README changes, product specs, ADRs, issue writeups, plans intended for human review, and release notes.
-5. Work in small, reversible steps. Prefer incremental changes that can be tested and rolled back independently.
-6. Use red/green TDD for behavior changes: add or update a failing test, make it pass, then refactor while tests stay green.
-7. Verify with the narrowest relevant check first, then broader checks when available. Do not invent install, run, test, or build commands before the scaffold defines them.
+2. For any UI / shell / token work, read `context-agent/design-system.md` first. It is the source of truth for primitives, the app shell, and visual patterns.
+3. Keep human and agent context separate. Human-facing product and architecture docs live under `context-human/`; durable working notes for agents live under `context-agent/`.
+4. Update `context-agent/` as you learn durable implementation context during a feature, especially decisions, code maps, gotchas, and follow-up notes that future agents should not rediscover.
+5. **Maintenance contract for the design system.** Any change that adds, removes, or modifies a shared UI primitive, shell piece, token, or recurring pattern must update `context-agent/design-system.md` in the same PR. See the "Maintenance contract" section of that doc for the full rules. If the doc is out of date relative to the code, open a `docs(design-system):` PR with the correction first.
+6. Use `micromanager` for any document expected to be human-facing, including README changes, product specs, ADRs, issue writeups, plans intended for human review, and release notes.
+7. Work in small, reversible steps. Prefer incremental changes that can be tested and rolled back independently.
+8. Use red/green TDD for behavior changes: add or update a failing test, make it pass, then refactor while tests stay green.
+9. Verify with the narrowest relevant check first, then broader checks when available. Do not invent install, run, test, or build commands before the scaffold defines them.
 
 ## Context map
 
-- `context-human/specs/app.md` — product summary, requirements, planned stack, testing expectations, and design guidance for human review.
-- `context-human/adrs/` — accepted architecture decisions. Read the relevant ADR before changing auth, desktop framework, storage, history, AI provider routing, retrieval, or settings behavior.
+- `context-human/specs/app.md` — product summary, requirements, planned stack, testing expectations, and a short pointer to design-system.md for UI / shell concerns.
+- `context-human/adrs/` — accepted architecture decisions. Read the relevant ADR before changing auth, desktop framework, storage, history, AI provider routing, retrieval, settings behavior, or the app shell.
 - `context-agent/` — durable agent-maintained context. Create it when first needed; keep it separate from human-facing docs.
+- `context-agent/design-system.md` — **canonical reference** for tokens, UI primitives, the app shell, and visual patterns. Read this before any UI / shell / token change; update it in the same PR per the maintenance contract.
 - `context-agent/wiki/` — agent-maintained code maps, workflow notes, debugging notes, and implementation landmarks. Add concise pages as the codebase takes shape.
 - `context-agent/wiki/code-map.md` — preferred home for the evolving code map once the app scaffold exists.
 - `context-agent/wiki/testing.md` — preferred home for discovered test commands, test data notes, and red/green workflow notes once tooling exists.
