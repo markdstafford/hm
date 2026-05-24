@@ -28,9 +28,9 @@
 
 ## Current repository status
 
-- The app is in early development.
-- The Tauri/React/Rust scaffold is not present yet.
-- Do not invent run, test, or build commands until checked-in package or crate configuration defines them.
+- The app shell, all design-system primitives, and three placeholder pages (Inbox, Backlog hygiene, Jira viewer) are present.
+- The Tauri/React/Rust scaffold exists; `npm run lint`, `npm test`, `npm run build`, and `npm run tauri dev` are wired.
+- The Settings UI and Jira ingestion (#10) will build on top of this shell.
 
 ## Project boundaries
 
@@ -38,12 +38,13 @@
 - Keep source-system tokens out of files, logs, and the database. Tokens belong in the OS keychain or environment variables.
 - Route AI calls through the provider abstraction described by ADR-006.
 
-## Planned stack
+## Stack
 
 - Desktop shell: Tauri with a Rust core and TypeScript/React UI.
 - Styling: Tailwind v4 design tokens; no shadcn.
 - Data: SQLite plus sqlite-vec.
 - Testing once scaffolded: `cargo test`, `Vitest` + `React Testing Library`, `Playwright`, and `axe-core` where relevant.
+- Markdown rendering: react-markdown + remark-gfm; syntax highlighting via shiki using Catppuccin Latte / Macchiato themes.
 
 ## Provider notes
 

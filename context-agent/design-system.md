@@ -115,11 +115,15 @@ For any interactive component with accessibility requirements (focus management,
 | Radix package | Wrapped at | Use |
 | --- | --- | --- |
 | `@radix-ui/react-dialog` | `src/ui/overlays/Dialog.tsx` | Modals, confirm/destructive dialogs. |
+| `@radix-ui/react-alert-dialog` | `src/ui/overlays/AlertDialog.tsx` | Destructive / confirm dialogs. |
 | `@radix-ui/react-popover` | `src/ui/overlays/Popover.tsx` | Anchored menus, inline pickers. |
 | `@radix-ui/react-dropdown-menu` | `src/ui/overlays/DropdownMenu.tsx` | Action menus (`…` kebabs). |
 | `@radix-ui/react-context-menu` | `src/ui/overlays/ContextMenu.tsx` | Right-click menus on list rows. |
 | `@radix-ui/react-tooltip` | `src/ui/overlays/Tooltip.tsx` | Hover hints for icon-only buttons. |
 | `@radix-ui/react-select` | `src/ui/forms/Select.tsx` | Single-select dropdowns. |
+| `@radix-ui/react-checkbox` | `src/ui/forms/Checkbox.tsx` | Boolean toggle in lists. |
+| `@radix-ui/react-switch` | `src/ui/forms/Switch.tsx` | Inline boolean toggle. |
+| `@radix-ui/react-radio-group` | `src/ui/forms/RadioGroup.tsx` | Single-choice from a small set. |
 | `@radix-ui/react-tabs` | `src/ui/navigation/Tabs.tsx` | In-page section switching. |
 | `@radix-ui/react-toast` | `src/ui/feedback/Toast.tsx` | Ephemeral notifications. |
 | `@radix-ui/react-separator` | `src/ui/layout/Separator.tsx` | Hairline dividers between sections/groups. |
@@ -152,10 +156,12 @@ For any interactive component with accessibility requirements (focus management,
 | Component | Wraps | Purpose |
 | --- | --- | --- |
 | `TextField` | native `<input>` | Single-line text input. |
+| `Field` | composed (label + control + help/error) | Form field wrapper. Generates an id via `useId` and exposes it via a `(id) => ReactNode` render-prop so the child input is properly associated with the label. |
 | `Select` | `@radix-ui/react-select` | Single-select dropdown. |
 | `MultiSelect` | `Popover` + checkbox list | Multi-value selection. |
-| `Checkbox` | native `<input type="checkbox">` | Boolean toggle in lists. |
-| `Toggle` | `@radix-ui/react-toggle` (add when needed) | Inline boolean (enable feature, etc.). |
+| `Checkbox` | `@radix-ui/react-checkbox` | Boolean toggle in lists. |
+| `Switch` | `@radix-ui/react-switch` | Inline boolean toggle. |
+| `RadioGroup` | `@radix-ui/react-radio-group` | Single-choice from a small set. Compound: `RadioGroup` + `RadioGroup.Item` (each item carries its own label). |
 
 ### Overlays — `src/ui/overlays/`
 
@@ -164,6 +170,7 @@ Everything that floats above content.
 | Component | Wraps | Purpose |
 | --- | --- | --- |
 | `Dialog` | `@radix-ui/react-dialog` | Modals, confirm dialogs. |
+| `AlertDialog` | `@radix-ui/react-alert-dialog` | Destructive / confirm dialog. Compound: `Root \| Trigger \| Content \| Title \| Description \| Cancel \| Action`. |
 | `Popover` | `@radix-ui/react-popover` | Anchored menus, inline pickers. |
 | `DropdownMenu` | `@radix-ui/react-dropdown-menu` | Action menus (kebab `…`). |
 | `ContextMenu` | `@radix-ui/react-context-menu` | Right-click menus. |
@@ -215,13 +222,29 @@ Composable pieces used by the shell's sidebar column.
 | `Toast` | `@radix-ui/react-toast` | Ephemeral notifications (save errors, batch action results). |
 | `EmptyState` | layout | "No results" / "Nothing here yet" placeholders. |
 | `StatusDot` | layout | Small colored dot (sync, presence, badge). |
+| `Spinner` | layout | Indeterminate progress affordance. `label` exposes accessible name via `role="status"`. |
+| `Skeleton` | layout | Placeholder shape for loading content. Renders with `aria-hidden`. |
 
 ### Data — `src/ui/data/`
 
 | Component | Wraps | Purpose |
 | --- | --- | --- |
 | `Avatar` | layout | User / scope visual (initial or image). |
+| `Badge` | layout | Small label pill. Tones: neutral / primary / green / red / yellow / mauve / peach. |
+| `Tag` | layout | Removable label with optional `onRemove` callback. |
 | `ConfidenceChip` | layout | AI-confidence percentage chip with high/low styling (≥85% = primary accent; below = muted). |
+
+### Text — `src/ui/text/`
+
+| Component | Wraps | Purpose |
+| --- | --- | --- |
+| `Heading` | native `<h1>`–`<h6>` | Page and section titles. `level` 1–6 maps to the typography scale. |
+| `Link` | native `<a>` | Inline link. External URLs (matched by `^https?://`) get `target="_blank"` and `rel="noreferrer noopener"`; relative URLs render plain. |
+| `InlineCode` | native `<code>` | Inline `<code>` with mono font and subtle surface background. |
+| `CodeBlock` | `shiki` (async) | Fenced code block with syntax highlighting. Theme follows `data-theme-mode` on `<html>` (Catppuccin Latte for light, Macchiato for dark). Renders an unstyled `<pre><code>` fallback while shiki resolves. |
+| `Markdown` | `react-markdown` + `remark-gfm` | Display-only Markdown. Renders GFM (tables, task lists). Single newlines do NOT produce `<br>`. Image nodes render as `<span class="italic text-subtext">[image: alt]</span>` (no remote fetches at v1). |
+
+**Future: rich text editing.** A write surface (e.g. TipTap) is not part of v1. When an editor ships, it will live alongside `Markdown` under `src/ui/text/`. Until then, `Markdown` is display-only.
 
 ### Layout — `src/ui/layout/`
 
@@ -291,13 +314,7 @@ Persistent ~28px row at the very bottom (`--height-footer`). Three zones:
 
 ### Composer
 
-`<AppShell>` at `src/shell/AppShell.tsx` composes the layout. It accepts content for the six row × column zones plus the footer, and owns:
-
-- Sidebar visibility state (visible / hidden / overlay).
-- Viewport breakpoint detection (`src/shell/useViewportBreakpoint.ts`).
-- Sidebar-toggle keyboard shortcut (`src/shell/useSidebarToggle.ts`).
-- Drag-region wiring on the correct elements.
-- Scroll-collapse behavior when configured via user preferences.
+`<AppShell>` at `src/shell/AppShell.tsx` composes the layout. The API is **flat slot props** — one prop per zone: `sidebarTitleBar`, `sidebarHeader`, `sidebarContent`, `mainTitleBar`, `mainHeader`, `mainContent`, `footerLeft`, `footerCenter`, `footerRight`, plus an optional `scrollCollapse` prop (default `"none"`) reserved for the user-configurable behavior below. The shell internally owns sidebar visibility (via `useSidebarToggle`), breakpoint detection (`useViewportBreakpoint`), the overlay drawer at narrow widths, and drag-region wiring on the title-bar spacers.
 
 Feature pages compose against the shell by providing children for the appropriate zones. See "Page composer pattern" below + `src/features/<feature-name>/`.
 
@@ -449,6 +466,24 @@ When a view does **not** have a right rail, the footer-right zone shows only AI 
 ### Theme
 
 Components respect the user's theme preference. The `data-theme` attribute on `<html>` (`latte` / `macchiato`) determines which Catppuccin variant is active. Always write components against semantic tokens (`--color-text`, `--color-primary`, etc.), never against `--ctp-*` directly.
+
+### Keyboard shortcuts
+
+Bindings are registered through `useShortcut(binding, handler, options?)` (`src/shell/useShortcut.ts`). Display them with `<KeyboardShortcut binding="…" />`.
+
+| Pattern | Binding form | Example |
+| --- | --- | --- |
+| Single key | string | `useShortcut("[", …)` |
+| Combo | string with `+` separating modifiers | `useShortcut("⌘+shift+d", …)` |
+| Sequence | array of strings | `useShortcut(["g", "i"], …)` |
+
+**Display.** The `KeyboardShortcut` primitive renders the binding with `⌘ ⌥ ⌃ ⇧` glyphs on macOS and spelled `Ctrl+Shift+…` elsewhere. Sequences render each step as a separate `<kbd>` joined by the word `then`.
+
+**Scopes.** `scope: "global"` (default) registers a window-level listener; `scope: "page"` is intended for page-local bindings (currently equivalent to global — mounting scope determines lifetime).
+
+**Form-field filter.** By default `useShortcut` ignores keypresses when focus is in `INPUT` / `TEXTAREA` / `[contenteditable]`. Pass `allowInForm: true` to opt out (e.g. the `⌘+shift+d` showcase shortcut).
+
+**Sequence timeout.** Default `1500ms` between steps. Configurable via `sequenceTimeoutMs`.
 
 ---
 
