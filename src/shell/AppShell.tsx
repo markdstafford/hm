@@ -84,10 +84,11 @@ export function AppShell({
         {/* Overlay drawer (narrow + visible) */}
         {overlay && (
           <>
-            <div
-              role="presentation"
+            <button
+              type="button"
+              aria-label="Dismiss sidebar"
               onClick={dismissOverlay}
-              className="absolute inset-0 bg-crust/50 z-30"
+              className="absolute inset-0 bg-crust/50 z-30 cursor-default"
               style={{ bottom: "var(--height-footer)" }}
             />
             <aside

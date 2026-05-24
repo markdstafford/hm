@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { axe } from "jest-axe";
@@ -42,5 +42,40 @@ describe("AppShell", () => {
     const { container } = harness();
     const spacers = container.querySelectorAll("[data-tauri-drag-region]");
     expect(spacers.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("AppShell narrow mode", () => {
+  beforeEach(() => {
+    window.matchMedia = ((q: string) => ({
+      matches: q.includes("max-width: 899px"),
+      media: q, onchange: null,
+      addListener: () => {}, removeListener: () => {},
+      addEventListener: () => {}, removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  });
+  afterEach(() => {
+    // restore the broader test setup's stub
+    window.matchMedia = ((q: string) => ({
+      matches: false, media: q, onchange: null,
+      addListener: () => {}, removeListener: () => {},
+      addEventListener: () => {}, removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  });
+
+  it("clicking the dim backing dismisses the overlay", () => {
+    harness();
+    const dismiss = screen.getByRole("button", { name: "Dismiss sidebar" });
+    fireEvent.click(dismiss);
+    // overlay drawer should be gone
+    expect(screen.queryByRole("button", { name: "Dismiss sidebar" })).toBeNull();
+  });
+
+  it("Escape dismisses the overlay", () => {
+    harness();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("button", { name: "Dismiss sidebar" })).toBeNull();
   });
 });
