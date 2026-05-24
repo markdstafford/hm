@@ -228,7 +228,10 @@ impl JiraApiClient {
             .set("User-Agent", &self.user_agent)
             .call()
         {
-            Ok(resp) => resp.into_json::<T>().map_err(|_| JiraApiError::Decode),
+            Ok(resp) => {
+                let _rate_limit_headers = parse_rate_limit_headers(&resp);
+                resp.into_json::<T>().map_err(|_| JiraApiError::Decode)
+            }
             Err(ureq::Error::Status(status, resp)) => {
                 let retry_after = parse_retry_after_header(resp.header("Retry-After"));
                 Err(JiraApiError::from_status(status, retry_after))
@@ -237,12 +240,43 @@ impl JiraApiClient {
         }
     }
 
-    /// GET request with retry (currently just calls send_get_once; Task 6 adds retry loop).
+    /// GET request with bounded retry loop.
     fn get_json<T: serde::de::DeserializeOwned>(
         &self,
         path_and_query: &str,
     ) -> Result<T, JiraApiError> {
-        self.send_get_once(path_and_query)
+        let attempts = self.retry_policy.max_attempts.max(1);
+        let mut last_error: Option<JiraApiError> = None;
+        for attempt_index in 0..attempts {
+            match self.send_get_once(path_and_query) {
+                Ok(value) => return Ok(value),
+                Err(err) if err.is_retryable() && attempt_index + 1 < attempts => {
+                    let delay_ms = self.delay_for_attempt(attempt_index, &err);
+                    self.sleeper.sleep_ms(delay_ms);
+                    last_error = Some(err);
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Err(last_error.unwrap_or(JiraApiError::Network))
+    }
+
+    fn delay_for_attempt(&self, attempt_index: usize, err: &JiraApiError) -> u64 {
+        // If Retry-After is present, honor it (capped at max_retry_after_seconds)
+        if let Some(retry_after) = err.retry_after_duration() {
+            let max_ms = self.rate_limit_policy.max_retry_after_seconds.saturating_mul(1_000);
+            return (retry_after.as_millis() as u64).min(max_ms);
+        }
+        // For rate-limited responses without Retry-After, use conservative fallback delay
+        if matches!(err, JiraApiError::RateLimited { .. }) {
+            return self.rate_limit_policy.fallback_delay_ms;
+        }
+        // For transient 5xx / network errors, use exponential backoff
+        let exponential = self
+            .retry_policy
+            .base_delay_ms
+            .saturating_mul(1u64 << attempt_index.min(10));
+        exponential.min(self.retry_policy.max_delay_ms)
     }
 
     /// Fetch one issue by key or id with embedded changelog.
@@ -374,6 +408,27 @@ fn join_api_path(base_url: &str, path_and_query: &str) -> String {
 
 fn parse_retry_after_header(value: Option<&str>) -> Option<u64> {
     value.and_then(|raw| raw.trim().parse::<u64>().ok())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct JiraRateLimitHeaders {
+    limit: Option<u64>,
+    remaining: Option<u64>,
+    reset: Option<String>,
+    near_limit: Option<bool>,
+}
+
+fn parse_rate_limit_headers(resp: &ureq::Response) -> JiraRateLimitHeaders {
+    JiraRateLimitHeaders {
+        limit: resp.header("X-RateLimit-Limit").and_then(|v| v.parse().ok()),
+        remaining: resp
+            .header("X-RateLimit-Remaining")
+            .and_then(|v| v.parse().ok()),
+        reset: resp.header("X-RateLimit-Reset").map(str::to_string),
+        near_limit: resp
+            .header("X-RateLimit-NearLimit")
+            .and_then(|v| v.parse().ok()),
+    }
 }
 
 // ── URL normalization ──────────────────────────────────────────────────────────
@@ -756,6 +811,176 @@ mod tests {
         assert!(!should_stop_pagination(0, 50, 50, None));
         // Page size 1, partial returns
         assert!(should_stop_pagination(0, 1, 0, None));
+    }
+
+    struct RecordingSleeper {
+        sleeps: Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl RecordingSleeper {
+        fn new() -> (Self, Arc<Mutex<Vec<u64>>>) {
+            let sleeps = Arc::new(Mutex::new(Vec::new()));
+            (Self { sleeps: Arc::clone(&sleeps) }, sleeps)
+        }
+    }
+
+    impl Sleeper for RecordingSleeper {
+        fn sleep_ms(&self, millis: u64) {
+            self.sleeps.lock().unwrap().push(millis);
+        }
+    }
+
+    #[test]
+    fn retries_5xx_then_succeeds_without_real_sleep() {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            server.recv().unwrap().respond(json_response(503, "{}")).unwrap();
+            server
+                .recv()
+                .unwrap()
+                .respond(json_response(200, include_str!("fixtures/jira_projects.json")))
+                .unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let mut cfg = config(&base_url, "secret-jira-pat-123");
+        cfg.retry_policy = RetryPolicy {
+            max_attempts: 2,
+            base_delay_ms: 25,
+            max_delay_ms: 100,
+        };
+        let projects = JiraApiClient::new_with_sleeper(cfg, Arc::new(sleeper))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 2);
+        let sleeps = recorded_sleeps.lock().unwrap().clone();
+        assert_eq!(sleeps, vec![25], "expected exactly one delay of 25ms after first 503");
+    }
+
+    #[test]
+    fn does_not_retry_non_retryable_statuses() {
+        let base_url = spawn_json_server(|request| {
+            request
+                .respond(json_response(403, r#"{"errorMessages":["denied"]}"#))
+                .unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let err = JiraApiClient::new_with_sleeper(config(&base_url, "secret-jira-pat-123"), Arc::new(sleeper))
+            .unwrap()
+            .list_projects()
+            .unwrap_err();
+        assert_eq!(err, JiraApiError::Forbidden);
+        assert!(
+            recorded_sleeps.lock().unwrap().is_empty(),
+            "should not sleep on non-retryable 403"
+        );
+    }
+
+    #[test]
+    fn honors_429_retry_after_and_exhaustion_is_safe() {
+        // Single-attempt policy — 429 with Retry-After should be returned immediately
+        // (no more attempts left), and no sleep should occur
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let response = Response::from_string(r#"{"errorMessages":["rate limited"]}"#)
+                .with_status_code(StatusCode(429))
+                .with_header(Header::from_bytes(&b"Retry-After"[..], &b"2"[..]).unwrap());
+            server.recv().unwrap().respond(response).unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let err = JiraApiClient::new_with_sleeper(
+            config(&base_url, "secret-jira-pat-123"),
+            Arc::new(sleeper),
+        )
+        .unwrap()
+        .list_projects()
+        .unwrap_err();
+        assert_eq!(
+            err,
+            JiraApiError::RateLimited {
+                retry_after_seconds: Some(2)
+            }
+        );
+        assert!(
+            recorded_sleeps.lock().unwrap().is_empty(),
+            "one-attempt policy must not sleep after exhausted attempts"
+        );
+    }
+
+    #[test]
+    fn retries_429_without_retry_after_uses_fallback_delay() {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            // First request: 429 with no Retry-After header
+            let response_429 = Response::from_string(r#"{"errorMessages":["rate limited"]}"#)
+                .with_status_code(StatusCode(429));
+            server.recv().unwrap().respond(response_429).unwrap();
+            // Second request: success
+            server
+                .recv()
+                .unwrap()
+                .respond(json_response(200, include_str!("fixtures/jira_projects.json")))
+                .unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let mut cfg = config(&base_url, "secret-jira-pat-123");
+        cfg.retry_policy = RetryPolicy {
+            max_attempts: 2,
+            base_delay_ms: 5,    // Small to confirm fallback overrides base
+            max_delay_ms: 10,
+        };
+        cfg.rate_limit_policy = RateLimitPolicy {
+            fallback_delay_ms: 500,
+            max_retry_after_seconds: 60,
+        };
+        let projects = JiraApiClient::new_with_sleeper(cfg, Arc::new(sleeper))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 2);
+        let sleeps = recorded_sleeps.lock().unwrap().clone();
+        assert_eq!(
+            sleeps,
+            vec![500],
+            "429 without Retry-After should use fallback_delay_ms=500, not base_delay_ms=5"
+        );
+    }
+
+    #[test]
+    fn retries_429_with_retry_after_delay_when_budget_remains() {
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            // First request: 429 with Retry-After: 1 second
+            let response_429 = Response::from_string(r#"{"errorMessages":["rate limited"]}"#)
+                .with_status_code(StatusCode(429))
+                .with_header(Header::from_bytes(&b"Retry-After"[..], &b"1"[..]).unwrap());
+            server.recv().unwrap().respond(response_429).unwrap();
+            // Second request: success
+            server
+                .recv()
+                .unwrap()
+                .respond(json_response(200, include_str!("fixtures/jira_projects.json")))
+                .unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let mut cfg = config(&base_url, "secret-jira-pat-123");
+        cfg.retry_policy = RetryPolicy {
+            max_attempts: 2,
+            base_delay_ms: 250,
+            max_delay_ms: 1_000,
+        };
+        let projects = JiraApiClient::new_with_sleeper(cfg, Arc::new(sleeper))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 2);
+        let sleeps = recorded_sleeps.lock().unwrap().clone();
+        // Should sleep for 1000ms (Retry-After: 1 second)
+        assert_eq!(sleeps, vec![1_000], "expected one sleep of 1000ms for Retry-After: 1");
     }
 }
 
