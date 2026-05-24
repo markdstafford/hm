@@ -122,6 +122,7 @@ For any interactive component with accessibility requirements (focus management,
 | `@radix-ui/react-select` | `src/ui/forms/Select.tsx` | Single-select dropdowns. |
 | `@radix-ui/react-tabs` | `src/ui/navigation/Tabs.tsx` | In-page section switching. |
 | `@radix-ui/react-toast` | `src/ui/feedback/Toast.tsx` | Ephemeral notifications. |
+| `@radix-ui/react-separator` | `src/ui/layout/Separator.tsx` | Hairline dividers between sections/groups. |
 
 **Rules:**
 
@@ -221,6 +222,20 @@ Composable pieces used by the shell's sidebar column.
 | --- | --- | --- |
 | `Avatar` | layout | User / scope visual (initial or image). |
 | `ConfidenceChip` | layout | AI-confidence percentage chip with high/low styling (≥85% = primary accent; below = muted). |
+
+### Layout — `src/ui/layout/`
+
+| Component | Wraps | Purpose |
+| --- | --- | --- |
+| `Separator` | `@radix-ui/react-separator` | Hairline divider between sections/groups. Renders `bg-border` at `h-px w-full` (horizontal) or `w-px h-full` (vertical). |
+
+**`Separator` contract:**
+
+| Prop | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `orientation` | `"horizontal" \| "vertical"` | `"horizontal"` | Visual direction; sets `data-orientation` and swaps height/width. |
+| `decorative` | `boolean` | `true` | When `true`, Radix renders `role="none"` (purely visual). Set `false` to expose `role="separator"` for assistive tech when the divider is semantically meaningful. |
+| `className` | `string` | `""` | Extra utility classes. |
 
 ---
 
