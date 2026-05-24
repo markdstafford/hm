@@ -1,7 +1,7 @@
 ---
 created: 2026-05-24
 last_updated: 2026-05-24
-status: implementing
+status: complete
 issue: 9
 specced_by: autocatalyst
 implemented_by: markdstafford
