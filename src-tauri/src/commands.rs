@@ -117,6 +117,7 @@ pub fn shared_settings_set(
 }
 
 use crate::ai::config::{load_ai_provider_config, save_ai_provider_config, AiProviderConfig};
+use crate::ai::credentials::{delete_keychain_credential_secret, set_keychain_credential_secret};
 
 #[tauri::command]
 #[specta::specta]
@@ -135,4 +136,25 @@ pub fn ai_provider_config_save(
 ) -> Result<(), String> {
     let conn = db.lock().unwrap();
     save_ai_provider_config(&conn, &config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn ai_credential_secret_set(
+    credential_name: String,
+    value: String,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<(), String> {
+    set_keychain_credential_secret(&credential_name, &value, store.0.as_ref())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn ai_credential_secret_delete(
+    credential_name: String,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<(), String> {
+    delete_keychain_credential_secret(&credential_name, store.0.as_ref())
+        .map_err(|e| e.to_string())
 }

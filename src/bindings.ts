@@ -14,6 +14,8 @@ export const commands = {
 	sharedSettingsSet: (key: string, value: unknown) => typedError<null, string>(__TAURI_INVOKE("shared_settings_set", { key, value })),
 	aiProviderConfigGet: () => typedError<AiProviderConfig, string>(__TAURI_INVOKE("ai_provider_config_get")),
 	aiProviderConfigSave: (config: AiProviderConfig) => typedError<null, string>(__TAURI_INVOKE("ai_provider_config_save", { config })),
+	aiCredentialSecretSet: (credentialName: string, value: string) => typedError<null, string>(__TAURI_INVOKE("ai_credential_secret_set", { credentialName, value })),
+	aiCredentialSecretDelete: (credentialName: string) => typedError<null, string>(__TAURI_INVOKE("ai_credential_secret_delete", { credentialName })),
 };
 
 /* Types */
