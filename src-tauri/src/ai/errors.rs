@@ -31,7 +31,7 @@ impl std::fmt::Display for AiError {
 
 impl std::error::Error for AiError {}
 
-pub fn redact(input: &str) -> String {
+pub(crate) fn redact(input: &str) -> String {
     let lower = input.to_ascii_lowercase();
     if ["sk-", "bearer ", "authorization", "api_key", "token", "secret", "password", "x-api-key"]
         .iter()
