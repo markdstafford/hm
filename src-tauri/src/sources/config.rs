@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::errors::SourceError;
+use super::errors::{is_secret_shaped, SourceError};
 
 pub const SOURCES_CONFIG_KEY: &str = "sources.config";
 
@@ -49,7 +49,7 @@ pub struct JiraProjectFilter {
 pub struct ConnectionTestSummary {
     pub status: ConnectionTestStatus,
     pub tested_at: String,
-    pub message: Option<String>,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -75,16 +75,18 @@ impl Default for SourcesConfig {
 
 impl SourcesConfig {
     /// Normalize all source URLs in-place.
-    pub fn normalize(&mut self) {
+    ///
+    /// Returns an error if any source URL cannot be normalized; does not apply
+    /// partial normalization (all-or-nothing across sources).
+    pub fn normalize(&mut self) -> Result<(), SourceError> {
         for source in &mut self.sources {
             match source {
                 SourceConfig::Jira(jira) => {
-                    if let Ok(normalized) = normalize_jira_server_url(&jira.server_url) {
-                        jira.server_url = normalized;
-                    }
+                    jira.server_url = normalize_jira_server_url(&jira.server_url)?;
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -260,12 +262,9 @@ fn reject_recursive(value: &serde_json::Value, path: &str) -> Result<(), SourceE
         serde_json::Value::Object(map) => {
             for (key, val) in map {
                 let key_lower = key.to_ascii_lowercase();
-                if ["pat", "token", "secret", "authorization", "password", "bearer ", "cookie"]
-                    .iter()
-                    .any(|needle| key_lower.contains(needle))
-                {
+                if is_secret_shaped(&key_lower) {
                     return Err(SourceError::InvalidConfig(format!(
-                        "source config contains a secret-shaped field that must not be stored in settings: {path}{key}"
+                        "source config field looks like a credential and must not be stored in settings (key={path}{key})"
                     )));
                 }
                 let child_path = if path.is_empty() {
@@ -377,7 +376,8 @@ mod tests {
     fn stored_metadata_must_not_contain_secret_shaped_fields() {
         let raw = serde_json::json!({"version":1,"sources":[{"kind":"Jira","id":"src_a","pat":"abc"}]});
         let err = reject_secret_shaped_metadata(&raw).unwrap_err();
-        assert!(err.to_string().contains("secret-shaped"));
+        // Error describes a credential-shaped key; should mention "credential"
+        assert!(err.to_string().contains("credential"), "got: {err}");
     }
 
     #[test]
