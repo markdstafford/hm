@@ -12,13 +12,55 @@ export const commands = {
 	secretDelete: (key: string) => typedError<null, string>(__TAURI_INVOKE("secret_delete", { key })),
 	sharedSettingsGet: (key: string) => typedError<unknown | null, string>(__TAURI_INVOKE("shared_settings_get", { key })),
 	sharedSettingsSet: (key: string, value: unknown) => typedError<null, string>(__TAURI_INVOKE("shared_settings_set", { key, value })),
+	aiProviderConfigGet: () => typedError<AiProviderConfig, string>(__TAURI_INVOKE("ai_provider_config_get")),
+	aiProviderConfigSave: (config: AiProviderConfig) => typedError<null, string>(__TAURI_INVOKE("ai_provider_config_save", { config })),
 };
 
 /* Types */
+export type AiCredentialConfig = {
+	name: string,
+	kind: AiCredentialKind,
+	source: CredentialSource,
+};
+
+export type AiCredentialKind = "ApiKey" | "BearerToken" | "AwsIamProfile";
+
+export type AiEndpointConfig = {
+	name: string,
+	protocol: AiEndpointProtocol,
+	base_url: string,
+	credential_ref: string,
+};
+
+export type AiEndpointProtocol = "AnthropicMessages" | "OpenAiChatCompletionsCompatible";
+
+export type AiExecutionMode = "DirectApi";
+
+export type AiProfileConfig = {
+	name: string,
+	endpoint_ref: string,
+	model: string,
+	runner: AiRunner,
+	execution_mode: AiExecutionMode,
+	settings: unknown,
+};
+
+export type AiProviderConfig = {
+	version: number,
+	credentials: AiCredentialConfig[],
+	endpoints: AiEndpointConfig[],
+	profiles: AiProfileConfig[],
+	routing: { [key in string]: string },
+};
+
+export type AiRunner = "AnthropicMessages" | "OpenAiChatCompletions";
+
 export type AppStatus = {
 	version: string,
 	ready: boolean,
 };
+
+export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

@@ -21,6 +21,8 @@ pub fn run() {
         commands::secret_delete,
         commands::shared_settings_get,
         commands::shared_settings_set,
+        commands::ai_provider_config_get,
+        commands::ai_provider_config_save,
     ]);
 
     #[cfg(debug_assertions)]
@@ -79,6 +81,8 @@ mod tests {
                     commands::secret_delete,
                     commands::shared_settings_get,
                     commands::shared_settings_set,
+                    commands::ai_provider_config_get,
+                    commands::ai_provider_config_save,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)

@@ -115,3 +115,24 @@ pub fn shared_settings_set(
     let conn = db.lock().unwrap();
     shared::shared_settings_set(&conn, &key, &value.0).map_err(|e| e.to_string())
 }
+
+use crate::ai::config::{load_ai_provider_config, save_ai_provider_config, AiProviderConfig};
+
+#[tauri::command]
+#[specta::specta]
+pub fn ai_provider_config_get(
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<AiProviderConfig, String> {
+    let conn = db.lock().unwrap();
+    load_ai_provider_config(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn ai_provider_config_save(
+    config: AiProviderConfig,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<(), String> {
+    let conn = db.lock().unwrap();
+    save_ai_provider_config(&conn, &config).map_err(|e| e.to_string())
+}

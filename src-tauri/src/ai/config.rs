@@ -85,6 +85,27 @@ impl Default for AiProviderConfig {
     }
 }
 
+// ── Persistence helpers ───────────────────────────────────────────────────────
+
+pub fn load_ai_provider_config(conn: &rusqlite::Connection) -> Result<AiProviderConfig, AiError> {
+    let Some(value) = crate::settings::shared::shared_settings_get(conn, AI_PROVIDER_CONFIG_KEY)
+        .map_err(|e| AiError::Storage(e.to_string()))? else {
+        return Ok(AiProviderConfig::default());
+    };
+    let config: AiProviderConfig = serde_json::from_value(value)
+        .map_err(|e| AiError::InvalidConfig(format!("could not parse stored config: {e}")))?;
+    config.validate()?;
+    Ok(config)
+}
+
+pub fn save_ai_provider_config(conn: &rusqlite::Connection, config: &AiProviderConfig) -> Result<(), AiError> {
+    config.validate()?;
+    let value = serde_json::to_value(config)
+        .map_err(|e| AiError::InvalidConfig(format!("could not serialize config: {e}")))?;
+    crate::settings::shared::shared_settings_set(conn, AI_PROVIDER_CONFIG_KEY, &value)
+        .map_err(|e| AiError::Storage(e.to_string()))
+}
+
 // ── Validation helpers ────────────────────────────────────────────────────────
 
 fn validate_unique_names(names: &[&str], kind: &str) -> Result<(), AiError> {
@@ -563,5 +584,41 @@ mod tests {
                 "expected 'unsupported config version' in: {msg}"
             );
         }
+    }
+
+    #[test]
+    fn missing_shared_setting_returns_default_config() {
+        let conn = crate::db::open_in_memory().unwrap();
+        assert_eq!(load_ai_provider_config(&conn).unwrap(), AiProviderConfig::default());
+    }
+
+    #[test]
+    fn save_validates_before_writing() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let mut invalid = AiProviderConfig::default();
+        invalid.version = 99;
+        let err = save_ai_provider_config(&conn, &invalid).unwrap_err();
+        assert!(err.to_string().contains("unsupported config version"));
+        assert!(crate::settings::shared::shared_settings_get(&conn, AI_PROVIDER_CONFIG_KEY).unwrap().is_none());
+    }
+
+    #[test]
+    fn save_then_load_round_trips_valid_config() {
+        let conn = crate::db::open_in_memory().unwrap();
+        let config = AiProviderConfig::default();
+        save_ai_provider_config(&conn, &config).unwrap();
+        assert_eq!(load_ai_provider_config(&conn).unwrap(), config);
+    }
+
+    #[test]
+    fn invalid_stored_config_returns_typed_safe_error() {
+        let conn = crate::db::open_in_memory().unwrap();
+        crate::settings::shared::shared_settings_set(
+            &conn,
+            AI_PROVIDER_CONFIG_KEY,
+            &serde_json::json!({"version":99,"credentials":[],"endpoints":[],"profiles":[],"routing":{}}),
+        ).unwrap();
+        let err = load_ai_provider_config(&conn).unwrap_err();
+        assert!(err.to_string().contains("invalid AI provider config"));
     }
 }
