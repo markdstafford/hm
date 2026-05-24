@@ -118,6 +118,7 @@ pub fn shared_settings_set(
 
 use crate::ai::config::{load_ai_provider_config, save_ai_provider_config, AiProviderConfig};
 use crate::ai::credentials::{delete_keychain_credential_secret, set_keychain_credential_secret};
+use crate::ai::service::{smoke_test_profile, SmokeTestResult};
 
 #[tauri::command]
 #[specta::specta]
@@ -157,4 +158,15 @@ pub fn ai_credential_secret_delete(
 ) -> Result<(), String> {
     delete_keychain_credential_secret(&credential_name, store.0.as_ref())
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn ai_profile_smoke_test(
+    profile_name: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<SmokeTestResult, String> {
+    let conn = db.lock().unwrap();
+    Ok(smoke_test_profile(&conn, store.0.as_ref(), &profile_name))
 }

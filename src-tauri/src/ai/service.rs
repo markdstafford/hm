@@ -1,6 +1,6 @@
 use crate::ai::config::{AiExecutionMode, AiRunner};
 use crate::ai::errors::AiError;
-use crate::ai::resolver::resolve_for_task;
+use crate::ai::resolver::{resolve_for_profile, resolve_for_task};
 use crate::ai::runners::AiRunnerClient;
 use crate::settings::secrets::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -55,6 +55,87 @@ pub struct AiResponse {
     pub runner: AiRunner,
     pub execution_mode: AiExecutionMode,
     pub usage: Option<AiUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub enum SmokeTestStatus { NotRun, Running, Success, Error }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct SmokeTestResult {
+    pub status: SmokeTestStatus,
+    pub profile: String,
+    pub runner: AiRunner,
+    pub execution_mode: AiExecutionMode,
+    pub model: String,
+    pub elapsed_ms: u32,
+    pub preview: Option<String>,
+    pub error: Option<String>,
+    pub suggested_fix: Option<String>,
+}
+
+pub fn ai_call(
+    conn: &rusqlite::Connection,
+    store: &dyn SecretStore,
+    task_name: &str,
+    request: AiRequest,
+) -> Result<AiResponse, AiError> {
+    let runner = crate::ai::runners::DirectApiRunner;
+    ai_call_with_runner(conn, store, &runner, task_name, request)
+}
+
+pub fn smoke_test_profile(
+    conn: &rusqlite::Connection,
+    store: &dyn SecretStore,
+    profile_name: &str,
+) -> SmokeTestResult {
+    let started = std::time::Instant::now();
+    let runner = crate::ai::runners::DirectApiRunner;
+    match resolve_for_profile(conn, store, profile_name)
+        .and_then(|resolved| runner.run(&resolved, AiRequest::smoke_test()))
+    {
+        Ok(response) => SmokeTestResult {
+            status: SmokeTestStatus::Success,
+            profile: response.profile,
+            runner: response.runner,
+            execution_mode: response.execution_mode,
+            model: response.model,
+            elapsed_ms: started.elapsed().as_millis() as u32,
+            preview: Some(response.text.chars().take(200).collect()),
+            error: None,
+            suggested_fix: None,
+        },
+        Err(err) => {
+            let fix = suggested_fix(&err);
+            // Get runner/mode from profile if possible, fallback to defaults
+            let (runner, execution_mode, model) = resolve_for_profile(conn, store, profile_name)
+                .map(|r| (r.profile.runner.clone(), r.profile.execution_mode.clone(), r.profile.model.clone()))
+                .unwrap_or((AiRunner::OpenAiChatCompletions, AiExecutionMode::DirectApi, "".into()));
+            SmokeTestResult {
+                status: SmokeTestStatus::Error,
+                profile: profile_name.into(),
+                runner,
+                execution_mode,
+                model,
+                elapsed_ms: started.elapsed().as_millis() as u32,
+                preview: None,
+                error: Some(err.to_string()),
+                suggested_fix: Some(fix.into()),
+            }
+        }
+    }
+}
+
+fn suggested_fix(err: &AiError) -> &'static str {
+    let text = err.to_string();
+    if text.contains("401") || text.contains("credential") || text.contains("secret") {
+        "Check the selected credential."
+    } else if text.contains("base_url") || text.contains("connect") || text.contains("timed out") {
+        "Check base URL."
+    } else if text.contains("runner") || text.contains("protocol") {
+        "Choose a runner compatible with this endpoint protocol."
+    } else {
+        "Review the AI provider configuration."
+    }
 }
 
 pub fn ai_call_with_runner(

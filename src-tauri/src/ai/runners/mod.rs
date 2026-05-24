@@ -2,8 +2,26 @@ use crate::ai::errors::AiError;
 use crate::ai::resolver::ResolvedAiProvider;
 use crate::ai::service::{AiRequest, AiResponse};
 
+pub mod anthropic_messages;
+pub mod openai_chat_completions;
+
 pub trait AiRunnerClient: Send + Sync {
     fn run(&self, resolved: &ResolvedAiProvider, request: AiRequest) -> Result<AiResponse, AiError>;
+}
+
+pub struct DirectApiRunner;
+
+impl AiRunnerClient for DirectApiRunner {
+    fn run(&self, resolved: &ResolvedAiProvider, request: AiRequest) -> Result<AiResponse, AiError> {
+        match (&resolved.profile.runner, &resolved.profile.execution_mode) {
+            (crate::ai::config::AiRunner::AnthropicMessages, crate::ai::config::AiExecutionMode::DirectApi) => {
+                anthropic_messages::AnthropicMessagesRunner::default().run(resolved, request)
+            }
+            (crate::ai::config::AiRunner::OpenAiChatCompletions, crate::ai::config::AiExecutionMode::DirectApi) => {
+                openai_chat_completions::OpenAiChatCompletionsRunner::default().run(resolved, request)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

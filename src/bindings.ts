@@ -16,6 +16,7 @@ export const commands = {
 	aiProviderConfigSave: (config: AiProviderConfig) => typedError<null, string>(__TAURI_INVOKE("ai_provider_config_save", { config })),
 	aiCredentialSecretSet: (credentialName: string, value: string) => typedError<null, string>(__TAURI_INVOKE("ai_credential_secret_set", { credentialName, value })),
 	aiCredentialSecretDelete: (credentialName: string) => typedError<null, string>(__TAURI_INVOKE("ai_credential_secret_delete", { credentialName })),
+	aiProfileSmokeTest: (profileName: string) => typedError<SmokeTestResult, string>(__TAURI_INVOKE("ai_profile_smoke_test", { profileName })),
 };
 
 /* Types */
@@ -63,6 +64,20 @@ export type AppStatus = {
 };
 
 export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
+
+export type SmokeTestResult = {
+	status: SmokeTestStatus,
+	profile: string,
+	runner: AiRunner,
+	execution_mode: AiExecutionMode,
+	model: string,
+	elapsed_ms: number,
+	preview: string | null,
+	error: string | null,
+	suggested_fix: string | null,
+};
+
+export type SmokeTestStatus = "NotRun" | "Running" | "Success" | "Error";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

@@ -22,6 +22,16 @@ pub struct LoadedCredentialSecret {
     pub value: SecretValue,
 }
 
+impl LoadedCredentialSecret {
+    #[cfg(test)]
+    pub fn new_for_test(name: &str, secret: &str) -> Self {
+        Self {
+            credential_name: name.into(),
+            value: SecretValue(secret.into()),
+        }
+    }
+}
+
 pub fn credential_keychain_key(credential_name: &str) -> Result<String, AiError> {
     // Validate the credential name using keys::validate_key
     keys::validate_key(credential_name).map_err(|e| AiError::InvalidConfig(e.to_string()))?;

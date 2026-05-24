@@ -25,6 +25,7 @@ pub fn run() {
         commands::ai_provider_config_save,
         commands::ai_credential_secret_set,
         commands::ai_credential_secret_delete,
+        commands::ai_profile_smoke_test,
     ]);
 
     #[cfg(debug_assertions)]
@@ -87,6 +88,7 @@ mod tests {
                     commands::ai_provider_config_save,
                     commands::ai_credential_secret_set,
                     commands::ai_credential_secret_delete,
+                    commands::ai_profile_smoke_test,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)
