@@ -138,9 +138,11 @@ function App() {
         }
         mainHeader={page.header ?? undefined}
         mainContent={page.content}
-        footerLeft={
-          <IconButton label="Toggle sidebar"><PanelLeft size={12} /></IconButton>
-        }
+        footerLeft={({ sidebarVisible, toggleSidebar }) => (
+          <IconButton label="Toggle sidebar" active={sidebarVisible} onClick={toggleSidebar}>
+            <PanelLeft size={12} />
+          </IconButton>
+        )}
         footerCenter={status ? <span className="font-mono">v{status.version} · ready: {String(status.ready)}</span> : null}
         footerRight={
           <>

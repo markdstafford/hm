@@ -4,6 +4,8 @@ import { useViewportBreakpoint } from "./useViewportBreakpoint";
 import { useShortcut } from "./useShortcut";
 import { Footer } from "./Footer";
 
+type FooterLeftRender = (state: { sidebarVisible: boolean; toggleSidebar: () => void }) => ReactNode;
+
 export type AppShellProps = {
   sidebarTitleBar?: ReactNode;
   sidebarHeader?: ReactNode;
@@ -11,7 +13,7 @@ export type AppShellProps = {
   mainTitleBar: ReactNode;
   mainHeader?: ReactNode;
   mainContent: ReactNode;
-  footerLeft?: ReactNode;
+  footerLeft?: ReactNode | FooterLeftRender;
   footerCenter?: ReactNode;
   footerRight?: ReactNode;
   scrollCollapse?: "none" | "y2" | "y1-y2";
@@ -37,6 +39,10 @@ export function AppShell({
   useShortcut("escape", dismissOverlay, { enabled: overlay });
 
   const showInColumn = visible && bp === "wide";
+
+  const resolvedFooterLeft = typeof footerLeft === "function"
+    ? footerLeft({ sidebarVisible: visible, toggleSidebar: () => setVisible(!visible) })
+    : footerLeft;
 
   return (
     <div
@@ -101,7 +107,7 @@ export function AppShell({
 
       <Footer
         sidebarVisible={visible && bp === "wide"}
-        left={footerLeft}
+        left={resolvedFooterLeft}
         center={footerCenter}
         right={footerRight}
       />
