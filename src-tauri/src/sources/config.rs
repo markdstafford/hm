@@ -139,6 +139,10 @@ fn validate_jira_source(jira: &JiraSourceConfig) -> Result<(), SourceError> {
     if jira.id.is_empty() {
         return Err(SourceError::InvalidConfig("source id must not be empty".into()));
     }
+    // Source IDs must be valid key components so credential refs like
+    // "source.jira.<id>.pat" are always valid keychain keys.
+    crate::settings::keys::validate_key(&jira.id)
+        .map_err(|e| SourceError::InvalidConfig(format!("invalid source id: {e}")))?;
     if jira.name.is_empty() {
         return Err(SourceError::InvalidConfig("source name must not be empty".into()));
     }
@@ -412,6 +416,35 @@ mod tests {
         let err = reject_secret_shaped_metadata(&raw).unwrap_err();
         // Error describes a credential-shaped key; should mention "credential"
         assert!(err.to_string().contains("credential"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_source_ids_that_are_invalid_key_components() {
+        // IDs with spaces, slashes, or other characters rejected by validate_key
+        // would produce invalid credential-ref keychain keys.
+        for bad_id in &["bad id", "slash/id", "tab\tid", "bad@id"] {
+            let credential_ref = format!("source.jira.{bad_id}.pat");
+            let cfg = SourcesConfig {
+                version: 1,
+                sources: vec![SourceConfig::Jira(JiraSourceConfig {
+                    id: bad_id.to_string(),
+                    name: "Test".into(),
+                    enabled: true,
+                    server_url: "https://jira.example.com".into(),
+                    auth: JiraAuthConfig::Pat { credential_ref },
+                    projects: vec![],
+                    last_connection_test: None,
+                    created_at: "2024-01-01T00:00:00Z".into(),
+                    updated_at: "2024-01-01T00:00:00Z".into(),
+                })],
+            };
+            let err = cfg.validate().unwrap_err();
+            assert!(
+                err.to_string().contains("invalid source id"),
+                "expected invalid source id error for {:?}, got: {err}",
+                bad_id
+            );
+        }
     }
 
     #[test]

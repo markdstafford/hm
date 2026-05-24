@@ -87,8 +87,15 @@ pub fn load_source_credential_secret(
 
 /// Remove a source from config and delete all credentials it owns.
 ///
-/// Loads the current config, deletes each credential ref owned by the source,
-/// removes the source from config, and saves the updated config.
+/// Loads the current config, removes the source, saves the updated config to
+/// SQLite, and then deletes the source's keychain credentials (best-effort).
+///
+/// Atomicity: SQLite metadata removal and keychain credential deletion are two
+/// independent stores; true cross-store atomicity is not possible. The
+/// implementation saves SQLite changes first so that if keychain deletion
+/// fails the source is already removed from the visible config and the
+/// dangling keychain entry can be cleaned up on retry. If the SQLite save
+/// fails, the keychain is untouched and the full operation is safely retried.
 /// Treats missing credentials as a safe no-op.
 pub fn remove_source_config_and_credentials(
     conn: &rusqlite::Connection,
@@ -100,7 +107,7 @@ pub fn remove_source_config_and_credentials(
     // 1. Load current config
     let mut config = load_sources_config(conn)?;
 
-    // 2. Find the source and extract its credential refs
+    // 2. Find the source and extract its credential refs before removing it
     let credential_refs: Vec<String> = config.sources.iter()
         .filter(|s| s.id() == source_id)
         .flat_map(|s| match s {
@@ -114,16 +121,18 @@ pub fn remove_source_config_and_credentials(
         })
         .collect();
 
-    // 3. Delete credential refs (treat missing as no-op)
+    // 3. Remove the source from config (in-memory)
+    config.sources.retain(|s| s.id() != source_id);
+
+    // 4. Save updated config to SQLite first — if this fails, keychain is untouched
+    save_sources_config(conn, &config)?;
+
+    // 5. Delete credential refs (best-effort; treat missing as no-op)
     for cref in &credential_refs {
         delete_source_credential(cref, store)?;
     }
 
-    // 4. Remove the source from config
-    config.sources.retain(|s| s.id() != source_id);
-
-    // 5. Save updated config
-    save_sources_config(conn, &config)
+    Ok(())
 }
 
 /// Delete a source credential from the secret store.

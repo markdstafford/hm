@@ -84,10 +84,10 @@ pub(crate) fn map_client_error(err: JiraClientError) -> JiraConnectionTestResult
             projects: vec![],
             category: Some(JiraConnectionErrorCategory::Forbidden),
         },
-        JiraClientError::Network(msg) => JiraConnectionTestResult {
+        JiraClientError::Network(_) => JiraConnectionTestResult {
             status: JiraConnectionTestStatus::Error,
             tested_at: now_utc_string(),
-            message: format!("Network error: {msg}"),
+            message: "Network error connecting to Jira. Check the server URL and your network connection.".into(),
             suggested_fix: Some("Check the server URL and your network connection.".into()),
             projects: vec![],
             category: Some(JiraConnectionErrorCategory::Network),
@@ -100,10 +100,10 @@ pub(crate) fn map_client_error(err: JiraClientError) -> JiraConnectionTestResult
             projects: vec![],
             category: Some(JiraConnectionErrorCategory::RateLimited),
         },
-        JiraClientError::Server(msg) => JiraConnectionTestResult {
+        JiraClientError::Server(_) => JiraConnectionTestResult {
             status: JiraConnectionTestStatus::Error,
             tested_at: now_utc_string(),
-            message: format!("Jira server error: {msg}"),
+            message: "Jira server returned an error. Check the server status.".into(),
             suggested_fix: None,
             projects: vec![],
             category: Some(JiraConnectionErrorCategory::Server),
@@ -310,6 +310,37 @@ mod tests {
         let result = fake_successful_result(vec![]);
         assert_eq!(result.status, JiraConnectionTestStatus::Success);
         assert!(result.projects.is_empty());
+    }
+
+    #[test]
+    fn client_errors_with_unsafe_upstream_details_do_not_leak_to_message() {
+        // Raw upstream strings (stack traces, response bodies, credential-shaped text)
+        // must never appear in the user-visible message field.
+        let unsafe_msgs = vec![
+            "at com.sun.jira.JiraService.authenticate(JiraService.java:42)\n\tat ...".to_string(),
+            "Authorization: Bearer super-secret-token-abc123".to_string(),
+            "HTTP/1.1 500 Internal Server Error\nX-Internal-Error: db locked".to_string(),
+        ];
+        for msg in unsafe_msgs {
+            let network_result = map_client_error(JiraClientError::Network(msg.clone()));
+            assert!(
+                !network_result.message.contains("at com.sun") &&
+                !network_result.message.contains("Authorization") &&
+                !network_result.message.contains("X-Internal-Error") &&
+                !network_result.message.contains(&msg),
+                "Network: unsafe upstream detail leaked into message: {}",
+                network_result.message
+            );
+            let server_result = map_client_error(JiraClientError::Server(msg.clone()));
+            assert!(
+                !server_result.message.contains("at com.sun") &&
+                !server_result.message.contains("Authorization") &&
+                !server_result.message.contains("X-Internal-Error") &&
+                !server_result.message.contains(&msg),
+                "Server: unsafe upstream detail leaked into message: {}",
+                server_result.message
+            );
+        }
     }
 
     #[test]

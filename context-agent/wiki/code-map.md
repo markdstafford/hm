@@ -159,7 +159,7 @@ App.tsx owns `AppPreferences` state. On mount: `loadPreferences()` → `setPrefs
 |---------|-------|
 | `source_config_get` | Reads `sources.config` from SQLite; empty default if absent |
 | `source_config_save` | Validates and writes to SQLite |
-| `source_config_remove` | Deletes metadata + keychain credential atomically |
+| `source_config_remove` | Saves updated SQLite config first, then deletes keychain credential (best-effort; not cross-store atomic) |
 | `source_credential_secret_set` | Stores PAT in keychain; returns credential_ref |
 | `source_credential_delete` | Removes keychain entry; missing = no-op |
 | `jira_source_test_connection` | Does NOT take DB state — no lock held during keychain/future network calls |
