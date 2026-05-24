@@ -1,0 +1,4 @@
+[
+  { "self": "https://jira.example.invalid/rest/api/2/project/10001", "id": "10001", "key": "HM", "name": "Home Map" },
+  { "self": "https://jira.example.invalid/rest/api/2/project/10002", "id": "10002", "key": "OPS", "name": "Operations" }
+]
