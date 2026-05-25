@@ -23,7 +23,7 @@ const SECRET_EXACT_WORDS: &[&str] = &["pat"];
 ///
 /// Returns `true` for messages / keys containing a known secret pattern.
 pub(crate) fn is_secret_shaped(lower: &str) -> bool {
-    SECRET_EXACT_WORDS.iter().any(|w| lower == *w)
+    SECRET_EXACT_WORDS.contains(&lower)
         || SECRET_KEYWORDS.iter().any(|needle| lower.contains(needle))
 }
 

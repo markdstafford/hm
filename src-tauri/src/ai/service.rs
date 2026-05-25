@@ -1,6 +1,6 @@
 use crate::ai::config::{AiExecutionMode, AiProviderConfig, AiRunner};
 use crate::ai::errors::AiError;
-use crate::ai::resolver::{resolve_for_profile, resolve_for_profile_from_config, resolve_for_task};
+use crate::ai::resolver::{resolve_for_profile_from_config, resolve_for_task};
 use crate::ai::runners::AiRunnerClient;
 use crate::settings::secrets::SecretStore;
 use serde::{Deserialize, Serialize};
@@ -58,7 +58,12 @@ pub struct AiResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub enum SmokeTestStatus { NotRun, Running, Success, Error }
+pub enum SmokeTestStatus {
+    NotRun,
+    Running,
+    Success,
+    Error,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SmokeTestResult {
@@ -136,8 +141,18 @@ pub fn smoke_test_profile_with_config(
             // Profile metadata for the result (no DB or HTTP, just config lookup)
             let (runner_val, execution_mode, model) =
                 resolve_for_profile_from_config(config, store, profile_name)
-                    .map(|r| (r.profile.runner.clone(), r.profile.execution_mode.clone(), r.profile.model.clone()))
-                    .unwrap_or((AiRunner::OpenAiChatCompletions, AiExecutionMode::DirectApi, "".into()));
+                    .map(|r| {
+                        (
+                            r.profile.runner.clone(),
+                            r.profile.execution_mode.clone(),
+                            r.profile.model.clone(),
+                        )
+                    })
+                    .unwrap_or((
+                        AiRunner::OpenAiChatCompletions,
+                        AiExecutionMode::DirectApi,
+                        "".into(),
+                    ));
             SmokeTestResult {
                 status: SmokeTestStatus::Error,
                 profile: profile_name.into(),
@@ -222,12 +237,19 @@ mod tests {
     fn ai_call_with_fake_runner_returns_response() {
         let conn = crate::db::open_in_memory().unwrap();
         let store = InMemorySecretStore::new();
-        store.set("ai.credentials.openai-prod", "sk-test-secret").unwrap();
+        store
+            .set("ai.credentials.openai-prod", "sk-test-secret")
+            .unwrap();
         save_ai_provider_config(&conn, &test_config()).unwrap();
         let runner = FakeRunner::new("ok");
         let response = ai_call_with_runner(
-            &conn, &store, &runner, "chat.answer", AiRequest::smoke_test()
-        ).unwrap();
+            &conn,
+            &store,
+            &runner,
+            "chat.answer",
+            AiRequest::smoke_test(),
+        )
+        .unwrap();
         assert_eq!(response.text, "ok");
         assert_eq!(response.model, "gpt-4o-mini");
         assert_eq!(response.profile, "chat-fast");
@@ -243,8 +265,15 @@ mod tests {
         save_ai_provider_config(&conn, &test_config()).unwrap();
         let runner = FakeRunner::new("ok");
         let err = ai_call_with_runner(
-            &conn, &store, &runner, "unknown.task", AiRequest::smoke_test()
-        ).unwrap_err();
-        assert!(err.to_string().contains("No AI profile is routed for unknown.task"));
+            &conn,
+            &store,
+            &runner,
+            "unknown.task",
+            AiRequest::smoke_test(),
+        )
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("No AI profile is routed for unknown.task"));
     }
 }

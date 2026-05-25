@@ -13,6 +13,16 @@ Last updated: 2026-05-21 (scaffold)
 | `npm run test:e2e` | Playwright e2e against Vite dev server |
 | `npm run tauri dev` | Vite dev server + Tauri desktop window |
 
+## Pre-handoff validation checklist
+
+- Run the narrowest relevant validation first so failures point at the smallest changed surface.
+- After targeted checks pass, run the CI job commands affected by the change before handoff.
+- For Rust backend or Tauri changes, include these commands unless explicitly skipped with a reason:
+  - `cd src-tauri && cargo check`
+  - `cd src-tauri && cargo test`
+  - `cd src-tauri && cargo clippy -- -D warnings`
+- In PR descriptions, issue handoffs, or agent final summaries, list the checks that ran and call out skipped checks with the reason.
+
 ## Test locations
 
 - `src/App.test.tsx` — component render, theme toggle, axe accessibility smoke

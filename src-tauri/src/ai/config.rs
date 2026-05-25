@@ -89,7 +89,8 @@ impl Default for AiProviderConfig {
 
 pub fn load_ai_provider_config(conn: &rusqlite::Connection) -> Result<AiProviderConfig, AiError> {
     let Some(value) = crate::settings::shared::shared_settings_get(conn, AI_PROVIDER_CONFIG_KEY)
-        .map_err(|e| AiError::Storage(e.to_string()))? else {
+        .map_err(|e| AiError::Storage(e.to_string()))?
+    else {
         return Ok(AiProviderConfig::default());
     };
     let config: AiProviderConfig = serde_json::from_value(value)
@@ -98,7 +99,10 @@ pub fn load_ai_provider_config(conn: &rusqlite::Connection) -> Result<AiProvider
     Ok(config)
 }
 
-pub fn save_ai_provider_config(conn: &rusqlite::Connection, config: &AiProviderConfig) -> Result<(), AiError> {
+pub fn save_ai_provider_config(
+    conn: &rusqlite::Connection,
+    config: &AiProviderConfig,
+) -> Result<(), AiError> {
     config.validate()?;
     let value = serde_json::to_value(config)
         .map_err(|e| AiError::InvalidConfig(format!("could not serialize config: {e}")))?;
@@ -195,7 +199,7 @@ fn validate_url(base_url: &str) -> Result<(), AiError> {
             "endpoint base_url must use http or https scheme: {base_url:?}"
         )));
     }
-    if parsed.host_str().map_or(true, |h| h.is_empty()) {
+    if parsed.host_str().is_none_or(|h| h.is_empty()) {
         return Err(AiError::InvalidConfig(format!(
             "endpoint base_url must have a non-empty host: {base_url:?}"
         )));
@@ -213,11 +217,21 @@ fn validate_url(base_url: &str) -> Result<(), AiError> {
     Ok(())
 }
 
-fn validate_supported_combination(profile: &AiProfileConfig, endpoint: &AiEndpointConfig) -> Result<(), AiError> {
+fn validate_supported_combination(
+    profile: &AiProfileConfig,
+    endpoint: &AiEndpointConfig,
+) -> Result<(), AiError> {
     let ok = matches!(
         (&endpoint.protocol, &profile.runner, &profile.execution_mode),
-        (AiEndpointProtocol::AnthropicMessages, AiRunner::AnthropicMessages, AiExecutionMode::DirectApi)
-            | (AiEndpointProtocol::OpenAiChatCompletionsCompatible, AiRunner::OpenAiChatCompletions, AiExecutionMode::DirectApi)
+        (
+            AiEndpointProtocol::AnthropicMessages,
+            AiRunner::AnthropicMessages,
+            AiExecutionMode::DirectApi
+        ) | (
+            AiEndpointProtocol::OpenAiChatCompletionsCompatible,
+            AiRunner::OpenAiChatCompletions,
+            AiExecutionMode::DirectApi
+        )
     );
     if !ok {
         return Err(AiError::InvalidConfig(format!(
@@ -272,11 +286,7 @@ impl AiProviderConfig {
         }
 
         // Validate and collect credential names
-        let cred_names: Vec<&str> = self
-            .credentials
-            .iter()
-            .map(|c| c.name.as_str())
-            .collect();
+        let cred_names: Vec<&str> = self.credentials.iter().map(|c| c.name.as_str()).collect();
         validate_unique_names(&cred_names, "credential")?;
         for cred in &self.credentials {
             validate_name(&cred.name, "credential")?;
@@ -298,11 +308,7 @@ impl AiProviderConfig {
         }
 
         // Validate and collect endpoint names
-        let endpoint_names: Vec<&str> = self
-            .endpoints
-            .iter()
-            .map(|e| e.name.as_str())
-            .collect();
+        let endpoint_names: Vec<&str> = self.endpoints.iter().map(|e| e.name.as_str()).collect();
         validate_unique_names(&endpoint_names, "endpoint")?;
         for endpoint in &self.endpoints {
             validate_name(&endpoint.name, "endpoint")?;
@@ -316,11 +322,7 @@ impl AiProviderConfig {
         }
 
         // Validate and collect profile names
-        let profile_names: Vec<&str> = self
-            .profiles
-            .iter()
-            .map(|p| p.name.as_str())
-            .collect();
+        let profile_names: Vec<&str> = self.profiles.iter().map(|p| p.name.as_str()).collect();
         validate_unique_names(&profile_names, "profile")?;
         for profile in &self.profiles {
             validate_name(&profile.name, "profile")?;
@@ -518,7 +520,8 @@ mod tests {
     fn rejects_invalid_dotted_task_name() {
         let mut cfg = sample_config();
         cfg.routing.clear();
-        cfg.routing.insert("issue".into(), "triage-authoring".into());
+        cfg.routing
+            .insert("issue".into(), "triage-authoring".into());
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, AiError::InvalidConfig(_)));
         if let AiError::InvalidConfig(msg) = err {
@@ -561,7 +564,10 @@ mod tests {
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, AiError::InvalidConfig(_)));
         if let AiError::InvalidConfig(msg) = err {
-            assert!(msg.contains("fragment"), "expected fragment error in: {msg}");
+            assert!(
+                msg.contains("fragment"),
+                "expected fragment error in: {msg}"
+            );
         }
     }
 
@@ -622,7 +628,8 @@ mod tests {
     #[test]
     fn rejects_missing_profile_in_routing() {
         let mut cfg = sample_config();
-        cfg.routing.insert("issue.triage".into(), "nonexistent-profile".into());
+        cfg.routing
+            .insert("issue.triage".into(), "nonexistent-profile".into());
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, AiError::InvalidConfig(_)));
         if let AiError::InvalidConfig(msg) = err {
@@ -656,10 +663,7 @@ mod tests {
         let err = cfg.validate().unwrap_err();
         assert!(matches!(err, AiError::InvalidConfig(_)));
         if let AiError::InvalidConfig(msg) = err {
-            assert!(
-                msg.contains("api_key"),
-                "expected 'api_key' in: {msg}"
-            );
+            assert!(msg.contains("api_key"), "expected 'api_key' in: {msg}");
         }
     }
 
@@ -680,7 +684,10 @@ mod tests {
     #[test]
     fn missing_shared_setting_returns_default_config() {
         let conn = crate::db::open_in_memory().unwrap();
-        assert_eq!(load_ai_provider_config(&conn).unwrap(), AiProviderConfig::default());
+        assert_eq!(
+            load_ai_provider_config(&conn).unwrap(),
+            AiProviderConfig::default()
+        );
     }
 
     #[test]
@@ -690,7 +697,11 @@ mod tests {
         invalid.version = 99;
         let err = save_ai_provider_config(&conn, &invalid).unwrap_err();
         assert!(err.to_string().contains("unsupported config version"));
-        assert!(crate::settings::shared::shared_settings_get(&conn, AI_PROVIDER_CONFIG_KEY).unwrap().is_none());
+        assert!(
+            crate::settings::shared::shared_settings_get(&conn, AI_PROVIDER_CONFIG_KEY)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
