@@ -17,7 +17,7 @@ export function Popover({ trigger, children, side = "bottom", align = "start" }:
           side={side}
           align={align}
           sideOffset={4}
-          className="z-50 rounded border border-border bg-mantle text-text shadow-lg"
+          className="z-50 rounded border border-border bg-mantle text-text shadow-lg p-2"
         >
           {children}
         </RP.Content>

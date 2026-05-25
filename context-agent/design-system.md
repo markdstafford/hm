@@ -171,7 +171,7 @@ Everything that floats above content.
 | --- | --- | --- |
 | `Dialog` | `@radix-ui/react-dialog` | Modals, confirm dialogs. |
 | `AlertDialog` | `@radix-ui/react-alert-dialog` | Destructive / confirm dialog. Compound: `Root \| Trigger \| Content \| Title \| Description \| Cancel \| Action`. |
-| `Popover` | `@radix-ui/react-popover` | Anchored menus, inline pickers. |
+| `Popover` | `@radix-ui/react-popover` | Anchored menus, inline pickers. Content has default `p-2` padding so a bare body looks finished without extra wrapping. |
 | `DropdownMenu` | `@radix-ui/react-dropdown-menu` | Action menus (kebab `…`). |
 | `ContextMenu` | `@radix-ui/react-context-menu` | Right-click menus. |
 | `Tooltip` | `@radix-ui/react-tooltip` | Hover hints for icon-only buttons. **Required** when a button has no visible label. |
