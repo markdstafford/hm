@@ -73,58 +73,109 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
     setSaving(true);
     setSaveError(null);
     try {
-      let credentialRef = draft.auth.credential_ref;
-      // Track whether we created a new credential that needs rollback if save fails.
-      // Edit mode overwrites the same ref (source still references it), so only new sources need cleanup.
-      let newCredentialRef: string | null = null;
-
-      if (pendingPat.trim()) {
-        const credResult = await setSourceCredentialSecret(draft.id, "JiraPat", pendingPat);
-        if (!credResult.ok) {
-          setSaveError(credResult.error);
-          return;
-        }
-        credentialRef = credResult.credentialRef;
-        if (mode === "new") {
-          newCredentialRef = credentialRef;
-        }
-      }
-
       let serverUrl = draft.server_url;
       try { serverUrl = normalizeJiraServerUrl(serverUrl); } catch { /* validation already caught */ }
 
       const now = new Date().toISOString();
-      const updatedSource: JiraSourceConfig = {
-        ...draft,
-        server_url: serverUrl,
-        name: draft.name || (() => { try { return new URL(serverUrl).hostname; } catch { return serverUrl; } })(),
-        auth: { type: "Pat", credential_ref: credentialRef },
-        projects: dedupeAndSortProjects(draft.projects),
-        last_connection_test: testResult
-          ? { status: testResult.status === "Success" ? "Success" : testResult.status === "Unavailable" ? "Unavailable" : "Error", tested_at: testResult.tested_at, message: testResult.message }
-          : draft.last_connection_test,
-        updated_at: now,
-        created_at: mode === "new" ? now : draft.created_at,
-      };
+      // The credential_ref is stable for a given source id, so we compute it
+      // up-front. In create mode `setSourceCredentialSecret` returns the same
+      // value; we still write the secret first in create mode (next branch
+      // below) so the credential exists when the config references it.
+      const stableCredentialRef = draft.auth.credential_ref;
 
-      let updatedSources;
-      if (mode === "new") {
-        updatedSources = [...config.sources, { kind: "Jira" as const, ...updatedSource }];
-      } else {
-        updatedSources = config.sources.map((s) =>
-          s.id === updatedSource.id ? { kind: "Jira" as const, ...updatedSource } : s
-        );
+      function buildUpdatedSource(credentialRef: string): JiraSourceConfig {
+        return {
+          ...draft,
+          server_url: serverUrl,
+          name:
+            draft.name ||
+            (() => {
+              try { return new URL(serverUrl).hostname; } catch { return serverUrl; }
+            })(),
+          auth: { type: "Pat", credential_ref: credentialRef },
+          projects: dedupeAndSortProjects(draft.projects),
+          last_connection_test: testResult
+            ? {
+                status:
+                  testResult.status === "Success"
+                    ? "Success"
+                    : testResult.status === "Unavailable"
+                    ? "Unavailable"
+                    : "Error",
+                tested_at: testResult.tested_at,
+                message: testResult.message,
+              }
+            : draft.last_connection_test,
+          updated_at: now,
+          created_at: mode === "new" ? now : draft.created_at,
+        };
       }
-      const updatedConfig: SourcesConfig = { ...config, sources: updatedSources };
 
+      function buildUpdatedConfig(updatedSource: JiraSourceConfig): SourcesConfig {
+        const updatedSources =
+          mode === "new"
+            ? [...config.sources, { kind: "Jira" as const, ...updatedSource }]
+            : config.sources.map((s) =>
+                s.id === updatedSource.id ? { kind: "Jira" as const, ...updatedSource } : s,
+              );
+        return { ...config, sources: updatedSources };
+      }
+
+      if (mode === "new") {
+        // Create flow: write the credential first so the config save lands on
+        // an existing keychain entry. If the config save fails afterwards,
+        // delete the just-created credential to avoid an orphan.
+        let credentialRef = stableCredentialRef;
+        let newCredentialRef: string | null = null;
+        if (pendingPat.trim()) {
+          const credResult = await setSourceCredentialSecret(draft.id, "JiraPat", pendingPat);
+          if (!credResult.ok) {
+            setSaveError(credResult.error);
+            return;
+          }
+          credentialRef = credResult.credentialRef;
+          newCredentialRef = credentialRef;
+        }
+        const updatedConfig = buildUpdatedConfig(buildUpdatedSource(credentialRef));
+        const saveResult = await saveSourcesConfig(updatedConfig);
+        if (!saveResult.ok) {
+          if (newCredentialRef) {
+            await deleteSourceCredential(newCredentialRef);
+          }
+          setSaveError(saveResult.error);
+          return;
+        }
+        setPendingPat("");
+        onSaved(updatedConfig);
+        return;
+      }
+
+      // Edit flow: save the config first. The credential reference is
+      // unchanged for an existing source, so the config doesn't need a new
+      // keychain entry to land. If config save fails, we never touched the
+      // keychain. Only after a successful config save do we attempt the PAT
+      // update — if that fails we surface a focused error explaining that
+      // metadata is saved but the new PAT could not be stored, which is the
+      // less destructive partial-failure state.
+      const updatedConfig = buildUpdatedConfig(buildUpdatedSource(stableCredentialRef));
       const saveResult = await saveSourcesConfig(updatedConfig);
       if (!saveResult.ok) {
-        // Roll back the newly written credential for new sources to avoid an orphaned keychain entry.
-        if (newCredentialRef) {
-          await deleteSourceCredential(newCredentialRef);
-        }
         setSaveError(saveResult.error);
         return;
+      }
+
+      if (pendingPat.trim()) {
+        const credResult = await setSourceCredentialSecret(draft.id, "JiraPat", pendingPat);
+        if (!credResult.ok) {
+          setSaveError(
+            `Source metadata saved, but the new PAT could not be stored: ${credResult.error}. Re-enter and save again to update the credential.`,
+          );
+          // Even with the PAT update failure, the config is persisted — bubble
+          // the updated config to the parent so the list refreshes.
+          setPendingPat("");
+          onSaved(updatedConfig);
+          return;
+        }
       }
 
       setPendingPat("");
