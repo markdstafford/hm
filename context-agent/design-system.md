@@ -254,6 +254,7 @@ Composable pieces used by the shell's sidebar column.
 | Component | Wraps | Purpose |
 | --- | --- | --- |
 | `Separator` | `@radix-ui/react-separator` | Hairline divider between sections/groups. Renders `bg-border` at `h-px w-full` (horizontal) or `w-px h-full` (vertical). |
+| `Card` | layout | Bordered, padded container. `interactive` variant renders a `<button>` for clickable tiles (source-kind picker, profile rows). |
 
 **`Separator` contract:**
 
