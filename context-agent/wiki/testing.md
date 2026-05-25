@@ -237,6 +237,52 @@ vi.mock("../bindings", () => ({
 - `src/features/settings/sources/SourcesCategory.test.tsx` mocks `jiraSourceTestConnection` to return `Unavailable` with the browser fallback message. The `ConnectionTestStatus` component renders `result.message`, so the test exercises the browser-side rendering path.
 - Real Jira network and keychain behavior cannot be tested in the browser (Vitest jsdom). Full round-trip connection tests require the desktop app and a real Jira server — this is intentional.
 
+## Jira issue ingestion tests (added 2026-05-25, issue #10)
+
+### Targeted commands
+
+```bash
+cd src-tauri && cargo test issues:: -- --nocapture
+cd src-tauri && cargo test ingestion:: -- --nocapture
+cd src-tauri && cargo test sources::jira_ingestion::tests -- --nocapture
+cd src-tauri && cargo test commands::tests -- --nocapture
+cd src-tauri && cargo test redaction -- --nocapture
+```
+
+The `redaction` filter selects the four `redaction_*` tests in `sources::jira_ingestion::tests`, which lock down the guarantee that PATs, `Authorization` headers, and `Bearer ` tokens never appear in persisted rows (`ingestion_runs`, `ingestion_cursors`, `jira_issues.raw_*_json`), in `IngestionError` `Display` output, or anywhere in the synthetic fixture corpus.
+
+### Fixtures
+
+All ingestion fixtures live under `src-tauri/src/sources/fixtures/` and are 100% synthetic — no real Jira data, no real PATs, no production identifiers.
+
+| File | Used by |
+|------|---------|
+| `jira_amp_search_page.json` | AMP search-page projection + multi-page ingestion tests |
+| `jira_comments_page.json` | Inline-comment projection and comment tail tests |
+| `jira_worklogs_page.json` | Inline-worklog projection tests |
+
+`redaction_fixtures_directory_contains_no_secret_shaped_strings` asserts that no fixture contains `Authorization:`, `Bearer `, `pat-`, `secret-`, or `eyJ` (JWT prefix). Update this allowlist if a future fixture legitimately needs one of those substrings.
+
+### Frontend test
+
+```bash
+npm test -- src/features/settings/sources/SourcesCategory.test.tsx
+```
+
+Covers the source-row status text + Run/Cancel buttons added in #10.
+
+### Binding regeneration
+
+```bash
+cd src-tauri && cargo test generate_typescript_bindings -- --exact --nocapture
+```
+
+Run this after touching any `#[tauri::command] #[specta::specta]` function so `src/bindings.ts` matches the Rust signatures.
+
+### Clippy gate
+
+`cd src-tauri && cargo clippy -- -D warnings` (and `--all-targets`) passes after the three pre-existing fixes shipped with #10: `field_reassign_with_default` in `ai/config.rs::save_validates_before_writing`, `approx_constant` in `settings/shared.rs::preserves_json_type_fidelity`, and `while_let_loop` in `sources/jira_client.rs::search_issues_all_terminates_when_server_omits_total_and_returns_full_pages` (`#[allow(clippy::while_let_loop)]` preserved — the inner `if count >= … { break; }` early-exit is intentional termination-guard test infrastructure).
+
 ---
 
 ## AI provider testing (added 2026-05-24)

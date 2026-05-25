@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use crate::sources::jira_errors::JiraApiError;
 use crate::sources::jira_types::{
-    JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraProject, JiraSearchPage,
+    JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraPagedComments, JiraPagedProjects,
+    JiraPagedWorklogs, JiraProject, JiraRemoteLink, JiraSearchPage,
 };
 
 // ── Secret string ─────────────────────────────────────────────────────────────
@@ -143,6 +144,7 @@ pub struct JiraSearchRequest {
     pub jql: String,
     pub start_at: u32,
     pub max_results: u32,
+    pub fields: Vec<String>,
 }
 
 impl JiraSearchRequest {
@@ -151,6 +153,7 @@ impl JiraSearchRequest {
             jql: jql.into(),
             start_at: 0,
             max_results: 50,
+            fields: Vec::new(),
         }
     }
 
@@ -161,6 +164,15 @@ impl JiraSearchRequest {
 
     pub fn with_max_results(mut self, max_results: u32) -> Self {
         self.max_results = clamp_page_size(max_results);
+        self
+    }
+
+    pub fn with_fields<I, S>(mut self, fields: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.fields = fields.into_iter().map(Into::into).collect();
         self
     }
 }
@@ -327,8 +339,50 @@ impl JiraApiClient {
         self.get_json(&format!("/rest/api/2/issue/{issue}?expand=changelog"))
     }
 
-    /// List accessible projects.
+    /// List all accessible projects, paginating via `/rest/api/2/project/search`.
+    /// Falls back to the legacy `/rest/api/2/project` (flat, truncated) when
+    /// `/search` returns 404 on older Jira Data Center versions.
     pub fn list_projects(&self) -> Result<Vec<JiraProject>, JiraApiError> {
+        match self.list_projects_paginated() {
+            Ok(projects) => Ok(projects),
+            Err(JiraApiError::NotFound) => self.list_projects_flat(),
+            Err(other) => Err(other),
+        }
+    }
+
+    fn list_projects_paginated(&self) -> Result<Vec<JiraProject>, JiraApiError> {
+        let page_size: u32 = 50;
+        let mut start_at: u32 = 0;
+        let mut out: Vec<JiraProject> = Vec::new();
+        let mut pages_fetched: usize = 0;
+        loop {
+            if pages_fetched >= MAX_PAGINATION_PAGES {
+                break;
+            }
+            let path = format!(
+                "/rest/api/2/project/search?startAt={start_at}&maxResults={page_size}"
+            );
+            let page: JiraPagedProjects = self.get_json(&path)?;
+            let returned = page.values.len() as u32;
+            out.extend(page.values);
+            pages_fetched += 1;
+            if let Some(true) = page.is_last {
+                break;
+            }
+            let stop = should_stop_pagination(start_at, page_size, returned as usize, page.total);
+            if stop {
+                break;
+            }
+            let next = start_at.saturating_add(returned.max(1));
+            if next <= start_at {
+                break;
+            }
+            start_at = next;
+        }
+        Ok(out)
+    }
+
+    fn list_projects_flat(&self) -> Result<Vec<JiraProject>, JiraApiError> {
         self.get_json("/rest/api/2/project")
     }
 
@@ -344,6 +398,9 @@ impl JiraApiClient {
             "maxResults",
             &clamp_page_size(request.max_results).to_string(),
         );
+        if !request.fields.is_empty() {
+            serializer.append_pair("fields", &request.fields.join(","));
+        }
         self.get_json(&format!("/rest/api/2/search?{}", serializer.finish()))
     }
 
@@ -364,6 +421,7 @@ impl JiraApiClient {
                 start_at,
                 max_results: page_size,
                 jql: request.jql.clone(),
+                fields: request.fields.clone(),
             })?;
             let returned = page.issues.len();
             let stop =
@@ -426,6 +484,43 @@ impl JiraApiClient {
             start_at = next_start;
         }
         Ok(histories)
+    }
+
+    /// Fetch one page of comments for an issue.
+    pub fn get_issue_comments_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraPagedComments, JiraApiError> {
+        let issue = encode_path_segment(issue_id_or_key)?;
+        let max_results = clamp_page_size(max_results);
+        self.get_json(&format!(
+            "/rest/api/2/issue/{issue}/comment?startAt={start_at}&maxResults={max_results}"
+        ))
+    }
+
+    /// Fetch one page of worklogs for an issue.
+    pub fn get_issue_worklogs_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraPagedWorklogs, JiraApiError> {
+        let issue = encode_path_segment(issue_id_or_key)?;
+        let max_results = clamp_page_size(max_results);
+        self.get_json(&format!(
+            "/rest/api/2/issue/{issue}/worklog?startAt={start_at}&maxResults={max_results}"
+        ))
+    }
+
+    /// Fetch all remote links for an issue (Jira Data Center returns a JSON array, not paginated).
+    pub fn get_issue_remote_links(
+        &self,
+        issue_id_or_key: &str,
+    ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
+        let issue = encode_path_segment(issue_id_or_key)?;
+        self.get_json(&format!("/rest/api/2/issue/{issue}/remotelink"))
     }
 
     #[cfg(test)]
@@ -620,7 +715,10 @@ mod tests {
         let seen_clone = Arc::clone(&seen);
         let base_url = spawn_json_server(move |request| {
             assert_eq!(request.method(), &Method::Get);
-            assert_eq!(request.url(), "/rest/api/2/project");
+            assert_eq!(
+                request.url(),
+                "/rest/api/2/project/search?startAt=0&maxResults=50"
+            );
             for header in request.headers() {
                 seen_clone.lock().unwrap().push((
                     header.field.as_str().to_string(),
@@ -630,7 +728,7 @@ mod tests {
             request
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -801,6 +899,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::while_let_loop)]
     fn search_issues_all_terminates_when_server_omits_total_and_returns_full_pages() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -894,7 +993,7 @@ mod tests {
                 .unwrap()
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -987,7 +1086,7 @@ mod tests {
                 .unwrap()
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -1031,7 +1130,7 @@ mod tests {
                 .unwrap()
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -1073,7 +1172,7 @@ mod tests {
                 .unwrap()
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -1110,7 +1209,7 @@ mod tests {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", server.server_addr());
         thread::spawn(move || {
-            let response = Response::from_string(include_str!("fixtures/jira_projects.json"))
+            let response = Response::from_string(include_str!("fixtures/jira_projects_paginated.json"))
                 .with_status_code(StatusCode(200))
                 .with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
@@ -1150,7 +1249,7 @@ mod tests {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", server.server_addr());
         thread::spawn(move || {
-            let response = Response::from_string(include_str!("fixtures/jira_projects.json"))
+            let response = Response::from_string(include_str!("fixtures/jira_projects_paginated.json"))
                 .with_status_code(StatusCode(200))
                 .with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
@@ -1179,5 +1278,228 @@ mod tests {
             vec![400],
             "X-RateLimit-Remaining: 0 should trigger fallback_delay_ms=400"
         );
+    }
+
+    const AMP_FIELDS: &[&str] = &[
+        "summary",
+        "status",
+        "resolution",
+        "assignee",
+        "reporter",
+        "priority",
+        "labels",
+        "components",
+        "issuetype",
+        "project",
+        "description",
+        "created",
+        "updated",
+        "resolutiondate",
+        "duedate",
+        "fixVersions",
+        "subtasks",
+        "watches",
+        "customfield_14051",
+        "customfield_14353",
+        "customfield_12751",
+        "customfield_14655",
+        "customfield_10857",
+        "customfield_10858",
+        "customfield_10859",
+        "customfield_10557",
+        "comment",
+        "issuelinks",
+        "worklog",
+    ];
+
+    #[test]
+    fn search_issues_page_includes_fields_query_when_set() {
+        let base_url = spawn_json_server(|request| {
+            let url = request.url().to_string();
+            let expected = "&fields=summary%2Cstatus%2Cresolution%2Cassignee%2Creporter%2Cpriority%2Clabels%2Ccomponents%2Cissuetype%2Cproject%2Cdescription%2Ccreated%2Cupdated%2Cresolutiondate%2Cduedate%2CfixVersions%2Csubtasks%2Cwatches%2Ccustomfield_14051%2Ccustomfield_14353%2Ccustomfield_12751%2Ccustomfield_14655%2Ccustomfield_10857%2Ccustomfield_10858%2Ccustomfield_10859%2Ccustomfield_10557%2Ccomment%2Cissuelinks%2Cworklog";
+            assert!(
+                url.contains(expected),
+                "expected fields query, got url={url}"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_amp_search_page.json"),
+                ))
+                .unwrap();
+        });
+        let page = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .search_issues_page(
+                JiraSearchRequest::new("project = AMP").with_fields(AMP_FIELDS.iter().copied()),
+            )
+            .unwrap();
+        assert_eq!(page.issues[0].key, "AMP-1");
+    }
+
+    #[test]
+    fn search_issues_page_omits_fields_when_unset() {
+        let base_url = spawn_json_server(|request| {
+            let url = request.url().to_string();
+            assert!(
+                !url.contains("fields="),
+                "expected no fields query, got url={url}"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_search_page.json"),
+                ))
+                .unwrap();
+        });
+        let page = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .search_issues_page(JiraSearchRequest::new("project = HM"))
+            .unwrap();
+        assert_eq!(page.issues.len(), 2);
+    }
+
+    #[test]
+    fn get_issue_comments_page_calls_correct_url_and_returns_paged() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(
+                request.url(),
+                "/rest/api/2/issue/AMP-1/comment?startAt=2&maxResults=50"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_comments_page.json"),
+                ))
+                .unwrap();
+        });
+        let comments = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .get_issue_comments_page("AMP-1", 2, 50)
+            .unwrap();
+        assert_eq!(comments.total, Some(3));
+    }
+
+    #[test]
+    fn get_issue_worklogs_page_calls_correct_url_and_returns_paged() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(
+                request.url(),
+                "/rest/api/2/issue/AMP-1/worklog?startAt=1&maxResults=50"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_worklogs_page.json"),
+                ))
+                .unwrap();
+        });
+        let worklogs = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .get_issue_worklogs_page("AMP-1", 1, 50)
+            .unwrap();
+        assert_eq!(worklogs.total, Some(2));
+    }
+
+    #[test]
+    fn get_issue_remote_links_returns_array() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(request.url(), "/rest/api/2/issue/AMP-1/remotelink");
+            request
+                .respond(json_response(
+                    200,
+                    r#"[{"id":1,"globalId":"abc","relationship":"mentioned","object":{"url":"https://docs.example.invalid/abc","title":"Doc"}}]"#,
+                ))
+                .unwrap();
+        });
+        let links = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .get_issue_remote_links("AMP-1")
+            .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(
+            links[0].object.as_ref().unwrap().url,
+            "https://docs.example.invalid/abc"
+        );
+    }
+
+    #[test]
+    fn list_projects_paginated_follows_search_pages_and_dedupes_via_islast() {
+        // Exercises the /rest/api/2/project/search paginated code path:
+        // two pages, stopping on isLast=true on the second response.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let first = server.recv().unwrap();
+            assert!(
+                first.url().starts_with("/rest/api/2/project/search?"),
+                "expected /project/search, got {}",
+                first.url()
+            );
+            assert!(first.url().contains("startAt=0"));
+            first
+                .respond(json_response(
+                    200,
+                    r#"{"startAt":0,"maxResults":2,"total":3,"isLast":false,"values":[{"id":"1","key":"AMP","name":"AMP"},{"id":"2","key":"BMP","name":"BMP"}]}"#,
+                ))
+                .unwrap();
+            let second = server.recv().unwrap();
+            assert!(
+                second.url().starts_with("/rest/api/2/project/search?"),
+                "expected /project/search, got {}",
+                second.url()
+            );
+            assert!(second.url().contains("startAt=2"));
+            second
+                .respond(json_response(
+                    200,
+                    r#"{"startAt":2,"maxResults":2,"total":3,"isLast":true,"values":[{"id":"3","key":"CMP","name":"CMP"}]}"#,
+                ))
+                .unwrap();
+        });
+        let projects = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(
+            projects.iter().map(|p| p.key.as_str()).collect::<Vec<_>>(),
+            vec!["AMP", "BMP", "CMP"]
+        );
+    }
+
+    #[test]
+    fn list_projects_falls_back_to_flat_endpoint_on_404() {
+        // Exercises the legacy /rest/api/2/project fallback path used on older
+        // Jira Data Center versions (8.3 and earlier) where /project/search 404s.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let first = server.recv().unwrap();
+            assert!(
+                first.url().starts_with("/rest/api/2/project/search?"),
+                "expected /project/search probe, got {}",
+                first.url()
+            );
+            first
+                .respond(json_response(404, r#"{"errorMessages":["not found"]}"#))
+                .unwrap();
+            let second = server.recv().unwrap();
+            assert_eq!(second.url(), "/rest/api/2/project");
+            second
+                .respond(json_response(
+                    200,
+                    r#"[{"id":"1","key":"AMP","name":"AMP"}]"#,
+                ))
+                .unwrap();
+        });
+        let projects = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].key, "AMP");
     }
 }

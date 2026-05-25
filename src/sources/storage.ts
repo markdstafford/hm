@@ -1,4 +1,5 @@
 import { commands } from "../bindings";
+import type { JiraIssueIngestionProgress } from "../bindings";
 import { EMPTY_SOURCES_CONFIG, JIRA_UNAVAILABLE_MESSAGE } from "./defaults";
 import type {
   SourcesConfig,
@@ -70,6 +71,38 @@ export async function testJiraSourceConnection(
     };
   }
   const r = await commands.jiraSourceTestConnection(source, pendingPat);
+  if (r.status === "error") throw new Error(r.error);
+  return r.data;
+}
+
+export async function runJiraIssueIngestion(
+  sourceId: string,
+  options?: { fetchRemoteLinks: boolean }
+): Promise<{ ok: true; runId: string } | { ok: false; error: string }> {
+  if (!isTauri()) return { ok: true, runId: "browser-preview" };
+  const wireOptions = options
+    ? { fetch_remote_links: options.fetchRemoteLinks }
+    : null;
+  const r = await commands.jiraIssueIngestionRun(sourceId, wireOptions);
+  return r.status === "ok"
+    ? { ok: true, runId: r.data.run_id }
+    : { ok: false, error: r.error };
+}
+
+export async function cancelJiraIssueIngestion(
+  sourceId: string,
+  runId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isTauri()) return { ok: true };
+  const r = await commands.jiraIssueIngestionCancel(sourceId, runId);
+  return r.status === "ok" ? { ok: true } : { ok: false, error: r.error };
+}
+
+export async function loadJiraIssueIngestionProgress(
+  sourceId: string
+): Promise<JiraIssueIngestionProgress | null> {
+  if (!isTauri()) return null;
+  const r = await commands.jiraIssueIngestionProgress(sourceId);
   if (r.status === "error") throw new Error(r.error);
   return r.data;
 }

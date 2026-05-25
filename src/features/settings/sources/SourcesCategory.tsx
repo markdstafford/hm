@@ -1,6 +1,16 @@
-import { useEffect, useState } from "react";
-import { loadSourcesConfig, removeSource } from "../../../sources/storage";
-import type { SourcesConfig, JiraSourceConfig } from "../../../sources/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  cancelJiraIssueIngestion,
+  loadJiraIssueIngestionProgress,
+  loadSourcesConfig,
+  removeSource,
+  runJiraIssueIngestion,
+} from "../../../sources/storage";
+import type {
+  JiraIssueIngestionProgress,
+  JiraSourceConfig,
+  SourcesConfig,
+} from "../../../sources/types";
 import { SourceList } from "./SourceList";
 import { AddSourceFlow } from "./AddSourceFlow";
 import { JiraSourceForm } from "./JiraSourceForm";
@@ -14,12 +24,79 @@ export function SourcesCategory() {
   const [mode, setMode] = useState<Mode>("list");
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
+  const [progressBySourceId, setProgressBySourceId] = useState<
+    Record<string, JiraIssueIngestionProgress | null>
+  >({});
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fastPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (fastPollTimerRef.current) {
+        clearInterval(fastPollTimerRef.current);
+        fastPollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     loadSourcesConfig()
       .then((cfg) => { setConfig(cfg); setLoading(false); })
       .catch((e) => { setError(String(e)); setLoading(false); });
   }, []);
+
+  const refreshProgress = useCallback(async (sourceIds: string[]) => {
+    if (sourceIds.length === 0) return;
+    const entries = await Promise.all(
+      sourceIds.map(async (id) => {
+        try {
+          const p = await loadJiraIssueIngestionProgress(id);
+          return [id, p] as const;
+        } catch {
+          return [id, null] as const;
+        }
+      })
+    );
+    setProgressBySourceId((prev) => {
+      const next = { ...prev };
+      for (const [id, p] of entries) next[id] = p;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const ids = config.sources.map((s) => s.id);
+    if (ids.length > 0) {
+      void refreshProgress(ids);
+    }
+  }, [config.sources, refreshProgress]);
+
+  // Polling: when any source is running, poll every 2s for just those sources.
+  useEffect(() => {
+    const runningIds = Object.entries(progressBySourceId)
+      .filter(([, p]) => p?.status === "running")
+      .map(([id]) => id);
+
+    if (runningIds.length === 0) {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (pollTimerRef.current) return;
+    pollTimerRef.current = setInterval(() => {
+      void refreshProgress(runningIds);
+    }, 2000);
+
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [progressBySourceId, refreshProgress]);
 
   async function handleRemoveConfirm(sourceId: string) {
     const result = await removeSource(sourceId);
@@ -48,6 +125,51 @@ export function SourcesCategory() {
   function handleCancel() {
     setEditingSourceId(null);
     setMode("list");
+  }
+
+  function handleRunSync(sourceId: string) {
+    // Kick off the run but DO NOT await — the Rust command is synchronous and
+    // would block UI updates for the entire ingestion duration. We need to
+    // observe the `running` progress state during the run so the user sees
+    // live progress and a Cancel button.
+    const runPromise = runJiraIssueIngestion(sourceId).then((result) => {
+      if (!result.ok) setError(result.error);
+      // Final refresh once the run resolves to capture the terminal state.
+      return refreshProgress([sourceId]);
+    });
+
+    // Short-cycle poll to pick up the `running` state quickly. The standard
+    // 2s polling effect takes over once status flips to "running".
+    if (fastPollTimerRef.current) {
+      clearInterval(fastPollTimerRef.current);
+      fastPollTimerRef.current = null;
+    }
+    let attempts = 0;
+    fastPollTimerRef.current = setInterval(() => {
+      attempts += 1;
+      void refreshProgress([sourceId]);
+      if (attempts >= 8 && fastPollTimerRef.current) {
+        clearInterval(fastPollTimerRef.current);
+        fastPollTimerRef.current = null;
+      }
+    }, 250);
+
+    // Stop fast-polling if the run finishes before the cap is hit.
+    void runPromise.finally(() => {
+      if (fastPollTimerRef.current) {
+        clearInterval(fastPollTimerRef.current);
+        fastPollTimerRef.current = null;
+      }
+    });
+  }
+
+  async function handleCancelSync(sourceId: string, runId: string) {
+    const result = await cancelJiraIssueIngestion(sourceId, runId);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    await refreshProgress([sourceId]);
   }
 
   if (mode === "choose-kind") {
@@ -104,10 +226,13 @@ export function SourcesCategory() {
           <SourceList
             sources={config.sources}
             pendingRemoveId={pendingRemoveId}
+            progressBySourceId={progressBySourceId}
             onEdit={handleEdit}
             onRemoveRequest={setPendingRemoveId}
             onRemoveConfirm={handleRemoveConfirm}
             onRemoveCancel={() => setPendingRemoveId(null)}
+            onRunSync={handleRunSync}
+            onCancelSync={handleCancelSync}
           />
         </>
       )}

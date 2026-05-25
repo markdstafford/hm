@@ -6,7 +6,7 @@ pub fn open_in_memory() -> Result<Connection> {
     Ok(conn)
 }
 
-fn setup_schema(conn: &Connection) -> Result<()> {
+pub fn setup_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS migrations (
             id          INTEGER PRIMARY KEY,
@@ -18,7 +18,9 @@ fn setup_schema(conn: &Connection) -> Result<()> {
             value_json  TEXT NOT NULL,
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );",
-    )
+    )?;
+    crate::issues::schema::setup_schema(conn)?;
+    Ok(())
 }
 
 pub fn open_at(path: &std::path::Path) -> Result<Connection> {

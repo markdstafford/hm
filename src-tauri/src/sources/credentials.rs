@@ -57,6 +57,13 @@ pub fn validate_source_credential_ref(credential_ref: &str) -> Result<(), Source
 }
 
 /// Write a source credential secret to the secret store, returning the credential ref.
+///
+/// Surrounding ASCII whitespace (including newlines) is stripped before
+/// writing. Pasted PATs commonly carry a trailing newline from terminal
+/// output or copied UI cards, and a stray `\n` in the stored value will be
+/// inlined into the `Authorization: Bearer <pat>` header — most HTTP clients
+/// sanitize the malformed header silently, which causes the request to be
+/// treated as anonymous by Jira.
 pub fn set_source_credential_secret(
     source_id: &str,
     kind: SourceCredentialKind,
@@ -64,8 +71,14 @@ pub fn set_source_credential_secret(
     store: &dyn crate::settings::secrets::SecretStore,
 ) -> Result<String, SourceError> {
     let credential_ref = source_credential_ref(source_id, kind)?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(SourceError::InvalidConfig(
+            "credential value is empty".into(),
+        ));
+    }
     store
-        .set(&credential_ref, value)
+        .set(&credential_ref, trimmed)
         .map_err(|e| SourceError::Storage(e.to_string()))?;
     Ok(credential_ref)
 }
@@ -73,6 +86,9 @@ pub fn set_source_credential_secret(
 /// Load a source credential secret from the secret store.
 ///
 /// Returns `SourceError::MissingCredential` when the key is not found.
+/// Surrounding whitespace is stripped on load as a defensive hedge against
+/// older entries that were written before `set_source_credential_secret`
+/// trimmed input.
 pub fn load_source_credential_secret(
     credential_ref: &str,
     store: &dyn crate::settings::secrets::SecretStore,
@@ -82,7 +98,13 @@ pub fn load_source_credential_secret(
         .get(credential_ref)
         .map_err(|e| SourceError::Storage(e.to_string()))?
         .ok_or_else(|| SourceError::MissingCredential("credential not found".into()))?;
-    Ok(SourceSecretValue(value))
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(SourceError::MissingCredential(
+            "credential is empty".into(),
+        ));
+    }
+    Ok(SourceSecretValue(trimmed))
 }
 
 /// Remove a source from config and delete all credentials it owns.
@@ -215,5 +237,52 @@ mod tests {
     fn deleting_missing_source_credential_is_safe_noop() {
         let store = crate::settings::secrets::InMemorySecretStore::new();
         delete_source_credential("source.jira.src_missing.pat", &store).unwrap();
+    }
+
+    #[test]
+    fn set_trims_surrounding_whitespace_before_writing() {
+        let store = crate::settings::secrets::InMemorySecretStore::new();
+        let cred_ref = set_source_credential_secret(
+            "src_trim",
+            SourceCredentialKind::JiraPat,
+            "  jira-pat-value\n",
+            &store,
+        )
+        .unwrap();
+        let raw = store.get(&cred_ref).unwrap().unwrap();
+        assert_eq!(raw, "jira-pat-value", "stored value must be trimmed");
+        let loaded = load_source_credential_secret(&cred_ref, &store).unwrap();
+        assert_eq!(loaded.expose_for_jira_client(), "jira-pat-value");
+    }
+
+    #[test]
+    fn set_rejects_whitespace_only_value() {
+        let store = crate::settings::secrets::InMemorySecretStore::new();
+        let err = set_source_credential_secret(
+            "src_blank",
+            SourceCredentialKind::JiraPat,
+            "   \n\t",
+            &store,
+        )
+        .unwrap_err();
+        match err {
+            SourceError::InvalidConfig(msg) => assert!(msg.contains("empty")),
+            other => panic!("expected InvalidConfig, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_trims_existing_corrupted_value_for_backward_compatibility() {
+        // Simulate a pre-fix entry that was stored with a trailing newline.
+        let store = crate::settings::secrets::InMemorySecretStore::new();
+        store
+            .set("source.jira.src_legacy.pat", "jira-pat-value\n")
+            .unwrap();
+        let loaded = load_source_credential_secret(
+            "source.jira.src_legacy.pat",
+            &store,
+        )
+        .unwrap();
+        assert_eq!(loaded.expose_for_jira_client(), "jira-pat-value");
     }
 }
