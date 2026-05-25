@@ -148,22 +148,17 @@ function App() {
         mainTitleBarStart={page.titleBar}
         mainTitleBarEnd={
           inSettings ? (
-            <button
-              onClick={handleCloseSettings}
-              aria-label="Close settings"
-              className="p-1 rounded text-subtext hover:text-text"
-            >
+            <IconButton label="Close settings" onClick={handleCloseSettings}>
               <X size={12} aria-hidden={true} />
-            </button>
+            </IconButton>
           ) : (
-            <button
+            <IconButton
               ref={settingsOpenerRef}
+              label="Open settings"
               onClick={() => setSettingsPage("general")}
-              aria-label="Open settings"
-              className="p-1 rounded text-subtext hover:text-text"
             >
               <SettingsIcon size={12} aria-hidden={true} />
-            </button>
+            </IconButton>
           )
         }
         mainHeader={page.header ?? undefined}

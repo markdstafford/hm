@@ -108,7 +108,7 @@ function ProfileRow({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium text-sm text-text truncate">{profile.name}</span>
               {pill && (
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-surface text-subtext">
+                <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-surface text-subtext">
                   {pill}
                 </span>
               )}
@@ -130,7 +130,7 @@ function ProfileRow({
                 {routedTasks.map((t) => (
                   <span
                     key={t}
-                    className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-primary/10 text-primary"
+                    className="text-xs font-mono px-1.5 py-0.5 rounded bg-primary/10 text-primary"
                   >
                     {t}
                   </span>

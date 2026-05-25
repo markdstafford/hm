@@ -51,7 +51,7 @@ export function YamlAdvancedView({ config, onSave, onCancel }: Props) {
       <textarea
         aria-label="AI providers YAML"
         spellCheck={false}
-        className="w-full min-h-[420px] rounded border border-border bg-background text-text px-3 py-2 font-mono text-xs leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className="w-full min-h-96 rounded border border-border bg-background text-text px-3 py-2 font-mono text-xs leading-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         value={text}
         onChange={(e) => { setText(e.target.value); if (error) setError(null); }}
       />

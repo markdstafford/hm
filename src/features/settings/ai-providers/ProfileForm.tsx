@@ -624,7 +624,7 @@ export function ProfileForm({
                   onCheckedChange={(v) => toggleRoute(task, v === true)}
                 />
                 {conflict && (
-                  <span className="text-[10px] text-yellow" title={`Currently: ${conflict.currentlyAssigned}`}>
+                  <span className="text-xs text-yellow" title={`Currently: ${conflict.currentlyAssigned}`}>
                     reassign from {conflict.currentlyAssigned}
                   </span>
                 )}

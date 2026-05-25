@@ -86,7 +86,7 @@ export function SourcesCategory() {
   return (
     <section aria-labelledby="sources-heading" className="space-y-6">
       <div>
-        <h1 id="sources-heading" className="text-2xl font-semibold text-text">Sources</h1>
+        <h1 id="sources-heading" className="text-lg font-semibold text-text">Sources</h1>
         <p className="text-sm text-subtext mt-1">
           Configure the systems hm reads from. Secrets are stored in the OS keychain.
         </p>
