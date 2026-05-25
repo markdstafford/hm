@@ -1,7 +1,25 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
+import { beforeAll, vi } from "vitest";
 import App from "./App";
+
+beforeAll(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).PointerEvent = window.MouseEvent;
+  if (!window.HTMLElement.prototype.hasPointerCapture) {
+    window.HTMLElement.prototype.hasPointerCapture = () => false;
+  }
+  if (!window.HTMLElement.prototype.releasePointerCapture) {
+    window.HTMLElement.prototype.releasePointerCapture = () => {};
+  }
+  if (!window.HTMLElement.prototype.setPointerCapture) {
+    window.HTMLElement.prototype.setPointerCapture = () => {};
+  }
+  if (!window.HTMLElement.prototype.scrollIntoView) {
+    window.HTMLElement.prototype.scrollIntoView = () => {};
+  }
+});
 
 vi.mock("./bindings", () => ({
   commands: {
@@ -35,11 +53,12 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: /open settings/i })).toBeInTheDocument();
   });
 
-  it("opens the settings panel when opener is clicked", async () => {
+  it("flips into the settings page mode when opener is clicked", async () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole("button", { name: /open settings/i }));
-    expect(screen.getByRole("dialog", { name: /settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Close settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
   });
 
   it("has no accessibility violations on initial render", async () => {

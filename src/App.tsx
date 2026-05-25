@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Inbox, Settings as SettingsIcon, PanelLeft, Sparkles, MessageSquare } from "lucide-react";
+import { Inbox, Settings as SettingsIcon, PanelLeft, Sparkles, MessageSquare, X } from "lucide-react";
 import { commands, type AppStatus } from "./bindings";
 import {
   type AppPreferences,
@@ -10,7 +10,6 @@ import {
 import { applyColorScheme, applyFonts, getSystemPrefersDark } from "./theme";
 import { loadPreferences, savePreferences } from "./preferences/storage";
 import { restoreWindowState, registerWindowListeners } from "./windowState";
-import { SettingsPanel } from "./settings/SettingsPanel";
 import { AppShell } from "./shell/AppShell";
 import { useShortcut } from "./shell/useShortcut";
 import { IconButton } from "./ui/buttons/IconButton";
@@ -19,12 +18,18 @@ import { NavItem } from "./ui/sidebar/NavItem";
 import { ScopeHeader } from "./ui/sidebar/ScopeHeader";
 import { Showcase } from "./_dev/Showcase";
 import { InboxPage } from "./features/inbox/InboxPage";
+import {
+  SettingsPage,
+  SettingsBreadcrumb,
+} from "./features/settings/SettingsPage";
+import { SettingsSidebar } from "./features/settings/SettingsSidebar";
+import type { SettingsCategory } from "./features/settings/categories";
 
 function App() {
   const [prefs, setPrefs] = useState<AppPreferences>(DEFAULT_PREFERENCES);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [status, setStatus] = useState<AppStatus | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<SettingsCategory | null>(null);
   const [showShowcase, setShowShowcase] = useState(false);
   const [prefersDark, setPrefersDark] = useState(getSystemPrefersDark);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
@@ -103,35 +108,63 @@ function App() {
 
   useShortcut("⌘+shift+d", () => setShowShowcase((v) => !v), { allowInForm: true });
 
-  const handleSettingsOpen = () => setSettingsOpen(true);
-  const handleSettingsClose = () => {
-    setSettingsOpen(false);
+  const inSettings = settingsPage !== null;
+  const handleCloseSettings = () => {
+    setSettingsPage(null);
     setTimeout(() => settingsOpenerRef.current?.focus(), 0);
   };
 
-  const page = showShowcase
+  const page = inSettings
+    ? {
+        titleBar: <SettingsBreadcrumb category={settingsPage!} />,
+        header: null as React.ReactNode,
+        content: (
+          <SettingsPage
+            category={settingsPage!}
+            onPickCategory={setSettingsPage}
+            prefs={prefs}
+            onUpdatePreferences={updatePreferences}
+            prefersDark={prefersDark}
+          />
+        ),
+      }
+    : showShowcase
     ? { titleBar: <span className="text-sm text-text">Showcase</span>, header: null as React.ReactNode, content: <Showcase /> }
     : InboxPage;
 
   return (
     <>
       <AppShell
-        sidebarHeader={<ScopeHeader name="Personal" />}
+        sidebarHeader={inSettings ? null : <ScopeHeader name="Personal" />}
         sidebarContent={
-          <NavSection label="Personal">
-            <NavItem label="Inbox" count={0} icon={<Inbox size={12} />} active />
-          </NavSection>
+          inSettings ? (
+            <SettingsSidebar current={settingsPage!} onPick={setSettingsPage} />
+          ) : (
+            <NavSection label="Personal">
+              <NavItem label="Inbox" count={0} icon={<Inbox size={12} />} active />
+            </NavSection>
+          )
         }
         mainTitleBarStart={page.titleBar}
         mainTitleBarEnd={
-          <button
-            ref={settingsOpenerRef}
-            onClick={handleSettingsOpen}
-            aria-label="Open settings"
-            className="p-1 rounded text-subtext hover:text-text"
-          >
-            <SettingsIcon size={12} aria-hidden={true} />
-          </button>
+          inSettings ? (
+            <button
+              onClick={handleCloseSettings}
+              aria-label="Close settings"
+              className="p-1 rounded text-subtext hover:text-text"
+            >
+              <X size={12} aria-hidden={true} />
+            </button>
+          ) : (
+            <button
+              ref={settingsOpenerRef}
+              onClick={() => setSettingsPage("general")}
+              aria-label="Open settings"
+              className="p-1 rounded text-subtext hover:text-text"
+            >
+              <SettingsIcon size={12} aria-hidden={true} />
+            </button>
+          )
         }
         mainHeader={page.header ?? undefined}
         mainContent={page.content}
@@ -154,14 +187,6 @@ function App() {
           {saveError}
         </p>
       )}
-
-      <SettingsPanel
-        open={settingsOpen}
-        onClose={handleSettingsClose}
-        prefs={prefs}
-        onUpdatePreferences={updatePreferences}
-        prefersDark={prefersDark}
-      />
     </>
   );
 }
