@@ -149,7 +149,10 @@ For any interactive component with accessibility requirements (focus management,
 | `children` | `ReactNode` | required | The icon (Lucide React). |
 | `dimmed` | `boolean` | `false` | Renders muted; reads as "secondary action." |
 | `active` | `boolean` | `false` | Renders in accent color; reads as "currently on." |
-| `...rest` | `ButtonHTMLAttributes` | — | Standard button attributes (incl. `disabled`, `onClick`). |
+| `disabled` | `boolean` | `false` | Renders muted; blocks `onClick` and `Enter` / `Space` activation. |
+| `...rest` | `ButtonHTMLAttributes` | — | Standard button attributes (`onClick`, etc.). |
+
+**Disabled semantics.** `IconButton` uses `aria-disabled="true"` rather than the native `disabled` attribute. The native attribute would suppress pointer and focus events, which would break the wrapping Radix Tooltip — "(coming soon)" buttons would have no hover or focus explanation. `aria-disabled` keeps the button focusable and Tooltip-eligible; the component blocks click and `Enter` / `Space` activation in handlers so the disabled state remains effective. Tests should assert `toHaveAttribute("aria-disabled", "true")` rather than `toBeDisabled()` — jest-dom's `toBeDisabled` matcher only honors `aria-disabled` for custom elements with a button role, not for native `<button>`.
 
 ### Forms — `src/ui/forms/`
 
@@ -314,7 +317,11 @@ Persistent ~28px row at the very bottom (`--height-footer`). Three zones:
 
 ### Composer
 
-`<AppShell>` at `src/shell/AppShell.tsx` composes the layout. The API is **flat slot props** — one prop per zone: `sidebarTitleBar`, `sidebarHeader`, `sidebarContent`, `mainTitleBar`, `mainHeader`, `mainContent`, `footerLeft`, `footerCenter`, `footerRight`, plus an optional `scrollCollapse` prop (default `"none"`) reserved for the user-configurable behavior below. The shell internally owns sidebar visibility (via `useSidebarToggle`), breakpoint detection (`useViewportBreakpoint`), the overlay drawer at narrow widths, and drag-region wiring on the title-bar spacers.
+`<AppShell>` at `src/shell/AppShell.tsx` composes the layout. The API is **flat slot props** — one prop per zone: `sidebarTitleBar`, `sidebarHeader`, `sidebarContent`, `mainTitleBarStart` (page identity), `mainTitleBarEnd` (page-level actions), `mainHeader`, `mainContent`, `footerLeft`, `footerCenter`, `footerRight`, plus an optional `scrollCollapse` prop (default `"none"`) reserved for the user-configurable behavior below. The shell renders a `data-tauri-drag-region` spacer between `mainTitleBarStart` and `mainTitleBarEnd` so consumers do not have to thread drag-region attributes through their own slot content. The shell internally owns sidebar visibility, breakpoint detection (`useViewportBreakpoint`), the overlay drawer at narrow widths, and drag-region wiring on the title-bar spacers.
+
+**Wide and narrow visibility are tracked separately.** Wide mode mounts with the sidebar visible in its column. Narrow mode auto-collapses on mount and never opens automatically — the overlay drawer appears only after the user presses `[` or clicks the footer toggle. Switching breakpoints does not bleed state between modes: hiding the wide-mode column does not preset the narrow-mode overlay, and dismissing the overlay does not hide the wide-mode column on a subsequent resize.
+
+`footerLeft` accepts either a `ReactNode` or a render prop `(state: { sidebarVisible, toggleSidebar }) => ReactNode`. The render-prop form lets the consumer wire the sidebar-toggle `IconButton` to the shell's internal state without lifting it out of the shell.
 
 Feature pages compose against the shell by providing children for the appropriate zones. See "Page composer pattern" below + `src/features/<feature-name>/`.
 

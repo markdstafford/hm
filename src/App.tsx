@@ -122,19 +122,16 @@ function App() {
             <NavItem label="Inbox" count={0} icon={<Inbox size={12} />} active />
           </NavSection>
         }
-        mainTitleBar={
-          <>
-            {page.titleBar}
-            <span className="flex-1" />
-            <button
-              ref={settingsOpenerRef}
-              onClick={handleSettingsOpen}
-              aria-label="Open settings"
-              className="p-1 rounded text-subtext hover:text-text"
-            >
-              <SettingsIcon size={12} aria-hidden={true} />
-            </button>
-          </>
+        mainTitleBarStart={page.titleBar}
+        mainTitleBarEnd={
+          <button
+            ref={settingsOpenerRef}
+            onClick={handleSettingsOpen}
+            aria-label="Open settings"
+            className="p-1 rounded text-subtext hover:text-text"
+          >
+            <SettingsIcon size={12} aria-hidden={true} />
+          </button>
         }
         mainHeader={page.header ?? undefined}
         mainContent={page.content}

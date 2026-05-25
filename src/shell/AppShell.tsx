@@ -1,5 +1,4 @@
-import { useCallback, type ReactNode } from "react";
-import { useSidebarToggle } from "./useSidebarToggle";
+import { useCallback, useState, type ReactNode } from "react";
 import { useViewportBreakpoint } from "./useViewportBreakpoint";
 import { useShortcut } from "./useShortcut";
 import { Footer } from "./Footer";
@@ -10,7 +9,10 @@ export type AppShellProps = {
   sidebarTitleBar?: ReactNode;
   sidebarHeader?: ReactNode;
   sidebarContent: ReactNode;
-  mainTitleBar: ReactNode;
+  /** Page identity zone in the main title bar (breadcrumb, title, count). */
+  mainTitleBarStart: ReactNode;
+  /** Optional action zone in the main title bar (settings cog, page-level buttons). */
+  mainTitleBarEnd?: ReactNode;
   mainHeader?: ReactNode;
   mainContent: ReactNode;
   footerLeft?: ReactNode | FooterLeftRender;
@@ -23,25 +25,41 @@ export function AppShell({
   sidebarTitleBar,
   sidebarHeader,
   sidebarContent,
-  mainTitleBar,
+  mainTitleBarStart,
+  mainTitleBarEnd,
   mainHeader,
   mainContent,
   footerLeft,
   footerCenter,
   footerRight,
 }: AppShellProps) {
-  const { visible, setVisible } = useSidebarToggle(true);
+  // Wide-mode column visibility and narrow-mode overlay state are tracked
+  // separately so resizing across the breakpoint does not bleed user-chosen
+  // state between them. The spec requires "auto-collapse" below 900px, so
+  // overlayOpen starts false and the overlay only appears after the user
+  // opens it via `[` or the footer toggle.
+  const [wideVisible, setWideVisible] = useState(true);
+  const [overlayOpen, setOverlayOpen] = useState(false);
   const bp = useViewportBreakpoint();
-  const overlay = bp === "narrow" && visible;
+
+  const showInColumn = bp === "wide" && wideVisible;
+  const overlay = bp === "narrow" && overlayOpen;
+  const visible = bp === "wide" ? wideVisible : overlayOpen;
+
+  const toggle = useCallback(() => {
+    if (bp === "wide") setWideVisible((v) => !v);
+    else setOverlayOpen((v) => !v);
+  }, [bp]);
+
+  useShortcut("[", toggle);
+
   const dismissOverlay = useCallback(() => {
-    if (overlay) setVisible(false);
-  }, [overlay, setVisible]);
+    setOverlayOpen(false);
+  }, []);
   useShortcut("escape", dismissOverlay, { enabled: overlay });
 
-  const showInColumn = visible && bp === "wide";
-
   const resolvedFooterLeft = typeof footerLeft === "function"
-    ? footerLeft({ sidebarVisible: visible, toggleSidebar: () => setVisible(!visible) })
+    ? footerLeft({ sidebarVisible: visible, toggleSidebar: toggle })
     : footerLeft;
 
   return (
@@ -70,8 +88,11 @@ export function AppShell({
             {!showInColumn && (
               <div className="titlebar-no-drag" style={{ width: "var(--width-traffic-light)" }} />
             )}
-            <span className="titlebar-no-drag flex items-center gap-2 min-w-0">{mainTitleBar}</span>
+            <span className="titlebar-no-drag flex items-center gap-2 min-w-0">{mainTitleBarStart}</span>
             <div data-tauri-drag-region className="flex-1 min-w-0" />
+            {mainTitleBarEnd && (
+              <span className="titlebar-no-drag flex items-center gap-2">{mainTitleBarEnd}</span>
+            )}
           </div>
           {mainHeader && (
             <div className="flex items-center px-3" style={{ height: "var(--height-header-bar)" }}>
