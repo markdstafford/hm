@@ -1,5 +1,14 @@
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Search, Inbox } from "lucide-react";
+import {
+  THEME_CATALOG,
+  CATPPUCCIN_ACCENTS,
+  applyColorScheme,
+  applyFonts,
+  getThemeMeta,
+  themeSupportsFeature,
+  type CatppuccinAccent,
+} from "../theme";
 import { Heading } from "../ui/text/Heading";
 import { Button } from "../ui/buttons/Button";
 import { IconButton } from "../ui/buttons/IconButton";
@@ -69,10 +78,101 @@ function ColorSwatch({ name, varName }: { name: string; varName: string }) {
 export function Showcase() {
   const [breakpointOverlay, setBreakpointOverlay] = useState(false);
   const [multi, setMulti] = useState<string[]>([]);
+
+  const initialRef = useRef<null | {
+    themeId: string;
+    brightness: "light" | "dark";
+    accent: CatppuccinAccent | undefined;
+    uiFont: string;
+    monoFont: string;
+  }>(null);
+
+  if (!initialRef.current && typeof document !== "undefined") {
+    const root = document.documentElement;
+    const themeId = root.dataset.theme ?? "catppuccin-macchiato";
+    const brightness = (root.dataset.themeMode === "light" ? "light" : "dark") as "light" | "dark";
+    const accent = (root.dataset.accent as CatppuccinAccent | undefined) || undefined;
+    const sansVar = root.style.getPropertyValue("--font-sans") || getComputedStyle(root).getPropertyValue("--font-sans");
+    const monoVar = root.style.getPropertyValue("--font-mono") || getComputedStyle(root).getPropertyValue("--font-mono");
+    const firstFamily = (s: string) => (s.match(/^["']?([^"',]+)["']?/)?.[1] ?? "").trim();
+    initialRef.current = {
+      themeId,
+      brightness,
+      accent,
+      uiFont: firstFamily(sansVar) || "Inter Variable",
+      monoFont: firstFamily(monoVar) || "Fira Code",
+    };
+  }
+
+  const [themeId, setThemeId] = useState(() => initialRef.current?.themeId ?? "catppuccin-macchiato");
+  const [accent, setAccent] = useState<CatppuccinAccent | undefined>(() => initialRef.current?.accent);
+  const [uiFont, setUiFont] = useState(() => initialRef.current?.uiFont ?? "Inter Variable");
+  const [monoFont, setMonoFont] = useState(() => initialRef.current?.monoFont ?? "Fira Code");
+
+  useEffect(() => {
+    const brightness = (getThemeMeta(themeId)?.brightness ?? "dark") as "light" | "dark";
+    const supportsAccent = themeSupportsFeature(themeId, "catppuccinAccent");
+    applyColorScheme({ themeId, brightness, accent: supportsAccent ? accent : undefined });
+  }, [themeId, accent]);
+
+  useEffect(() => {
+    applyFonts(uiFont, monoFont);
+  }, [uiFont, monoFont]);
+
+  useEffect(() => {
+    return () => {
+      const initial = initialRef.current;
+      if (!initial) return;
+      applyColorScheme({ themeId: initial.themeId, brightness: initial.brightness, accent: initial.accent });
+      applyFonts(initial.uiFont, initial.monoFont);
+    };
+  }, []);
+
+  const supportsAccent = themeSupportsFeature(themeId, "catppuccinAccent");
+
+  function reset() {
+    const initial = initialRef.current;
+    if (!initial) return;
+    setThemeId(initial.themeId);
+    setAccent(initial.accent);
+    setUiFont(initial.uiFont);
+    setMonoFont(initial.monoFont);
+  }
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <Heading level={1}>Design system showcase</Heading>
-      <p className="text-sm text-subtext">Press Cmd+Shift+D to toggle. Use the breakpoint overlay to inspect the 900px boundary.</p>
+      <p className="text-sm text-subtext">Press Cmd+Shift+D to toggle. Use the breakpoint overlay to inspect the 900px boundary. Theme, accent, and font changes are transient; they do not write to your preferences.</p>
+
+      <Section title="Appearance (transient)">
+        <Card caption="Theme">
+          <Select
+            aria-label="Theme"
+            value={themeId}
+            onValueChange={setThemeId}
+            options={THEME_CATALOG.map((t) => ({ value: t.id, label: t.label }))}
+          />
+        </Card>
+        {supportsAccent && (
+          <Card caption="Catppuccin accent">
+            <Select
+              aria-label="Accent"
+              value={accent ?? "sapphire"}
+              onValueChange={(v) => setAccent(v as CatppuccinAccent)}
+              options={CATPPUCCIN_ACCENTS.map((a) => ({ value: a, label: a }))}
+            />
+          </Card>
+        )}
+        <Card caption="UI font">
+          <TextField aria-label="UI font" value={uiFont} onChange={(e) => setUiFont(e.target.value)} />
+        </Card>
+        <Card caption="Code font">
+          <TextField aria-label="Code font" value={monoFont} onChange={(e) => setMonoFont(e.target.value)} />
+        </Card>
+        <Card caption="Reset">
+          <Button onClick={reset}>Reset to my preferences</Button>
+        </Card>
+      </Section>
 
       <Section title="Tokens">
         <Card caption="Color tokens">

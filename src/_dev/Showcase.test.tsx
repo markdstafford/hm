@@ -6,7 +6,7 @@ import { Showcase } from "./Showcase";
 describe("Showcase", () => {
   it("renders all category headings", () => {
     render(<Showcase />);
-    for (const h of ["Tokens", "Buttons", "Forms", "Overlays", "Navigation", "Sidebar", "Feedback", "Data", "Text", "Layout"]) {
+    for (const h of ["Appearance (transient)", "Tokens", "Buttons", "Forms", "Overlays", "Navigation", "Sidebar", "Feedback", "Data", "Text", "Layout"]) {
       expect(screen.getByRole("heading", { name: h })).toBeInTheDocument();
     }
   });
