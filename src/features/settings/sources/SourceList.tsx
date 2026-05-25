@@ -1,3 +1,4 @@
+import type { JiraIssueIngestionProgress } from "../../../bindings";
 import type { SourceConfig } from "../../../sources/types";
 import { Button } from "../../../ui/buttons/Button";
 import { Card } from "../../../ui/layout/Card";
@@ -6,19 +7,25 @@ import { AlertDialog } from "../../../ui/overlays/AlertDialog";
 interface SourceListProps {
   sources: SourceConfig[];
   pendingRemoveId: string | null;
+  progressBySourceId: Record<string, JiraIssueIngestionProgress | null>;
   onEdit: (sourceId: string) => void;
   onRemoveRequest: (sourceId: string) => void;
   onRemoveConfirm: (sourceId: string) => void;
   onRemoveCancel: () => void;
+  onRunSync: (sourceId: string) => void;
+  onCancelSync: (sourceId: string, runId: string) => void;
 }
 
 export function SourceList({
   sources,
   pendingRemoveId,
+  progressBySourceId,
   onEdit,
   onRemoveRequest,
   onRemoveConfirm,
   onRemoveCancel,
+  onRunSync,
+  onCancelSync,
 }: SourceListProps) {
   if (sources.length === 0) {
     return (
@@ -62,6 +69,26 @@ export function SourceList({
               ? jira.projects[0].key
               : `${jira.projects.length} projects: ${jira.projects.map((p) => p.key).join(", ")}`;
 
+          const progress = progressBySourceId[jira.id] ?? null;
+          const running = progress?.status === "running";
+          const statusMessage = progress ? progress.message : "Not synced";
+          let progressLine: string | null = null;
+          if (progress) {
+            if (typeof progress.total_issues === "number") {
+              progressLine = `Progress: ${progress.saved_issues} of ${progress.total_issues} issues saved`;
+              if (
+                typeof progress.current_page === "number" &&
+                typeof progress.total_pages === "number"
+              ) {
+                progressLine += ` · page ${progress.current_page} of ${progress.total_pages}`;
+              }
+              if (progress.phase && progress.phase.length > 0) {
+                progressLine += ` · ${progress.phase}`;
+              }
+            } else if (progress.saved_issues > 0) {
+              progressLine = `Progress: ${progress.saved_issues} issues saved`;
+            }
+          }
           return (
             <li key={jira.id}>
               <Card>
@@ -75,6 +102,31 @@ export function SourceList({
                         Last test: {jira.last_connection_test.status} — {jira.last_connection_test.message}
                       </div>
                     )}
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="pt-1 space-y-0.5"
+                    >
+                      <div className="text-xs text-subtext">
+                        Status: {statusMessage}
+                      </div>
+                      {progressLine && (
+                        <div className="text-xs text-subtext">{progressLine}</div>
+                      )}
+                      {progress?.last_successful_issue_sync_at && (
+                        <div className="text-xs text-subtext">
+                          Last successful issue sync: {progress.last_successful_issue_sync_at}
+                        </div>
+                      )}
+                      <div className="text-xs text-subtext">
+                        Optional sub-resources: Watchers · Off · never synced · Votes · Off · never synced · Remote links · Off · never synced
+                      </div>
+                      {progress?.error_summary && (
+                        <div className="text-xs text-red">
+                          Error: {progress.error_summary}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="flex gap-1 shrink-0">
                     <button
@@ -91,6 +143,19 @@ export function SourceList({
                     >
                       Remove
                     </button>
+                    {running && progress ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onCancelSync(jira.id, progress.run_id)}
+                      >
+                        Cancel sync
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={() => onRunSync(jira.id)}>
+                        Run sync now
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>

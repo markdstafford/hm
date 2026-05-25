@@ -12,4 +12,5 @@ export type {
   JiraConnectionTestStatus,
   JiraConnectionProject,
   JiraConnectionErrorCategory,
+  JiraIssueIngestionProgress,
 } from "../bindings";
