@@ -165,6 +165,7 @@ For any interactive component with accessibility requirements (focus management,
 | `Checkbox` | `@radix-ui/react-checkbox` | Boolean toggle in lists. |
 | `Switch` | `@radix-ui/react-switch` | Inline boolean toggle. |
 | `RadioGroup` | `@radix-ui/react-radio-group` | Single-choice from a small set. Compound: `RadioGroup` + `RadioGroup.Item` (each item carries its own label). |
+| `SettingRow` | layout | Label + optional description on the left, control on the right, hairline below. Used by settings categories (General, Appearance). |
 
 ### Overlays — `src/ui/overlays/`
 
