@@ -240,7 +240,7 @@ vi.mock("../bindings", () => ({
 
 ### Frontend tests
 
-- AI provider tests mock `../bindings` command functions (see `AiProvidersSettings.test.tsx`).
+- AI provider tests mock `../../../bindings` command functions and use `vi.resetAllMocks()` + an `installDefaults()` helper in `beforeEach` so per-test `mockImplementation`s don't leak between tests (see `src/features/settings/ai-providers/AiProvidersCategory.test.tsx`).
 - `validateAiProviderConfig` is a pure function; `validation.test.ts` tests it without any mocks.
 - `storage.ts` guards all Tauri calls with `isTauri()` check; non-Tauri (Vitest jsdom) returns safe fallbacks.
 

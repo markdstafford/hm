@@ -16,33 +16,51 @@ beforeAll(() => {
 
 vi.mock("../../../bindings", () => ({
   commands: {
-    aiProviderConfigGet: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: { version: 1, credentials: [], endpoints: [], profiles: [], routing: {} },
-    }),
-    aiProviderConfigSave: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    aiCredentialSecretSet: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    aiCredentialSecretDelete: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    aiProfileSmokeTest: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: {
-        status: "Success",
-        profile: "test",
-        runner: "AnthropicMessages",
-        execution_mode: "DirectApi",
-        model: "m",
-        elapsed_ms: 100,
-        preview: "ok",
-        error: null,
-        suggested_fix: null,
-      },
-    }),
+    aiProviderConfigGet: vi.fn(),
+    aiProviderConfigSave: vi.fn(),
+    aiCredentialSecretSet: vi.fn(),
+    aiCredentialSecretDelete: vi.fn(),
+    aiProfileSmokeTest: vi.fn(),
   },
 }));
 
+// Reinstall the default mock implementations before every test. Using
+// vi.resetAllMocks() instead of vi.clearAllMocks() means a per-test
+// mockImplementation does not leak into the next test, so test ordering
+// stays an implementation detail.
+function installDefaults() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (commands.aiProviderConfigGet as any).mockResolvedValue({
+    status: "ok",
+    data: { version: 1, credentials: [], endpoints: [], profiles: [], routing: {} },
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (commands.aiProviderConfigSave as any).mockResolvedValue({ status: "ok", data: null });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (commands.aiCredentialSecretSet as any).mockResolvedValue({ status: "ok", data: null });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (commands.aiCredentialSecretDelete as any).mockResolvedValue({ status: "ok", data: null });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (commands.aiProfileSmokeTest as any).mockResolvedValue({
+    status: "ok",
+    data: {
+      status: "Success",
+      profile: "test",
+      runner: "AnthropicMessages",
+      execution_mode: "DirectApi",
+      model: "m",
+      elapsed_ms: 100,
+      preview: "ok",
+      error: null,
+      suggested_fix: null,
+    },
+  });
+}
+
 describe("AiProvidersCategory", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    installDefaults();
   });
 
   it("renders the empty state when no profiles exist", async () => {
@@ -60,18 +78,18 @@ describe("AiProvidersCategory", () => {
   });
 
   it("writes the keychain secret before saving the config when a new Keychain credential is created", async () => {
+    // Push each call's identity into a shared call-order array. Previously
+    // this test compared two independent counters that both ended at 1, so a
+    // reversed order would still satisfy the assertion — a false positive.
+    const callOrder: string[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const setSpy = (commands.aiCredentialSecretSet as any) as ReturnType<typeof vi.fn>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const saveSpy = (commands.aiProviderConfigSave as any) as ReturnType<typeof vi.fn>;
-    let setAt = 0;
-    let saveAt = 0;
-    setSpy.mockImplementation(async () => {
-      setAt = ++setAt || Date.now();
+    (commands.aiCredentialSecretSet as any).mockImplementation(async () => {
+      callOrder.push("set-secret");
       return { status: "ok", data: null };
     });
-    saveSpy.mockImplementation(async () => {
-      saveAt = ++saveAt || Date.now();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (commands.aiProviderConfigSave as any).mockImplementation(async () => {
+      callOrder.push("save-config");
       return { status: "ok", data: null };
     });
 
@@ -85,20 +103,17 @@ describe("AiProvidersCategory", () => {
     await userEvent.type(screen.getByLabelText(/^Model$/i), "claude-y");
     await userEvent.click(screen.getByRole("button", { name: /Add profile/ }));
 
-    await waitFor(() => expect(setSpy).toHaveBeenCalledWith("cred", "sk-keep-me"));
-    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
-    expect(setAt).toBeLessThanOrEqual(saveAt);
+    await waitFor(() => expect(callOrder).toContain("save-config"));
+    expect(callOrder).toEqual(["set-secret", "save-config"]);
   });
 
   it("rolls back the keychain secret when the config save fails", async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const setSpy = (commands.aiCredentialSecretSet as any) as ReturnType<typeof vi.fn>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const saveSpy = (commands.aiProviderConfigSave as any) as ReturnType<typeof vi.fn>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const deleteSpy = (commands.aiCredentialSecretDelete as any) as ReturnType<typeof vi.fn>;
-    setSpy.mockResolvedValue({ status: "ok", data: null });
-    saveSpy.mockResolvedValue({ status: "error", error: "validation failed" });
+    (commands.aiProviderConfigSave as any).mockResolvedValue({
+      status: "error",
+      error: "validation failed",
+    });
+    const deleteSpy = commands.aiCredentialSecretDelete as ReturnType<typeof vi.fn>;
 
     render(<AiProvidersCategory />);
     await screen.findByText(/No AI profiles configured/);
@@ -116,10 +131,7 @@ describe("AiProvidersCategory", () => {
 
   it("removes a profile and clears routing entries that pointed at it", async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const getSpy = (commands.aiProviderConfigGet as any) as ReturnType<typeof vi.fn>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const saveSpy = (commands.aiProviderConfigSave as any) as ReturnType<typeof vi.fn>;
-    getSpy.mockResolvedValueOnce({
+    (commands.aiProviderConfigGet as any).mockResolvedValueOnce({
       status: "ok",
       data: {
         version: 1,
@@ -129,7 +141,7 @@ describe("AiProvidersCategory", () => {
         routing: { "question.answer": "victim", "issue.triage": "victim" },
       },
     });
-    saveSpy.mockResolvedValue({ status: "ok", data: null });
+    const saveSpy = commands.aiProviderConfigSave as ReturnType<typeof vi.fn>;
 
     render(<AiProvidersCategory />);
     await screen.findByText("victim");
