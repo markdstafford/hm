@@ -108,6 +108,37 @@ describe("yamlToConfig", () => {
     expect(cfg.routing["question.answer"]).toBe("grove-sonnet");
   });
 
+  it("rejects YAML with no recognized keys to avoid silently wiping config", () => {
+    // An empty mapping previously parsed as an empty config because every
+    // optional array defaulted to []. Pasting the wrong file would then
+    // overwrite the saved AI providers with nothing.
+    expect(() => yamlToConfig("{}\n", PREVIOUS)).toThrow(/at least one of credentials/);
+    expect(() => yamlToConfig("name: something\n", PREVIOUS)).toThrow(/at least one of credentials/);
+    // An `ai:` whose value is a scalar (not a mapping) also fails the wrap test.
+    expect(() => yamlToConfig("ai: nope\n", PREVIOUS)).toThrow(/at least one of credentials/);
+  });
+
+  it("rejects secret-shaped keys in profile settings", () => {
+    const bad = `credentials:
+  - name: k
+    type: api_key
+    value: \${KEYCHAIN:ai.credentials.k}
+endpoints:
+  - name: e
+    protocol: openai
+    base_url: https://api.openai.com/v1
+    credential: k
+profiles:
+  - name: p
+    endpoint: e
+    model: gpt-x
+    runner: openai_direct
+    openai:
+      api_key: sk-snuck-in
+`;
+    expect(() => yamlToConfig(bad, PREVIOUS)).toThrow(/api_key|secret/i);
+  });
+
   it("does not unwrap when the root already has known keys", () => {
     // Pathological mix: top-level routing and a stray ai: key. We must read
     // the top-level routing and not the inner ai.routing — otherwise users

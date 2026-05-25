@@ -8,6 +8,7 @@ import type {
   AiProviderConfig,
   AiRunner,
 } from "../types";
+import { validateAiProviderConfig } from "../validation";
 
 export class YamlParseError extends Error {
   constructor(message: string) {
@@ -148,6 +149,16 @@ export function yamlToConfig(yaml: string, previous: AiProviderConfig): AiProvid
   if (!hasUnwrappedKeys && obj.ai && typeof obj.ai === "object") {
     obj = obj.ai as Record<string, unknown>;
   }
+  // Refuse documents with no recognized keys at all. Without this, asArray
+  // would fall through to [] for every missing list and the parser would
+  // silently produce an empty config — pasting the wrong file would wipe
+  // the user's AI providers.
+  const hasRecognizedKey = KNOWN_ROOT_KEYS.some((k) => k in obj);
+  if (!hasRecognizedKey) {
+    throw new YamlParseError(
+      "YAML must contain at least one of credentials / endpoints / profiles / routing — pasted document is not recognized as an ai: section.",
+    );
+  }
   const credentials = asArray(obj.credentials, "credentials").map(parseCredential);
   const endpoints = asArray(obj.endpoints, "endpoints").map(parseEndpoint);
   const profiles = asArray(obj.profiles, "profiles").map(parseProfile);
@@ -178,11 +189,22 @@ export function yamlToConfig(yaml: string, previous: AiProviderConfig): AiProvid
       throw new YamlParseError(`routing[${task}]: no profile named "${profileName}"`);
     }
   }
-  return {
+  const next: AiProviderConfig = {
     version: previous.version,
     credentials,
     endpoints,
     profiles,
     routing,
   };
+  // Final pass through the central validator catches everything the manual
+  // walk above doesn't: duplicate names, unsupported protocol/runner/exec
+  // combos, and — most importantly — secret-shaped keys (api_key, password,
+  // authorization, token, secret) inside profile.settings. Without this,
+  // pasted YAML could land plaintext secrets in settings and only get
+  // caught at save time.
+  const errors = validateAiProviderConfig(next);
+  if (errors.length) {
+    throw new YamlParseError(errors.join("\n"));
+  }
+  return next;
 }
