@@ -75,6 +75,20 @@ function ColorSwatch({ name, varName }: { name: string; varName: string }) {
   );
 }
 
+function ToastDemo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Toast.Provider duration={2500}>
+      <Button onClick={() => setOpen(true)}>Show toast</Button>
+      <Toast.Root open={open} onOpenChange={setOpen}>
+        <Toast.Title>Saved</Toast.Title>
+        <Toast.Description>Your changes are persisted.</Toast.Description>
+      </Toast.Root>
+      <Toast.Viewport />
+    </Toast.Provider>
+  );
+}
+
 export function Showcase() {
   const [breakpointOverlay, setBreakpointOverlay] = useState(false);
   const [multi, setMulti] = useState<string[]>([]);
@@ -331,11 +345,8 @@ export function Showcase() {
       </Section>
 
       <Section title="Feedback">
-        <Card caption="Toast">
-          <Toast.Provider>
-            <Toast.Root open><Toast.Title>Saved</Toast.Title></Toast.Root>
-            <Toast.Viewport />
-          </Toast.Provider>
+        <Card caption="Toast (auto-dismisses)">
+          <ToastDemo />
         </Card>
         <Card caption="EmptyState"><EmptyState icon={<Inbox size={20} />} title="Nothing yet" description="Come back later." /></Card>
         <Card caption="StatusDot"><StatusDot tone="green" label="Synced" /><StatusDot tone="yellow" label="Pending" /><StatusDot tone="red" label="Error" /></Card>
