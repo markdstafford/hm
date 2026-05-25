@@ -89,11 +89,10 @@ export function AppShell({
               aria-label="Dismiss sidebar"
               onClick={dismissOverlay}
               className="absolute inset-0 bg-crust/50 z-30 cursor-default"
-              style={{ bottom: "var(--height-footer)" }}
             />
             <aside
-              className="absolute top-0 left-0 bg-mantle flex flex-col border-r border-border z-40"
-              style={{ width: "var(--width-sidebar)", bottom: "var(--height-footer)" }}
+              className="absolute top-0 left-0 bottom-0 bg-mantle flex flex-col border-r border-border z-40"
+              style={{ width: "var(--width-sidebar)" }}
             >
               <div className="flex" style={{ height: "var(--height-title-bar)" }}>
                 <div className="titlebar-no-drag" style={{ width: "var(--width-traffic-light)" }} />

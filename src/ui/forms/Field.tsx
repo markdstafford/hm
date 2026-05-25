@@ -9,7 +9,8 @@ type Props = {
 
 export function Field({ label, help, error, children }: Props) {
   const id = useId();
-  const helpId = help ? `${id}-help` : undefined;
+  const showHelp = !!help && !error;
+  const helpId = showHelp ? `${id}-help` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
   return (
@@ -18,7 +19,7 @@ export function Field({ label, help, error, children }: Props) {
         {label}
       </label>
       {children({ id, describedBy })}
-      {help && !error && (
+      {showHelp && (
         <span id={helpId} className="text-xs text-subtext-1">{help}</span>
       )}
       {error && (

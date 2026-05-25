@@ -7,11 +7,12 @@ type Props = {
   options: MultiSelectOption[];
   value: string[];
   onChange: (next: string[]) => void;
-  "aria-label"?: string;
+  "aria-label": string;
   placeholder?: string;
 };
 
 export function MultiSelect({ options, value, onChange, placeholder = "Select…", ...rest }: Props) {
+  const label = rest["aria-label"];
   const summary = value.length
     ? options.filter((o) => value.includes(o.value)).map((o) => o.label).join(", ")
     : placeholder;
@@ -23,10 +24,10 @@ export function MultiSelect({ options, value, onChange, placeholder = "Select…
       trigger={
         <button
           type="button"
-          aria-label={rest["aria-label"]}
+          aria-label={label}
           className="inline-flex h-control-base items-center rounded border border-border bg-background px-2 text-sm text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
-          <span className="truncate max-w-[10rem]">{rest["aria-label"]}: {summary}</span>
+          <span className="truncate max-w-[10rem]">{label}: {summary}</span>
         </button>
       }
     >
