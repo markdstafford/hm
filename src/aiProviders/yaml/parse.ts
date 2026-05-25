@@ -43,19 +43,27 @@ function parseCredential(raw: unknown, i: number): AiCredentialConfig {
   }
   if (type === "api_key" || type === "bearer_token") {
     const kind: AiCredentialKind = type === "api_key" ? "ApiKey" : "BearerToken";
-    const value = obj.value as string | undefined;
-    if (!value) {
+    const rawValue = obj.value;
+    if (rawValue === undefined || rawValue === null) {
       return { name, kind, source: { type: "Keychain", key_ref: `ai.credentials.${name}` } };
     }
+    if (typeof rawValue !== "string") {
+      throw new YamlParseError(`${where}.value: expected a string sigil — got ${typeof rawValue}`);
+    }
+    const value = rawValue;
     if (value.startsWith("${KEYCHAIN:") && value.endsWith("}")) {
-      return {
-        name,
-        kind,
-        source: { type: "Keychain", key_ref: value.slice("${KEYCHAIN:".length, -1) },
-      };
+      const keyRef = value.slice("${KEYCHAIN:".length, -1);
+      if (!keyRef) {
+        throw new YamlParseError(`${where}.value: empty $\{KEYCHAIN:…\} sigil`);
+      }
+      return { name, kind, source: { type: "Keychain", key_ref: keyRef } };
     }
     if (value.startsWith("${") && value.endsWith("}")) {
-      return { name, kind, source: { type: "Env", var_name: value.slice(2, -1) } };
+      const varName = value.slice(2, -1);
+      if (!varName) {
+        throw new YamlParseError(`${where}.value: empty $\{…\} sigil`);
+      }
+      return { name, kind, source: { type: "Env", var_name: varName } };
     }
     throw new YamlParseError(
       `${where}.value: expected $\{ENV_VAR\} or $\{KEYCHAIN:key_ref\} sigil — never plaintext`,
@@ -131,7 +139,15 @@ export function yamlToConfig(yaml: string, previous: AiProviderConfig): AiProvid
   if (!parsed || typeof parsed !== "object") {
     throw new YamlParseError("YAML root must be a mapping");
   }
-  const obj = parsed as Record<string, unknown>;
+  let obj = parsed as Record<string, unknown>;
+  // Accept both the unwrapped shape (credentials/endpoints/profiles/routing at
+  // root) and the autocatalyst.yaml-style wrapped shape (everything under an
+  // `ai:` key). If `ai` is the only recognized branch present, unwrap it.
+  const KNOWN_ROOT_KEYS = ["credentials", "endpoints", "profiles", "routing"];
+  const hasUnwrappedKeys = KNOWN_ROOT_KEYS.some((k) => k in obj);
+  if (!hasUnwrappedKeys && obj.ai && typeof obj.ai === "object") {
+    obj = obj.ai as Record<string, unknown>;
+  }
   const credentials = asArray(obj.credentials, "credentials").map(parseCredential);
   const endpoints = asArray(obj.endpoints, "endpoints").map(parseEndpoint);
   const profiles = asArray(obj.profiles, "profiles").map(parseProfile);

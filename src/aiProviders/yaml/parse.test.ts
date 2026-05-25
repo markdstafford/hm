@@ -73,4 +73,51 @@ describe("yamlToConfig", () => {
     );
     expect(() => yamlToConfig(bad, PREVIOUS)).toThrow(/sigil/);
   });
+
+  it("refuses empty ${KEYCHAIN:} sigils", () => {
+    const bad = AUTOCATALYST_FRAGMENT.replace(
+      "value: ${KEYCHAIN:ai.credentials.grove}",
+      "value: ${KEYCHAIN:}",
+    );
+    expect(() => yamlToConfig(bad, PREVIOUS)).toThrow(/empty \$\{KEYCHAIN/);
+  });
+
+  it("refuses empty ${} env sigils", () => {
+    const bad = AUTOCATALYST_FRAGMENT.replace(
+      "value: ${KEYCHAIN:ai.credentials.grove}",
+      "value: ${}",
+    );
+    expect(() => yamlToConfig(bad, PREVIOUS)).toThrow(/empty \$\{/);
+  });
+
+  it("refuses non-string value fields", () => {
+    const bad = AUTOCATALYST_FRAGMENT.replace(
+      "value: ${KEYCHAIN:ai.credentials.grove}",
+      "value: 42",
+    );
+    expect(() => yamlToConfig(bad, PREVIOUS)).toThrow(/expected a string sigil/);
+  });
+
+  it("accepts the autocatalyst.yaml-style ai: wrapper", () => {
+    const wrapped = "ai:\n" + AUTOCATALYST_FRAGMENT
+      .split("\n")
+      .map((line) => (line.length > 0 ? "  " + line : line))
+      .join("\n");
+    const cfg = yamlToConfig(wrapped, PREVIOUS);
+    expect(cfg.profiles[0].name).toBe("grove-sonnet");
+    expect(cfg.routing["question.answer"]).toBe("grove-sonnet");
+  });
+
+  it("does not unwrap when the root already has known keys", () => {
+    // Pathological mix: top-level routing and a stray ai: key. We must read
+    // the top-level routing and not the inner ai.routing — otherwise users
+    // could be tricked into silently saving the wrong scope.
+    const mixed = `${AUTOCATALYST_FRAGMENT}
+ai:
+  routing:
+    intent.classify: grove-sonnet
+`;
+    const cfg = yamlToConfig(mixed, PREVIOUS);
+    expect(cfg.routing).toEqual({ "question.answer": "grove-sonnet" });
+  });
 });
