@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Code, List } from "lucide-react";
 import { EMPTY_AI_PROVIDER_CONFIG } from "../../../aiProviders/defaults";
 import {
@@ -43,45 +43,56 @@ export function AiProvidersCategory() {
   // write the secret first so the credential ref resolves; if the subsequent
   // config save fails, best-effort delete the orphan secret so we don't leak
   // it. Plain config-only writes (remove, YAML apply) skip the secret step.
+  //
+  // Serialized via inFlightRef so that even if a caller races two calls (e.g.
+  // a double-click that slipped past the form's `saving` guard), the second
+  // call queues behind the first instead of running concurrent secret writes.
+  // Concurrent persists previously could rollback-delete a successfully saved
+  // profile's credential.
+  const inFlightRef = useRef<Promise<void>>(Promise.resolve());
   const persist = useCallback(
-    async (payload: ProfileFormSavePayload | { next: AiProviderConfig }) => {
-      const next = payload.next;
-      const pendingSecret = "pendingSecret" in payload ? payload.pendingSecret : undefined;
-      // Pre-flight the config validator before touching the keychain. A
-      // duplicate credential name (or any other validator failure) would
-      // otherwise let us overwrite an existing keychain entry and then, on
-      // config-save failure, the rollback path would delete that legit entry.
-      // Catch the problem before writing.
-      const validationErrors = validateAiProviderConfig(next);
-      if (validationErrors.length) {
-        setSaveError(validationErrors.join("\n"));
-        return;
-      }
-      if (pendingSecret) {
-        const secretResult = await setAiCredentialSecret(
-          pendingSecret.credentialName,
-          pendingSecret.value,
-        );
-        if (!secretResult.ok) {
-          setSaveError(`Could not store credential secret: ${secretResult.error}`);
+    (payload: ProfileFormSavePayload | { next: AiProviderConfig }): Promise<void> => {
+      const run = async () => {
+        const next = payload.next;
+        const pendingSecret = "pendingSecret" in payload ? payload.pendingSecret : undefined;
+        // Pre-flight the config validator before touching the keychain. A
+        // duplicate credential name (or any other validator failure) would
+        // otherwise let us overwrite an existing keychain entry and then, on
+        // config-save failure, the rollback path would delete that legit entry.
+        const validationErrors = validateAiProviderConfig(next);
+        if (validationErrors.length) {
+          setSaveError(validationErrors.join("\n"));
           return;
         }
-      }
-      const result = await saveAiProviderConfig(next);
-      if (result.ok) {
-        setConfig(next);
-        setSaveError(null);
-        setView({ kind: "list" });
-        return;
-      }
-      // Config save failed. If we just wrote a secret for a credential that
-      // never landed in persisted config, clean it up. Best-effort: a delete
-      // failure is not surfaced because the original error is what the user
-      // needs to see.
-      if (pendingSecret) {
-        await deleteAiCredentialSecret(pendingSecret.credentialName);
-      }
-      setSaveError(result.error);
+        if (pendingSecret) {
+          const secretResult = await setAiCredentialSecret(
+            pendingSecret.credentialName,
+            pendingSecret.value,
+          );
+          if (!secretResult.ok) {
+            setSaveError(`Could not store credential secret: ${secretResult.error}`);
+            return;
+          }
+        }
+        const result = await saveAiProviderConfig(next);
+        if (result.ok) {
+          setConfig(next);
+          setSaveError(null);
+          setView({ kind: "list" });
+          return;
+        }
+        // Config save failed. If we just wrote a secret for a credential that
+        // never landed in persisted config, clean it up. Best-effort: a delete
+        // failure is not surfaced because the original error is what the user
+        // needs to see.
+        if (pendingSecret) {
+          await deleteAiCredentialSecret(pendingSecret.credentialName);
+        }
+        setSaveError(result.error);
+      };
+      const queued = inFlightRef.current.then(run, run);
+      inFlightRef.current = queued;
+      return queued;
     },
     [],
   );

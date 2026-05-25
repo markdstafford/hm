@@ -304,6 +304,7 @@ export function ProfileForm({
 }: ProfileFormProps) {
   const [state, setState] = useState<FormState>(() => initialState(config, mode, initialProfileName));
   const [smoke, setSmoke] = useState<SmokeUiState>({ status: "idle", message: "" });
+  const [saving, setSaving] = useState(false);
   const originalName = mode === "edit" ? initialProfileName : undefined;
 
   const errors = useMemo(
@@ -364,8 +365,8 @@ export function ProfileForm({
     }
   }
 
-  function handleSubmit() {
-    if (errors.length > 0) return;
+  async function handleSubmit() {
+    if (errors.length > 0 || saving) return;
     const next = applyCascade(config, state, mode, originalName);
     const pendingSecret =
       state.connectionMode === "new" &&
@@ -374,7 +375,16 @@ export function ProfileForm({
       state.newCredentialSecret
         ? { credentialName: state.newCredentialName, value: state.newCredentialSecret }
         : undefined;
-    void onSave({ next, pendingSecret });
+    // Await onSave (which awaits persist) so a second submit click is blocked
+    // by `saving` until the keychain + config writes have both settled. The
+    // double-click previously raced two persist calls and could rollback-
+    // delete the successful save's credential.
+    setSaving(true);
+    try {
+      await onSave({ next, pendingSecret });
+    } finally {
+      setSaving(false);
+    }
   }
 
   const protocolOpt = PROTOCOL_OPTIONS.find((p) => p.value === state.newProtocol)!;
@@ -675,9 +685,11 @@ export function ProfileForm({
       )}
 
       <Form.Actions>
-        <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" variant="primary" disabled={errors.length > 0}>
-          {mode === "edit" ? "Save changes" : "Add profile"}
+        <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>Cancel</Button>
+        <Button type="submit" variant="primary" disabled={errors.length > 0 || saving}>
+          {saving
+            ? mode === "edit" ? "Saving…" : "Adding…"
+            : mode === "edit" ? "Save changes" : "Add profile"}
         </Button>
       </Form.Actions>
     </Form>

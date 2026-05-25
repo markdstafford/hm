@@ -129,6 +129,43 @@ describe("AiProvidersCategory", () => {
     expect(await screen.findByText(/Save failed/)).toBeInTheDocument();
   });
 
+  it("serializes a double-submit so the second click does not trigger a second save round-trip", async () => {
+    // Hold the first config save open so the second submit attempt has
+    // a chance to fire before persist() returns. Without the in-flight
+    // guard + persist serialization, both clicks would each write the
+    // keychain secret and run a config save; if one saved and the other
+    // failed, the rollback path would delete the successful save's
+    // credential. With the guards in place, the second click is a no-op
+    // and only one secret-write + one config-save happens.
+    let resolveSave: ((v: { status: "ok"; data: null }) => void) | null = null;
+    const savePromise = new Promise<{ status: "ok"; data: null }>((resolve) => {
+      resolveSave = resolve;
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (commands.aiProviderConfigSave as any).mockImplementation(() => savePromise);
+    const setSpy = commands.aiCredentialSecretSet as ReturnType<typeof vi.fn>;
+
+    render(<AiProvidersCategory />);
+    await screen.findByText(/No AI profiles configured/);
+    await userEvent.click(screen.getByRole("button", { name: /Add profile/ }));
+    await userEvent.type(screen.getByLabelText(/Profile name/i), "racy");
+    await userEvent.type(screen.getByLabelText(/Endpoint name/i), "ep");
+    await userEvent.type(screen.getByLabelText(/Credential name/i), "racy-cred");
+    await userEvent.type(screen.getByLabelText(/Secret value/i), "sk-x");
+    await userEvent.type(screen.getByLabelText(/^Model$/i), "claude-y");
+    const submit = screen.getByRole("button", { name: /Add profile/ });
+    await userEvent.click(submit);
+    // Button must be disabled while the first save is in-flight.
+    await waitFor(() => expect(submit).toBeDisabled());
+    // Attempting to click anyway: userEvent respects `disabled` and skips the click.
+    await userEvent.click(submit);
+    expect(setSpy).toHaveBeenCalledTimes(1);
+    // Now let the first save finish.
+    resolveSave!({ status: "ok", data: null });
+    await waitFor(() => expect(submit).not.toBeInTheDocument());
+    expect(setSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("removes a profile and clears routing entries that pointed at it", async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (commands.aiProviderConfigGet as any).mockResolvedValueOnce({
