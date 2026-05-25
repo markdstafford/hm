@@ -121,4 +121,53 @@ describe("validateAiProviderConfig", () => {
     const errors = validateAiProviderConfig(c);
     expect(errors.join("\n")).toContain("Invalid credential name: bad name");
   });
+
+  it("rejects keychain key_ref that does not match ai.credentials.<name>", () => {
+    const c = validConfig();
+    c.credentials[0] = {
+      name: "grove",
+      kind: "ApiKey",
+      source: { type: "Keychain", key_ref: "ai.credentials.attacker" },
+    };
+    const errors = validateAiProviderConfig(c);
+    expect(errors.join("\n")).toContain(
+      "Credential \"grove\" keychain key_ref must be ai.credentials.grove",
+    );
+  });
+
+  it("rejects empty env var name", () => {
+    const c = validConfig();
+    c.credentials[0] = {
+      name: "k",
+      kind: "ApiKey",
+      source: { type: "Env", var_name: "" },
+    };
+    const errors = validateAiProviderConfig(c);
+    expect(errors.join("\n")).toContain("env var name must not be empty");
+  });
+
+  it("rejects env var name with disallowed characters", () => {
+    const c = validConfig();
+    c.credentials[0] = {
+      name: "k",
+      kind: "ApiKey",
+      source: { type: "Env", var_name: "lowercase_or_dash-x" },
+    };
+    const errors = validateAiProviderConfig(c);
+    expect(errors.join("\n")).toContain("[A-Z0-9_]");
+  });
+
+  it("rejects endpoint URLs that include a query string", () => {
+    const c = validConfig();
+    c.endpoints[0].base_url = "https://api.example.com/v1?key=leak";
+    const errors = validateAiProviderConfig(c);
+    expect(errors.join("\n")).toContain("Invalid endpoint URL");
+  });
+
+  it("rejects endpoint URLs that include a fragment", () => {
+    const c = validConfig();
+    c.endpoints[0].base_url = "https://api.example.com/v1#anchor";
+    const errors = validateAiProviderConfig(c);
+    expect(errors.join("\n")).toContain("Invalid endpoint URL");
+  });
 });
