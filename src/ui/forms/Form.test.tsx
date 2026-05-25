@@ -32,6 +32,33 @@ describe("Form", () => {
     expect(fieldset.tagName.toLowerCase()).toBe("fieldset");
   });
 
+  it("wires Form.Section description to the fieldset via aria-describedby", () => {
+    render(
+      <Form onSubmit={() => {}} aria-label="My form">
+        <Form.Section label="Connection" description="How hm talks to the provider.">
+          <span>contents</span>
+        </Form.Section>
+      </Form>,
+    );
+    const fieldset = screen.getByRole("group", { name: "Connection" });
+    const describedBy = fieldset.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy!);
+    expect(description).toHaveTextContent("How hm talks to the provider.");
+  });
+
+  it("omits aria-describedby when Form.Section has no description", () => {
+    render(
+      <Form onSubmit={() => {}} aria-label="My form">
+        <Form.Section label="Plain">
+          <span>contents</span>
+        </Form.Section>
+      </Form>,
+    );
+    const fieldset = screen.getByRole("group", { name: "Plain" });
+    expect(fieldset).not.toHaveAttribute("aria-describedby");
+  });
+
   it("renders form-level error with alert role", () => {
     render(
       <Form onSubmit={() => {}} aria-label="My form">

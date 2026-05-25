@@ -1,4 +1,4 @@
-import type { FormHTMLAttributes, ReactNode } from "react";
+import { useId, type FormHTMLAttributes, type ReactNode } from "react";
 
 type FormProps = Omit<FormHTMLAttributes<HTMLFormElement>, "onSubmit"> & {
   children: ReactNode;
@@ -28,12 +28,20 @@ type SectionProps = {
 };
 
 function Section({ label, description, children }: SectionProps) {
+  const descriptionId = useId();
   return (
-    <fieldset className="flex flex-col gap-3 m-0 p-0 border-0">
+    <fieldset
+      className="flex flex-col gap-3 m-0 p-0 border-0"
+      aria-describedby={description ? descriptionId : undefined}
+    >
       <legend className="text-xs font-semibold text-subtext uppercase tracking-wider mb-0">
         {label}
       </legend>
-      {description && <p className="text-xs text-subtext-1 -mt-2">{description}</p>}
+      {description && (
+        <p id={descriptionId} className="text-xs text-subtext-1 -mt-2">
+          {description}
+        </p>
+      )}
       {children}
     </fieldset>
   );
