@@ -302,6 +302,20 @@ pub struct JiraProject {
     pub self_url: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraPagedProjects {
+    #[serde(rename = "startAt", default)]
+    pub start_at: u32,
+    #[serde(rename = "maxResults", default)]
+    pub max_results: u32,
+    #[serde(default)]
+    pub total: Option<u32>,
+    #[serde(rename = "isLast", default)]
+    pub is_last: Option<bool>,
+    #[serde(default)]
+    pub values: Vec<JiraProject>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JiraUser {
     #[serde(rename = "accountId", default)]

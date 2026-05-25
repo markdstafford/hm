@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::sources::jira_errors::JiraApiError;
 use crate::sources::jira_types::{
-    JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraPagedComments, JiraPagedWorklogs,
-    JiraProject, JiraRemoteLink, JiraSearchPage,
+    JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraPagedComments, JiraPagedProjects,
+    JiraPagedWorklogs, JiraProject, JiraRemoteLink, JiraSearchPage,
 };
 
 // ── Secret string ─────────────────────────────────────────────────────────────
@@ -339,8 +339,50 @@ impl JiraApiClient {
         self.get_json(&format!("/rest/api/2/issue/{issue}?expand=changelog"))
     }
 
-    /// List accessible projects.
+    /// List all accessible projects, paginating via `/rest/api/2/project/search`.
+    /// Falls back to the legacy `/rest/api/2/project` (flat, truncated) when
+    /// `/search` returns 404 on older Jira Data Center versions.
     pub fn list_projects(&self) -> Result<Vec<JiraProject>, JiraApiError> {
+        match self.list_projects_paginated() {
+            Ok(projects) => Ok(projects),
+            Err(JiraApiError::NotFound) => self.list_projects_flat(),
+            Err(other) => Err(other),
+        }
+    }
+
+    fn list_projects_paginated(&self) -> Result<Vec<JiraProject>, JiraApiError> {
+        let page_size: u32 = 50;
+        let mut start_at: u32 = 0;
+        let mut out: Vec<JiraProject> = Vec::new();
+        let mut pages_fetched: usize = 0;
+        loop {
+            if pages_fetched >= MAX_PAGINATION_PAGES {
+                break;
+            }
+            let path = format!(
+                "/rest/api/2/project/search?startAt={start_at}&maxResults={page_size}"
+            );
+            let page: JiraPagedProjects = self.get_json(&path)?;
+            let returned = page.values.len() as u32;
+            out.extend(page.values);
+            pages_fetched += 1;
+            if let Some(true) = page.is_last {
+                break;
+            }
+            let stop = should_stop_pagination(start_at, page_size, returned as usize, page.total);
+            if stop {
+                break;
+            }
+            let next = start_at.saturating_add(returned.max(1));
+            if next <= start_at {
+                break;
+            }
+            start_at = next;
+        }
+        Ok(out)
+    }
+
+    fn list_projects_flat(&self) -> Result<Vec<JiraProject>, JiraApiError> {
         self.get_json("/rest/api/2/project")
     }
 
@@ -673,7 +715,10 @@ mod tests {
         let seen_clone = Arc::clone(&seen);
         let base_url = spawn_json_server(move |request| {
             assert_eq!(request.method(), &Method::Get);
-            assert_eq!(request.url(), "/rest/api/2/project");
+            assert_eq!(
+                request.url(),
+                "/rest/api/2/project/search?startAt=0&maxResults=50"
+            );
             for header in request.headers() {
                 seen_clone.lock().unwrap().push((
                     header.field.as_str().to_string(),
@@ -683,7 +728,7 @@ mod tests {
             request
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -948,7 +993,7 @@ mod tests {
                 .unwrap()
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -1041,7 +1086,7 @@ mod tests {
                 .unwrap()
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -1085,7 +1130,7 @@ mod tests {
                 .unwrap()
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -1127,7 +1172,7 @@ mod tests {
                 .unwrap()
                 .respond(json_response(
                     200,
-                    include_str!("fixtures/jira_projects.json"),
+                    include_str!("fixtures/jira_projects_paginated.json"),
                 ))
                 .unwrap();
         });
@@ -1164,7 +1209,7 @@ mod tests {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", server.server_addr());
         thread::spawn(move || {
-            let response = Response::from_string(include_str!("fixtures/jira_projects.json"))
+            let response = Response::from_string(include_str!("fixtures/jira_projects_paginated.json"))
                 .with_status_code(StatusCode(200))
                 .with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
@@ -1204,7 +1249,7 @@ mod tests {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", server.server_addr());
         thread::spawn(move || {
-            let response = Response::from_string(include_str!("fixtures/jira_projects.json"))
+            let response = Response::from_string(include_str!("fixtures/jira_projects_paginated.json"))
                 .with_status_code(StatusCode(200))
                 .with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
@@ -1379,5 +1424,82 @@ mod tests {
             links[0].object.as_ref().unwrap().url,
             "https://docs.example.invalid/abc"
         );
+    }
+
+    #[test]
+    fn list_projects_paginated_follows_search_pages_and_dedupes_via_islast() {
+        // Exercises the /rest/api/2/project/search paginated code path:
+        // two pages, stopping on isLast=true on the second response.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let first = server.recv().unwrap();
+            assert!(
+                first.url().starts_with("/rest/api/2/project/search?"),
+                "expected /project/search, got {}",
+                first.url()
+            );
+            assert!(first.url().contains("startAt=0"));
+            first
+                .respond(json_response(
+                    200,
+                    r#"{"startAt":0,"maxResults":2,"total":3,"isLast":false,"values":[{"id":"1","key":"AMP","name":"AMP"},{"id":"2","key":"BMP","name":"BMP"}]}"#,
+                ))
+                .unwrap();
+            let second = server.recv().unwrap();
+            assert!(
+                second.url().starts_with("/rest/api/2/project/search?"),
+                "expected /project/search, got {}",
+                second.url()
+            );
+            assert!(second.url().contains("startAt=2"));
+            second
+                .respond(json_response(
+                    200,
+                    r#"{"startAt":2,"maxResults":2,"total":3,"isLast":true,"values":[{"id":"3","key":"CMP","name":"CMP"}]}"#,
+                ))
+                .unwrap();
+        });
+        let projects = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(
+            projects.iter().map(|p| p.key.as_str()).collect::<Vec<_>>(),
+            vec!["AMP", "BMP", "CMP"]
+        );
+    }
+
+    #[test]
+    fn list_projects_falls_back_to_flat_endpoint_on_404() {
+        // Exercises the legacy /rest/api/2/project fallback path used on older
+        // Jira Data Center versions (8.3 and earlier) where /project/search 404s.
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let base_url = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            let first = server.recv().unwrap();
+            assert!(
+                first.url().starts_with("/rest/api/2/project/search?"),
+                "expected /project/search probe, got {}",
+                first.url()
+            );
+            first
+                .respond(json_response(404, r#"{"errorMessages":["not found"]}"#))
+                .unwrap();
+            let second = server.recv().unwrap();
+            assert_eq!(second.url(), "/rest/api/2/project");
+            second
+                .respond(json_response(
+                    200,
+                    r#"[{"id":"1","key":"AMP","name":"AMP"}]"#,
+                ))
+                .unwrap();
+        });
+        let projects = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .list_projects()
+            .unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].key, "AMP");
     }
 }

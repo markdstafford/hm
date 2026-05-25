@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { JiraConnectionProject, JiraProjectFilter } from "../../../sources/types";
 
 interface ProjectMultiSelectProps {
@@ -13,7 +14,17 @@ export function ProjectMultiSelect({
   disabled,
   onChange,
 }: ProjectMultiSelectProps) {
+  const [filter, setFilter] = useState("");
   const selectedKeys = new Set(selectedProjects.map((p) => p.key));
+  const needle = filter.trim().toLowerCase();
+  const visible =
+    needle.length === 0
+      ? availableProjects
+      : availableProjects.filter(
+          (p) =>
+            p.key.toLowerCase().includes(needle) ||
+            (p.name ?? "").toLowerCase().includes(needle),
+        );
 
   function handleToggle(project: JiraConnectionProject) {
     const newSelected = selectedKeys.has(project.key)
@@ -34,7 +45,18 @@ export function ProjectMultiSelect({
       <legend className="text-sm font-medium text-text mb-1">
         Projects {disabled && <span className="text-subtext font-normal">(test connection first)</span>}
       </legend>
-      {availableProjects.map((project) => (
+      <input
+        type="search"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder={`Filter ${availableProjects.length} projects…`}
+        aria-label="Filter projects"
+        className="w-full rounded border border-surface bg-background text-text text-sm px-2 py-1 mb-2"
+      />
+      {visible.length === 0 && (
+        <p className="text-xs text-subtext">No projects match {`"${filter}"`}.</p>
+      )}
+      {visible.map((project) => (
         <label key={project.key} className="flex items-center gap-2 text-sm text-text cursor-pointer">
           <input
             type="checkbox"
