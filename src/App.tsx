@@ -8,7 +8,7 @@ import {
   resolveCatppuccinAccent,
 } from "./preferences";
 import { applyColorScheme, applyFonts, getSystemPrefersDark } from "./theme";
-import { loadPreferences, savePreferences } from "./settings/settingsStorage";
+import { loadPreferences, savePreferences } from "./preferences/storage";
 import { restoreWindowState, registerWindowListeners } from "./windowState";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { AppShell } from "./shell/AppShell";
