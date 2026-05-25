@@ -276,6 +276,108 @@ pub fn upsert_work_item_comment(
     Ok(())
 }
 
+pub struct JiraWorklogInput<'a> {
+    pub id: &'a str,
+    pub work_item_id: &'a str,
+    pub source_system_id: &'a str,
+    pub upstream_id: &'a str,
+    pub author_identity_id: Option<&'a str>,
+    pub update_author_identity_id: Option<&'a str>,
+    pub started_at_source: Option<&'a str>,
+    pub time_spent_seconds: Option<i64>,
+    pub comment: Option<&'a str>,
+    pub raw_json: Option<&'a str>,
+    pub raw_hash: &'a str,
+}
+
+/// Upsert a row into `jira_worklogs`. Idempotent on
+/// `UNIQUE(source_system_id, upstream_id)`.
+pub fn upsert_jira_worklog(
+    conn: &Connection,
+    now_utc: &str,
+    input: &JiraWorklogInput<'_>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO jira_worklogs (
+            id, work_item_id, source_system_id, upstream_id, author_identity_id,
+            update_author_identity_id, started_at_source, time_spent_seconds, comment,
+            raw_json, raw_hash, ingested_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ON CONFLICT(source_system_id, upstream_id) DO UPDATE SET
+            work_item_id = excluded.work_item_id,
+            author_identity_id = excluded.author_identity_id,
+            update_author_identity_id = excluded.update_author_identity_id,
+            started_at_source = excluded.started_at_source,
+            time_spent_seconds = excluded.time_spent_seconds,
+            comment = excluded.comment,
+            raw_json = excluded.raw_json,
+            raw_hash = excluded.raw_hash,
+            ingested_at = excluded.ingested_at",
+        params![
+            input.id,
+            input.work_item_id,
+            input.source_system_id,
+            input.upstream_id,
+            input.author_identity_id,
+            input.update_author_identity_id,
+            input.started_at_source,
+            input.time_spent_seconds,
+            input.comment,
+            input.raw_json,
+            input.raw_hash,
+            now_utc,
+        ],
+    )?;
+    Ok(())
+}
+
+pub struct JiraRemoteLinkInput<'a> {
+    pub id: &'a str,
+    pub work_item_id: &'a str,
+    pub source_system_id: &'a str,
+    pub upstream_id: Option<&'a str>,
+    pub url: &'a str,
+    pub title: Option<&'a str>,
+    pub relationship: Option<&'a str>,
+    pub raw_json: Option<&'a str>,
+    pub raw_hash: &'a str,
+}
+
+/// Upsert a row into `jira_remote_links`. Idempotent on
+/// `UNIQUE(source_system_id, work_item_id, url)`.
+pub fn upsert_jira_remote_link(
+    conn: &Connection,
+    now_utc: &str,
+    input: &JiraRemoteLinkInput<'_>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO jira_remote_links (
+            id, work_item_id, source_system_id, upstream_id, url, title, relationship,
+            raw_json, raw_hash, ingested_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        ON CONFLICT(source_system_id, work_item_id, url) DO UPDATE SET
+            upstream_id = excluded.upstream_id,
+            title = excluded.title,
+            relationship = excluded.relationship,
+            raw_json = excluded.raw_json,
+            raw_hash = excluded.raw_hash,
+            ingested_at = excluded.ingested_at",
+        params![
+            input.id,
+            input.work_item_id,
+            input.source_system_id,
+            input.upstream_id,
+            input.url,
+            input.title,
+            input.relationship,
+            input.raw_json,
+            input.raw_hash,
+            now_utc,
+        ],
+    )?;
+    Ok(())
+}
+
 pub struct IndexableDocumentInput<'a> {
     pub source_system_id: &'a str,
     pub entity_kind: &'a str,
@@ -533,6 +635,52 @@ mod tests {
         assert_eq!(title, "Updated title");
         assert_eq!(state, "in_progress");
         assert_eq!(hash, "hash-2");
+    }
+
+    #[test]
+    fn upserts_jira_worklog_and_remote_link_idempotently() {
+        let conn = open_in_memory().expect("db");
+        seed_source_system(&conn, "src-1");
+        seed_work_item(&conn, "wi-1", "src-1", "10001");
+
+        let wl = JiraWorklogInput {
+            id: "wl-1",
+            work_item_id: "wi-1",
+            source_system_id: "src-1",
+            upstream_id: "9001",
+            author_identity_id: None,
+            update_author_identity_id: None,
+            started_at_source: Some("2026-05-22T09:00:00Z"),
+            time_spent_seconds: Some(1800),
+            comment: Some("Investigating"),
+            raw_json: Some("{}"),
+            raw_hash: "h1",
+        };
+        upsert_jira_worklog(&conn, NOW, &wl).expect("worklog 1");
+        upsert_jira_worklog(&conn, NOW, &wl).expect("worklog 2");
+
+        let rl = JiraRemoteLinkInput {
+            id: "rl-1",
+            work_item_id: "wi-1",
+            source_system_id: "src-1",
+            upstream_id: Some("500"),
+            url: "https://docs.example.invalid/abc",
+            title: Some("Doc"),
+            relationship: Some("references"),
+            raw_json: Some("{}"),
+            raw_hash: "h1",
+        };
+        upsert_jira_remote_link(&conn, NOW, &rl).expect("remote link 1");
+        upsert_jira_remote_link(&conn, NOW, &rl).expect("remote link 2");
+
+        let wl_count: i64 = conn
+            .query_row("SELECT count(*) FROM jira_worklogs", [], |r| r.get(0))
+            .expect("count wl");
+        let rl_count: i64 = conn
+            .query_row("SELECT count(*) FROM jira_remote_links", [], |r| r.get(0))
+            .expect("count rl");
+        assert_eq!(wl_count, 1, "duplicate worklog must not insert twice");
+        assert_eq!(rl_count, 1, "duplicate remote link must not insert twice");
     }
 
     #[test]

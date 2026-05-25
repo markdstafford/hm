@@ -25,11 +25,12 @@ use serde_json::Value;
 use crate::issues::ids::{content_hash, stable_id};
 use crate::issues::people::{upsert_source_identity, SourceIdentityInput, UpsertedIdentity};
 use crate::issues::repository::{
-    upsert_indexable_document, upsert_work_item, upsert_work_item_comment,
-    upsert_work_item_relationship, upsert_work_item_term, IndexableDocumentInput, WorkItemInput,
-    WorkItemCommentInput, WorkItemRelationshipInput, WorkItemTermInput,
+    upsert_indexable_document, upsert_jira_remote_link, upsert_jira_worklog, upsert_work_item,
+    upsert_work_item_comment, upsert_work_item_relationship, upsert_work_item_term,
+    IndexableDocumentInput, JiraRemoteLinkInput, JiraWorklogInput, WorkItemCommentInput,
+    WorkItemInput, WorkItemRelationshipInput, WorkItemTermInput,
 };
-use crate::sources::jira_types::JiraIssue;
+use crate::sources::jira_types::{JiraComment, JiraIssue, JiraRemoteLink, JiraWorklog};
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -443,6 +444,228 @@ fn upsert_field_value(
         ],
     )?;
     Ok(())
+}
+
+/// Persist a single Jira comment under the supplied work_item. Used for both
+/// inline comments (during projection) and tail-fetched comments (during the
+/// ingestion service post-pass).
+fn persist_jira_comment(
+    conn: &Connection,
+    ctx: &JiraIssueProjectionContext<'_>,
+    work_item_id: &str,
+    issue_key: &str,
+    comment: &JiraComment,
+) -> Result<(), ProjectionError> {
+    let comment_id = stable_id("c", &[ctx.source_system_id, "jira", &comment.id]);
+    let author_identity = if let Some(author) = comment.author.as_ref() {
+        let raw = serde_json::to_string(author).ok();
+        let result = upsert_source_identity(
+            conn,
+            ctx.ingested_at,
+            &SourceIdentityInput {
+                source_system_id: ctx.source_system_id,
+                source_kind: JIRA_SOURCE_KIND,
+                upstream_account_id: author.account_id.as_deref(),
+                upstream_name: author.name.as_deref(),
+                upstream_key: author.key.as_deref(),
+                username: author.name.as_deref(),
+                email: author.email_address.as_deref(),
+                display_name: author.display_name.as_deref(),
+                avatar_url: None,
+                raw_json: raw.as_deref(),
+            },
+        );
+        match result {
+            Ok(id) => Some(id),
+            Err(rusqlite::Error::InvalidQuery) => None,
+            Err(e) => return Err(ProjectionError::Storage(e)),
+        }
+    } else {
+        None
+    };
+
+    let body_str = comment.body.clone().unwrap_or_default();
+    let body_hash = content_hash(&body_str);
+    let visibility_json = comment.visibility.as_ref().map(|v| v.to_string());
+    let raw_json = serde_json::to_string(comment).ok();
+
+    upsert_work_item_comment(
+        conn,
+        ctx.ingested_at,
+        &WorkItemCommentInput {
+            id: &comment_id,
+            work_item_id,
+            source_system_id: ctx.source_system_id,
+            upstream_id: &comment.id,
+            author_identity_id: author_identity
+                .as_ref()
+                .map(|i| i.source_identity_id.as_str()),
+            body: comment.body.as_deref(),
+            visibility_json: visibility_json.as_deref(),
+            created_at_source: comment.created.as_deref(),
+            updated_at_source: comment.updated.as_deref(),
+            raw_json: raw_json.as_deref(),
+            body_hash: &body_hash,
+        },
+    )?;
+
+    let metadata_json = serde_json::json!({
+        "kind": "jira_comment",
+        "jira_issue_key": issue_key,
+        "comment_id": comment.id,
+    })
+    .to_string();
+    upsert_indexable_document(
+        conn,
+        ctx.ingested_at,
+        &IndexableDocumentInput {
+            source_system_id: ctx.source_system_id,
+            entity_kind: "comment",
+            entity_id: &comment.id,
+            work_item_id: Some(work_item_id),
+            title: None,
+            body: comment.body.as_deref().unwrap_or(""),
+            metadata_json: &metadata_json,
+            content_hash: &body_hash,
+        },
+    )?;
+    Ok(())
+}
+
+/// Persist a single Jira worklog under the supplied work_item. Used for both
+/// inline worklogs (during projection) and tail-fetched worklogs (during the
+/// ingestion service post-pass).
+fn persist_jira_worklog(
+    conn: &Connection,
+    ctx: &JiraIssueProjectionContext<'_>,
+    work_item_id: &str,
+    worklog: &JiraWorklog,
+) -> Result<(), ProjectionError> {
+    let id = stable_id("wl", &[ctx.source_system_id, "jira", &worklog.id]);
+
+    let author_identity = if let Some(author) = worklog.author.as_ref() {
+        let raw = serde_json::to_string(author).ok();
+        let result = upsert_source_identity(
+            conn,
+            ctx.ingested_at,
+            &SourceIdentityInput {
+                source_system_id: ctx.source_system_id,
+                source_kind: JIRA_SOURCE_KIND,
+                upstream_account_id: author.account_id.as_deref(),
+                upstream_name: author.name.as_deref(),
+                upstream_key: author.key.as_deref(),
+                username: author.name.as_deref(),
+                email: author.email_address.as_deref(),
+                display_name: author.display_name.as_deref(),
+                avatar_url: None,
+                raw_json: raw.as_deref(),
+            },
+        );
+        match result {
+            Ok(id) => Some(id),
+            Err(rusqlite::Error::InvalidQuery) => None,
+            Err(e) => return Err(ProjectionError::Storage(e)),
+        }
+    } else {
+        None
+    };
+
+    let update_author_identity = if let Some(author) = worklog.update_author.as_ref() {
+        let raw = serde_json::to_string(author).ok();
+        let result = upsert_source_identity(
+            conn,
+            ctx.ingested_at,
+            &SourceIdentityInput {
+                source_system_id: ctx.source_system_id,
+                source_kind: JIRA_SOURCE_KIND,
+                upstream_account_id: author.account_id.as_deref(),
+                upstream_name: author.name.as_deref(),
+                upstream_key: author.key.as_deref(),
+                username: author.name.as_deref(),
+                email: author.email_address.as_deref(),
+                display_name: author.display_name.as_deref(),
+                avatar_url: None,
+                raw_json: raw.as_deref(),
+            },
+        );
+        match result {
+            Ok(id) => Some(id),
+            Err(rusqlite::Error::InvalidQuery) => None,
+            Err(e) => return Err(ProjectionError::Storage(e)),
+        }
+    } else {
+        None
+    };
+
+    let raw_json = serde_json::to_string(worklog).unwrap_or_default();
+    let raw_hash = content_hash(&raw_json);
+    let time_spent: Option<i64> = worklog.time_spent_seconds.map(|n| n as i64);
+
+    upsert_jira_worklog(
+        conn,
+        ctx.ingested_at,
+        &JiraWorklogInput {
+            id: &id,
+            work_item_id,
+            source_system_id: ctx.source_system_id,
+            upstream_id: &worklog.id,
+            author_identity_id: author_identity
+                .as_ref()
+                .map(|i| i.source_identity_id.as_str()),
+            update_author_identity_id: update_author_identity
+                .as_ref()
+                .map(|i| i.source_identity_id.as_str()),
+            started_at_source: worklog.started.as_deref(),
+            time_spent_seconds: time_spent,
+            comment: worklog.comment.as_deref(),
+            raw_json: Some(&raw_json),
+            raw_hash: &raw_hash,
+        },
+    )?;
+    Ok(())
+}
+
+/// Persist a single Jira remote link under the supplied work_item.
+fn persist_jira_remote_link(
+    conn: &Connection,
+    ctx: &JiraIssueProjectionContext<'_>,
+    work_item_id: &str,
+    issue_key: &str,
+    link: &JiraRemoteLink,
+) -> Result<bool, ProjectionError> {
+    let url = link
+        .object
+        .as_ref()
+        .map(|o| o.url.clone())
+        .unwrap_or_default();
+    if url.is_empty() {
+        return Ok(false);
+    }
+    let id = stable_id(
+        "rl",
+        &[ctx.source_system_id, "jira", issue_key, &url],
+    );
+    let upstream_id_string = link.id.map(|n| n.to_string());
+    let title = link.object.as_ref().and_then(|o| o.title.clone());
+    let raw_json = serde_json::to_string(link).unwrap_or_default();
+    let raw_hash = content_hash(&raw_json);
+
+    upsert_jira_remote_link(
+        conn,
+        ctx.ingested_at,
+        &JiraRemoteLinkInput {
+            id: &id,
+            work_item_id,
+            source_system_id: ctx.source_system_id,
+            upstream_id: upstream_id_string.as_deref(),
+            url: &url,
+            title: title.as_deref(),
+            relationship: link.relationship.as_deref(),
+            raw_json: Some(&raw_json),
+            raw_hash: &raw_hash,
+        },
+    )?;
+    Ok(true)
 }
 
 // ── Main projection ────────────────────────────────────────────────────────────
@@ -933,82 +1156,14 @@ pub fn project_jira_issue(
     // ── 7. Inline comments ────────────────────────────────────────────────────
     if let Some(comments) = fields.comment.as_ref() {
         for comment in &comments.comments {
-            let comment_id = stable_id("c", &[ctx.source_system_id, "jira", &comment.id]);
-            // Author upsert (best effort).
-            let author_identity = if let Some(author) = comment.author.as_ref() {
-                let raw = serde_json::to_string(author).ok();
-                let result = upsert_source_identity(
-                    conn,
-                    ctx.ingested_at,
-                    &SourceIdentityInput {
-                        source_system_id: ctx.source_system_id,
-                        source_kind: JIRA_SOURCE_KIND,
-                        upstream_account_id: author.account_id.as_deref(),
-                        upstream_name: author.name.as_deref(),
-                        upstream_key: author.key.as_deref(),
-                        username: author.name.as_deref(),
-                        email: author.email_address.as_deref(),
-                        display_name: author.display_name.as_deref(),
-                        avatar_url: None,
-                        raw_json: raw.as_deref(),
-                    },
-                );
-                match result {
-                    Ok(id) => Some(id),
-                    Err(rusqlite::Error::InvalidQuery) => None,
-                    Err(e) => return Err(ProjectionError::Storage(e)),
-                }
-            } else {
-                None
-            };
+            persist_jira_comment(conn, ctx, &work_item_id, &issue.key, comment)?;
+        }
+    }
 
-            let body_str = comment.body.clone().unwrap_or_default();
-            let body_hash = content_hash(&body_str);
-            let visibility_json =
-                comment.visibility.as_ref().map(|v| v.to_string());
-            let raw_json = serde_json::to_string(comment).ok();
-
-            upsert_work_item_comment(
-                conn,
-                ctx.ingested_at,
-                &WorkItemCommentInput {
-                    id: &comment_id,
-                    work_item_id: &work_item_id,
-                    source_system_id: ctx.source_system_id,
-                    upstream_id: &comment.id,
-                    author_identity_id: author_identity
-                        .as_ref()
-                        .map(|i| i.source_identity_id.as_str()),
-                    body: comment.body.as_deref(),
-                    visibility_json: visibility_json.as_deref(),
-                    created_at_source: comment.created.as_deref(),
-                    updated_at_source: comment.updated.as_deref(),
-                    raw_json: raw_json.as_deref(),
-                    body_hash: &body_hash,
-                },
-            )?;
-
-            // One indexable_document per comment.
-            let metadata_json = serde_json::json!({
-                "kind": "jira_comment",
-                "jira_issue_key": issue.key,
-                "comment_id": comment.id,
-            })
-            .to_string();
-            upsert_indexable_document(
-                conn,
-                ctx.ingested_at,
-                &IndexableDocumentInput {
-                    source_system_id: ctx.source_system_id,
-                    entity_kind: "comment",
-                    entity_id: &comment.id,
-                    work_item_id: Some(&work_item_id),
-                    title: None,
-                    body: comment.body.as_deref().unwrap_or(""),
-                    metadata_json: &metadata_json,
-                    content_hash: &body_hash,
-                },
-            )?;
+    // ── 7b. Inline worklogs ───────────────────────────────────────────────────
+    if let Some(worklogs) = fields.worklog.as_ref() {
+        for worklog in &worklogs.worklogs {
+            persist_jira_worklog(conn, ctx, &work_item_id, worklog)?;
         }
     }
 
@@ -1068,7 +1223,7 @@ use crate::ingestion::runs::{
 };
 use crate::sources::jira_client::{JiraApiClient, JiraSearchRequest};
 use crate::sources::jira_errors::JiraApiError;
-use crate::sources::jira_types::JiraSearchPage;
+use crate::sources::jira_types::{JiraPagedComments, JiraPagedWorklogs, JiraSearchPage};
 
 /// Trait seam that abstracts over `JiraApiClient::search_issues_page` so
 /// `JiraIssueIngestionService` can be exercised against an in-memory stub.
@@ -1077,6 +1232,25 @@ pub trait JiraIssueClient {
         &self,
         request: JiraSearchRequest,
     ) -> Result<JiraSearchPage, JiraApiError>;
+
+    fn get_issue_comments_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraPagedComments, JiraApiError>;
+
+    fn get_issue_worklogs_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraPagedWorklogs, JiraApiError>;
+
+    fn get_issue_remote_links(
+        &self,
+        issue_id_or_key: &str,
+    ) -> Result<Vec<JiraRemoteLink>, JiraApiError>;
 }
 
 impl JiraIssueClient for JiraApiClient {
@@ -1086,6 +1260,48 @@ impl JiraIssueClient for JiraApiClient {
     ) -> Result<JiraSearchPage, JiraApiError> {
         JiraApiClient::search_issues_page(self, request)
     }
+
+    fn get_issue_comments_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraPagedComments, JiraApiError> {
+        JiraApiClient::get_issue_comments_page(self, issue_id_or_key, start_at, max_results)
+    }
+
+    fn get_issue_worklogs_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraPagedWorklogs, JiraApiError> {
+        JiraApiClient::get_issue_worklogs_page(self, issue_id_or_key, start_at, max_results)
+    }
+
+    fn get_issue_remote_links(
+        &self,
+        issue_id_or_key: &str,
+    ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
+        JiraApiClient::get_issue_remote_links(self, issue_id_or_key)
+    }
+}
+
+/// Opt-in feature toggles for the Jira issue ingestion service.
+///
+/// Watchers / votes / remote links are disabled by default and must be
+/// explicitly opted into via this struct. Watchers and votes are placeholders
+/// for the next ingestion baseline; only `fetch_remote_links` is wired today.
+#[derive(Debug, Clone, Default)]
+pub struct JiraIngestionOptions {
+    /// When true, fetch `/rest/api/2/issue/{key}/remotelink` for each issue
+    /// and persist the result via `jira_remote_links`. Maintained under a
+    /// separate cursor key `project:{KEY}:remotelinks`.
+    pub fetch_remote_links: bool,
+    /// Placeholder — not wired in this task.
+    pub fetch_watchers: bool,
+    /// Placeholder — not wired in this task.
+    pub fetch_votes: bool,
 }
 
 /// Cooperative cancellation flag shared between the service and any caller
@@ -1137,6 +1353,7 @@ pub struct JiraIssueIngestionService<'a, C> {
     pub client: &'a C,
     pub page_size: u32,
     pub overlap_seconds: i64,
+    pub options: JiraIngestionOptions,
 }
 
 impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
@@ -1145,6 +1362,17 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             client,
             page_size: 50,
             overlap_seconds: 60,
+            options: JiraIngestionOptions::default(),
+        }
+    }
+
+    /// Construct a service with non-default ingestion options.
+    pub fn with_options(client: &'a C, options: JiraIngestionOptions) -> Self {
+        Self {
+            client,
+            page_size: 50,
+            overlap_seconds: 60,
+            options,
         }
     }
 
@@ -1219,6 +1447,11 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         let mut max_updated_seen: Option<String> = None;
         let mut any_page_persisted = false;
         let mut cancelled_mid_loop = false;
+        let mut tail_errors: Vec<String> = Vec::new();
+        // Tracks whether any remote-link fetch failed across the run. Used to
+        // decide whether to advance the per-project remote-links cursor.
+        let mut remote_links_had_error = false;
+        let mut any_remote_link_fetched = false;
 
         loop {
             if cancellation.is_cancelled() {
@@ -1281,6 +1514,160 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 saved_issues += 1;
             }
 
+            // ── Tail / sub-resource fetches ─────────────────────────────────
+            // These happen OUTSIDE the per-issue projection — by the time we
+            // reach here the issues are already persisted, so a tail failure
+            // marks the run "partial" but doesn't roll back saved issues.
+            for issue in &page.issues {
+                if cancellation.is_cancelled() {
+                    break;
+                }
+                let ctx = JiraIssueProjectionContext {
+                    source_system_id,
+                    project_key,
+                    project_name,
+                    ingested_at: now_utc,
+                };
+                let work_item_id_for_tail = stable_id(
+                    "wi",
+                    &[source_system_id, JIRA_WORK_ITEM_KIND, &issue.id],
+                );
+
+                // Comments tail.
+                if let Some(comment) = issue.fields.comment.as_ref() {
+                    let total = comment.total.unwrap_or(0) as usize;
+                    let inline = comment.comments.len();
+                    if total > inline {
+                        let mut start_at_tail = inline as u32;
+                        loop {
+                            if cancellation.is_cancelled() {
+                                break;
+                            }
+                            match self.client.get_issue_comments_page(
+                                &issue.key,
+                                start_at_tail,
+                                self.page_size,
+                            ) {
+                                Ok(page_tail) => {
+                                    let returned = page_tail.comments.len() as u32;
+                                    for c in &page_tail.comments {
+                                        if let Err(err) = persist_jira_comment(
+                                            conn,
+                                            &ctx,
+                                            &work_item_id_for_tail,
+                                            &issue.key,
+                                            c,
+                                        ) {
+                                            let ie: IngestionError = err.into();
+                                            return Err(ie);
+                                        }
+                                    }
+                                    let next = start_at_tail.saturating_add(returned);
+                                    let reached_total = page_tail
+                                        .total
+                                        .map(|t| next as usize >= t as usize)
+                                        .unwrap_or(false);
+                                    if returned == 0 || reached_total || next <= start_at_tail {
+                                        break;
+                                    }
+                                    start_at_tail = next;
+                                }
+                                Err(err) => {
+                                    let ie: IngestionError = err.into();
+                                    tail_errors.push(format!("comments {}: {}", issue.key, ie));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if cancellation.is_cancelled() {
+                    break;
+                }
+
+                // Worklogs tail.
+                if let Some(worklog) = issue.fields.worklog.as_ref() {
+                    let total = worklog.total.unwrap_or(0) as usize;
+                    let inline = worklog.worklogs.len();
+                    if total > inline {
+                        let mut start_at_tail = inline as u32;
+                        loop {
+                            if cancellation.is_cancelled() {
+                                break;
+                            }
+                            match self.client.get_issue_worklogs_page(
+                                &issue.key,
+                                start_at_tail,
+                                self.page_size,
+                            ) {
+                                Ok(page_tail) => {
+                                    let returned = page_tail.worklogs.len() as u32;
+                                    for w in &page_tail.worklogs {
+                                        if let Err(err) = persist_jira_worklog(
+                                            conn,
+                                            &ctx,
+                                            &work_item_id_for_tail,
+                                            w,
+                                        ) {
+                                            let ie: IngestionError = err.into();
+                                            return Err(ie);
+                                        }
+                                    }
+                                    let next = start_at_tail.saturating_add(returned);
+                                    let reached_total = page_tail
+                                        .total
+                                        .map(|t| next as usize >= t as usize)
+                                        .unwrap_or(false);
+                                    if returned == 0 || reached_total || next <= start_at_tail {
+                                        break;
+                                    }
+                                    start_at_tail = next;
+                                }
+                                Err(err) => {
+                                    let ie: IngestionError = err.into();
+                                    tail_errors.push(format!("worklogs {}: {}", issue.key, ie));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if cancellation.is_cancelled() {
+                    break;
+                }
+
+                // Remote links (opt-in).
+                if self.options.fetch_remote_links {
+                    match self.client.get_issue_remote_links(&issue.key) {
+                        Ok(links) => {
+                            for link in &links {
+                                match persist_jira_remote_link(
+                                    conn,
+                                    &ctx,
+                                    &work_item_id_for_tail,
+                                    &issue.key,
+                                    link,
+                                ) {
+                                    Ok(true) => any_remote_link_fetched = true,
+                                    Ok(false) => {}
+                                    Err(err) => {
+                                        let ie: IngestionError = err.into();
+                                        return Err(ie);
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            let ie: IngestionError = err.into();
+                            tail_errors.push(format!("remotelinks {}: {}", issue.key, ie));
+                            remote_links_had_error = true;
+                        }
+                    }
+                }
+            }
+
             pages += 1;
             any_page_persisted = any_page_persisted || returned > 0;
 
@@ -1330,10 +1717,34 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             }
         }
 
-        let status = if cancelled_mid_loop {
-            "cancelled"
+        // Separate cursor for remote-link sync: only advances when remote-link
+        // sync was enabled, fetched at least one link, and saw no errors.
+        if self.options.fetch_remote_links
+            && any_remote_link_fetched
+            && !remote_links_had_error
+        {
+            let remote_links_cursor_key = format!("project:{}:remotelinks", project_key);
+            let value = serde_json::json!({ "last_synced": now_utc }).to_string();
+            upsert_cursor(
+                conn,
+                source_system_id,
+                JIRA_ISSUE_CONNECTOR,
+                &remote_links_cursor_key,
+                &value,
+                Some(now_utc),
+                now_utc,
+            )?;
+        }
+
+        let (status, error_summary): (&str, Option<String>) = if cancelled_mid_loop {
+            ("cancelled", None)
+        } else if !tail_errors.is_empty() {
+            (
+                "partial",
+                Some(format!("{} tail errors", tail_errors.len())),
+            )
         } else {
-            "succeeded"
+            ("succeeded", None)
         };
         let final_counts = serde_json::json!({
             "saved_issues": saved_issues,
@@ -1341,7 +1752,14 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             "pages": pages,
         })
         .to_string();
-        finish_run(conn, &run_id, now_utc, status, &final_counts, None)?;
+        finish_run(
+            conn,
+            &run_id,
+            now_utc,
+            status,
+            &final_counts,
+            error_summary.as_deref(),
+        )?;
 
         Ok(JiraIssueIngestionSummary {
             run_id,
@@ -1807,6 +2225,7 @@ mod tests {
 
     // ── Service tests ──────────────────────────────────────────────────────
 
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::sync::Mutex;
 
@@ -1816,6 +2235,15 @@ mod tests {
         calls: Mutex<Vec<JiraSearchRequest>>,
         next_error: Mutex<Option<JiraApiError>>,
         cancel_after_call: Mutex<Option<(usize, Arc<CancellationFlag>)>>,
+        comments_pages: Mutex<HashMap<String, Vec<JiraPagedComments>>>,
+        comments_calls: Mutex<Vec<(String, u32, u32)>>,
+        next_comments_error: Mutex<Option<JiraApiError>>,
+        worklogs_pages: Mutex<HashMap<String, Vec<JiraPagedWorklogs>>>,
+        worklogs_calls: Mutex<Vec<(String, u32, u32)>>,
+        next_worklogs_error: Mutex<Option<JiraApiError>>,
+        remote_links: Mutex<HashMap<String, Vec<JiraRemoteLink>>>,
+        remote_link_calls: Mutex<Vec<String>>,
+        next_remote_links_error: Mutex<Option<JiraApiError>>,
     }
 
     impl FakeJiraClient {
@@ -1825,6 +2253,15 @@ mod tests {
                 calls: Mutex::new(Vec::new()),
                 next_error: Mutex::new(None),
                 cancel_after_call: Mutex::new(None),
+                comments_pages: Mutex::new(HashMap::new()),
+                comments_calls: Mutex::new(Vec::new()),
+                next_comments_error: Mutex::new(None),
+                worklogs_pages: Mutex::new(HashMap::new()),
+                worklogs_calls: Mutex::new(Vec::new()),
+                next_worklogs_error: Mutex::new(None),
+                remote_links: Mutex::new(HashMap::new()),
+                remote_link_calls: Mutex::new(Vec::new()),
+                next_remote_links_error: Mutex::new(None),
             }
         }
 
@@ -1834,6 +2271,43 @@ mod tests {
 
         fn set_next_error(&self, err: JiraApiError) {
             *self.next_error.lock().unwrap() = Some(err);
+        }
+
+        fn stub_comments_pages(&self, key: &str, pages: Vec<JiraPagedComments>) {
+            self.comments_pages
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), pages);
+        }
+
+        fn comments_calls(&self) -> Vec<(String, u32, u32)> {
+            self.comments_calls.lock().unwrap().clone()
+        }
+
+        fn set_next_comments_error(&self, err: JiraApiError) {
+            *self.next_comments_error.lock().unwrap() = Some(err);
+        }
+
+        fn stub_worklogs_pages(&self, key: &str, pages: Vec<JiraPagedWorklogs>) {
+            self.worklogs_pages
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), pages);
+        }
+
+        fn worklogs_calls(&self) -> Vec<(String, u32, u32)> {
+            self.worklogs_calls.lock().unwrap().clone()
+        }
+
+        fn stub_remote_links(&self, key: &str, links: Vec<JiraRemoteLink>) {
+            self.remote_links
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), links);
+        }
+
+        fn remote_link_calls(&self) -> Vec<String> {
+            self.remote_link_calls.lock().unwrap().clone()
         }
 
         /// Trip the cancellation flag *after* the Nth call returns successfully
@@ -1886,6 +2360,75 @@ mod tests {
                 }
             }
             result
+        }
+
+        fn get_issue_comments_page(
+            &self,
+            issue_id_or_key: &str,
+            start_at: u32,
+            max_results: u32,
+        ) -> Result<JiraPagedComments, JiraApiError> {
+            self.comments_calls
+                .lock()
+                .unwrap()
+                .push((issue_id_or_key.to_string(), start_at, max_results));
+            if let Some(err) = self.next_comments_error.lock().unwrap().take() {
+                return Err(err);
+            }
+            let mut map = self.comments_pages.lock().unwrap();
+            if let Some(pages) = map.get_mut(issue_id_or_key) {
+                if !pages.is_empty() {
+                    return Ok(pages.remove(0));
+                }
+            }
+            Ok(JiraPagedComments {
+                start_at,
+                max_results,
+                total: Some(0),
+                comments: vec![],
+            })
+        }
+
+        fn get_issue_worklogs_page(
+            &self,
+            issue_id_or_key: &str,
+            start_at: u32,
+            max_results: u32,
+        ) -> Result<JiraPagedWorklogs, JiraApiError> {
+            self.worklogs_calls
+                .lock()
+                .unwrap()
+                .push((issue_id_or_key.to_string(), start_at, max_results));
+            if let Some(err) = self.next_worklogs_error.lock().unwrap().take() {
+                return Err(err);
+            }
+            let mut map = self.worklogs_pages.lock().unwrap();
+            if let Some(pages) = map.get_mut(issue_id_or_key) {
+                if !pages.is_empty() {
+                    return Ok(pages.remove(0));
+                }
+            }
+            Ok(JiraPagedWorklogs {
+                start_at,
+                max_results,
+                total: Some(0),
+                worklogs: vec![],
+            })
+        }
+
+        fn get_issue_remote_links(
+            &self,
+            issue_id_or_key: &str,
+        ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
+            self.remote_link_calls
+                .lock()
+                .unwrap()
+                .push(issue_id_or_key.to_string());
+            if let Some(err) = self.next_remote_links_error.lock().unwrap().take() {
+                return Err(err);
+            }
+            let map = self.remote_links.lock().unwrap();
+            Ok(map.get(issue_id_or_key).cloned().unwrap_or_default())
         }
     }
 
@@ -2086,6 +2629,7 @@ mod tests {
             client: &client,
             page_size: 2,
             overlap_seconds: 60,
+            options: JiraIngestionOptions::default(),
         };
         // Page 2 will be a server error.
         client.set_next_error(JiraApiError::Server { status: 503 });
@@ -2176,6 +2720,7 @@ mod tests {
             client: &client,
             page_size: 2,
             overlap_seconds: 60,
+            options: JiraIngestionOptions::default(),
         };
         let summary = service
             .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
@@ -2203,5 +2748,329 @@ mod tests {
             )
             .expect("count");
         assert_eq!(wi_count, 2);
+    }
+
+    // ── Task 6: tails, options, partial-runs ───────────────────────────────
+
+    fn amp1_work_item_id() -> String {
+        stable_id("wi", &["srcsys_1", JIRA_WORK_ITEM_KIND, "30001"])
+    }
+
+    #[test]
+    fn persists_inline_comments_issue_links_and_worklogs_idempotently() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Run twice. The AMP fixture's AMP-1 has 2 inline comments, 1 inline
+        // issue link, and 1 inline worklog. No tail data is stubbed, so the
+        // default empty-tail response triggers no additional inserts.
+        for now_utc in ["2026-05-25T17:00:00Z", "2026-05-25T18:00:00Z"] {
+            let mut page1 = load_amp_search_page();
+            page1.total = Some(2);
+            let client = FakeJiraClient::with_pages(vec![page1]);
+            let service = JiraIssueIngestionService::new(&client);
+            let flag = CancellationFlag::new();
+            let summary = service
+                .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), now_utc, &flag)
+                .expect("ingest");
+            assert_eq!(summary.status, "succeeded");
+        }
+
+        let wi_id = amp1_work_item_id();
+        let comment_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_item_comments WHERE work_item_id = ?1",
+                [&wi_id],
+                |r| r.get(0),
+            )
+            .expect("count comments");
+        let worklog_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM jira_worklogs WHERE work_item_id = ?1",
+                [&wi_id],
+                |r| r.get(0),
+            )
+            .expect("count worklogs");
+        let rel_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_item_relationships
+                  WHERE from_upstream_key = 'AMP-1' AND relationship_type = 'Blocks'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count rels");
+
+        assert_eq!(comment_count, 2, "two inline comments persisted exactly once");
+        assert_eq!(worklog_count, 1, "one inline worklog persisted exactly once");
+        assert_eq!(rel_count, 1, "one issue-link relationship persisted exactly once");
+    }
+
+    #[test]
+    fn fetches_comment_tail_only_when_total_exceeds_inline_count() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let client = FakeJiraClient::with_pages(vec![page1]);
+
+        // AMP-1 has comment.total=3 with 2 inline → request startAt=2 fetches
+        // the 3rd comment.
+        let tail = JiraPagedComments {
+            start_at: 2,
+            max_results: 50,
+            total: Some(3),
+            comments: vec![JiraComment {
+                id: "1003".to_string(),
+                author: None,
+                update_author: None,
+                body: Some("Third comment".to_string()),
+                visibility: None,
+                created: Some("2026-05-22T08:00:00.000+0000".to_string()),
+                updated: Some("2026-05-22T08:00:00.000+0000".to_string()),
+                raw_extra: serde_json::Map::new(),
+            }],
+        };
+        client.stub_comments_pages("AMP-1", vec![tail]);
+
+        let service = JiraIssueIngestionService::new(&client);
+        let flag = CancellationFlag::new();
+        let summary = service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+        assert_eq!(summary.status, "succeeded");
+
+        let wi_id = amp1_work_item_id();
+        let comment_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_item_comments WHERE work_item_id = ?1",
+                [&wi_id],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(comment_count, 3, "all three comments persisted");
+
+        // Exactly one comments_calls entry for AMP-1, none for AMP-2.
+        let calls = client.comments_calls();
+        let amp1_calls: Vec<_> = calls.iter().filter(|(k, _, _)| k == "AMP-1").collect();
+        let amp2_calls: Vec<_> = calls.iter().filter(|(k, _, _)| k == "AMP-2").collect();
+        assert_eq!(amp1_calls.len(), 1, "expected exactly one tail call for AMP-1: {calls:?}");
+        assert_eq!(amp1_calls[0].1, 2, "tail startAt should be 2");
+        assert_eq!(amp1_calls[0].2, service.page_size);
+        assert!(amp2_calls.is_empty(), "AMP-2 has comment.total=0 → no tail call");
+    }
+
+    #[test]
+    fn fetches_worklog_tail_only_when_total_exceeds_inline_count() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Synthesize a search page where AMP-1's worklog has total=2 with 1 inline.
+        // Start from the AMP fixture and mutate.
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        if let Some(worklog) = page1.issues[0].fields.worklog.as_mut() {
+            worklog.total = Some(2);
+        }
+        let client = FakeJiraClient::with_pages(vec![page1]);
+
+        let tail = JiraPagedWorklogs {
+            start_at: 1,
+            max_results: 50,
+            total: Some(2),
+            worklogs: vec![JiraWorklog {
+                id: "9002".to_string(),
+                author: None,
+                update_author: None,
+                started: Some("2026-05-22T11:00:00.000+0000".to_string()),
+                time_spent_seconds: Some(600),
+                comment: Some("Reviewed".to_string()),
+                created: None,
+                updated: None,
+                raw_extra: serde_json::Map::new(),
+            }],
+        };
+        client.stub_worklogs_pages("AMP-1", vec![tail]);
+
+        let service = JiraIssueIngestionService::new(&client);
+        let flag = CancellationFlag::new();
+        let summary = service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+        assert_eq!(summary.status, "succeeded");
+
+        let wi_id = amp1_work_item_id();
+        let worklog_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM jira_worklogs WHERE work_item_id = ?1",
+                [&wi_id],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(worklog_count, 2, "inline + tail worklog rows");
+
+        let calls = client.worklogs_calls();
+        let amp1_calls: Vec<_> = calls.iter().filter(|(k, _, _)| k == "AMP-1").collect();
+        let amp2_calls: Vec<_> = calls.iter().filter(|(k, _, _)| k == "AMP-2").collect();
+        assert_eq!(amp1_calls.len(), 1, "expected exactly one worklog tail call for AMP-1: {calls:?}");
+        assert_eq!(amp1_calls[0].1, 1, "tail startAt should be 1");
+        assert!(amp2_calls.is_empty(), "AMP-2 has worklog.total=0 → no tail call");
+    }
+
+    #[test]
+    fn tail_failure_marks_run_partial_without_deleting_saved_issues() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let client = FakeJiraClient::with_pages(vec![page1]);
+        // AMP-1 has comment.total=3, inline=2 → would trigger a tail call.
+        // Force that call to fail.
+        client.set_next_comments_error(JiraApiError::Server { status: 503 });
+
+        let service = JiraIssueIngestionService::new(&client);
+        let flag = CancellationFlag::new();
+        let summary = service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+
+        assert_eq!(summary.status, "partial");
+
+        let wi_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_items WHERE project_key = 'AMP'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count wi");
+        assert_eq!(wi_count, 2, "issues persisted despite tail failure");
+
+        let (status, error_summary): (String, Option<String>) = conn
+            .query_row(
+                "SELECT status, error_summary FROM ingestion_runs
+                  WHERE source_system_id = 'srcsys_1' AND connector = ?1",
+                [JIRA_ISSUE_CONNECTOR],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("run row");
+        assert_eq!(status, "partial");
+        let summary_text = error_summary.expect("error_summary present");
+        assert!(
+            summary_text.contains("tail errors"),
+            "error_summary should mention tail errors: {summary_text}"
+        );
+    }
+
+    #[test]
+    fn watchers_votes_and_remote_links_are_disabled_by_default() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let client = FakeJiraClient::with_pages(vec![page1]);
+        // Even though we stub remote links, the service must NOT call the
+        // remote_links endpoint when the option is disabled.
+        client.stub_remote_links(
+            "AMP-1",
+            vec![JiraRemoteLink {
+                id: Some(1),
+                self_url: None,
+                global_id: None,
+                relationship: None,
+                object: Some(crate::sources::jira_types::JiraRemoteLinkObject {
+                    url: "https://docs.example.invalid/abc".to_string(),
+                    title: Some("Doc".to_string()),
+                    summary: None,
+                    raw_extra: serde_json::Map::new(),
+                }),
+            }],
+        );
+
+        let service = JiraIssueIngestionService::new(&client);
+        let flag = CancellationFlag::new();
+        service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+
+        assert!(
+            client.remote_link_calls().is_empty(),
+            "remote_links_calls must be empty when option disabled: {:?}",
+            client.remote_link_calls()
+        );
+        let rl_count: i64 = conn
+            .query_row("SELECT count(*) FROM jira_remote_links", [], |r| r.get(0))
+            .expect("count rl");
+        assert_eq!(rl_count, 0);
+    }
+
+    #[test]
+    fn enabled_remote_links_use_separate_cursor() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let client = FakeJiraClient::with_pages(vec![page1]);
+        client.stub_remote_links(
+            "AMP-1",
+            vec![JiraRemoteLink {
+                id: Some(7),
+                self_url: None,
+                global_id: None,
+                relationship: Some("references".to_string()),
+                object: Some(crate::sources::jira_types::JiraRemoteLinkObject {
+                    url: "https://docs.example.invalid/abc".to_string(),
+                    title: Some("Doc".to_string()),
+                    summary: None,
+                    raw_extra: serde_json::Map::new(),
+                }),
+            }],
+        );
+
+        let service = JiraIssueIngestionService::with_options(
+            &client,
+            JiraIngestionOptions {
+                fetch_remote_links: true,
+                ..JiraIngestionOptions::default()
+            },
+        );
+        let flag = CancellationFlag::new();
+        service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+
+        let calls = client.remote_link_calls();
+        assert!(calls.contains(&"AMP-1".to_string()), "expected AMP-1 call: {calls:?}");
+        assert!(calls.contains(&"AMP-2".to_string()), "expected AMP-2 call: {calls:?}");
+
+        let rl_count: i64 = conn
+            .query_row("SELECT count(*) FROM jira_remote_links", [], |r| r.get(0))
+            .expect("count rl");
+        assert_eq!(rl_count, 1);
+
+        // Both cursors are present and distinct.
+        let mut stmt = conn
+            .prepare(
+                "SELECT cursor_key FROM ingestion_cursors
+                  WHERE source_system_id = 'srcsys_1' AND connector = ?1
+                  ORDER BY cursor_key",
+            )
+            .expect("prep");
+        let keys: Vec<String> = stmt
+            .query_map([JIRA_ISSUE_CONNECTOR], |r| r.get::<_, String>(0))
+            .expect("query")
+            .map(|r| r.expect("row"))
+            .collect();
+        assert!(
+            keys.contains(&"project:AMP:issues".to_string()),
+            "issues cursor missing: {keys:?}"
+        );
+        assert!(
+            keys.contains(&"project:AMP:remotelinks".to_string()),
+            "remotelinks cursor missing: {keys:?}"
+        );
+        assert_eq!(keys.len(), 2, "expected exactly two cursors: {keys:?}");
     }
 }
