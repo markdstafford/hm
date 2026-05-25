@@ -1407,10 +1407,11 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             if let Err(err) = seed_amp_field_mappings(conn, source_system_id, project_key, now_utc)
             {
                 let ie: IngestionError = err.into();
+                let failed_at = now_utc_rfc3339();
                 let _ = finish_run(
                     conn,
                     &run_id,
-                    now_utc,
+                    &failed_at,
                     "failed",
                     "{}",
                     Some(&format!("{ie}")),
@@ -1460,300 +1461,319 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         let mut remote_links_had_error = false;
         let mut any_remote_link_fetched = false;
 
-        loop {
-            if cancellation.is_cancelled() {
-                cancelled_mid_loop = true;
-                break;
-            }
+        // Shared projection context — all four `with_conn` blocks below build
+        // an identical `JiraIssueProjectionContext` from these inputs, so we
+        // hoist it once. The lifetime tracks the `&str` borrows on
+        // `source_system_id`, `project_key`, `project_name`, and `now_utc`.
+        let ctx = JiraIssueProjectionContext {
+            source_system_id,
+            project_key,
+            project_name,
+            ingested_at: now_utc,
+        };
 
-            let request = JiraSearchRequest::new(jql.clone())
-                .with_max_results(self.page_size)
-                .with_fields(amp_search_fields())
-                .with_start_at(start_at);
+        // ── Page loop body wrapped in an IIFE so every error path falls
+        // through to ONE finalize block below. This guarantees we always call
+        // `finish_run` — even on storage errors mid-page — so the
+        // `ingestion_runs` row never stays stuck at status='running'.
+        let loop_result: Result<(), IngestionError> = (|| {
+            loop {
+                if cancellation.is_cancelled() {
+                    cancelled_mid_loop = true;
+                    break;
+                }
 
-            // HTTP: fetch the page WITHOUT holding the SQLite mutex.
-            let page = match self.client.search_issues_page(request) {
-                Ok(p) => p,
-                Err(err) => {
-                    let ie: IngestionError = err.into();
-                    let counts_json = serde_json::json!({
-                        "saved_issues": saved_issues,
-                        "total_issues": total_issues,
-                        "pages": pages,
-                    })
-                    .to_string();
-                    let now_utc_owned = now_utc.to_string();
-                    let run_id_owned = run_id.clone();
-                    let ie_str = format!("{ie}");
-                    let _ = db.with_conn(|conn| {
-                        let _ = finish_run(
-                            conn,
-                            &run_id_owned,
-                            &now_utc_owned,
-                            "partial",
-                            &counts_json,
-                            Some(&ie_str),
-                        );
+                let request = JiraSearchRequest::new(jql.clone())
+                    .with_max_results(self.page_size)
+                    .with_fields(amp_search_fields())
+                    .with_start_at(start_at);
+
+                // HTTP: fetch the page WITHOUT holding the SQLite mutex.
+                let page = self.client.search_issues_page(request)?;
+
+                let returned = page.issues.len() as u32;
+                total_issues = page.total.or(total_issues);
+
+                // ── Persist the whole page in ONE locked block, wrapped in an
+                // explicit transaction so a mid-page projection failure rolls
+                // back the entire page rather than leaving N-1 issues behind.
+                let (page_max_updated, page_saved) = db.with_conn(|conn| {
+                    let tx = conn.unchecked_transaction()?;
+                    let mut page_max_updated: Option<String> = None;
+                    let mut page_saved: u32 = 0;
+                    let result: Result<(), IngestionError> = (|| {
+                        for issue in &page.issues {
+                            let raw_value = serde_json::to_value(issue).map_err(|_| {
+                                IngestionError::new(IngestionErrorCategory::Decode, "")
+                            })?;
+                            project_jira_issue(&tx, &ctx, &raw_value, issue)?;
+
+                            if let Some(updated) = issue.fields.updated.as_deref() {
+                                match page_max_updated.as_deref() {
+                                    None => page_max_updated = Some(updated.to_string()),
+                                    Some(prev) if updated > prev => {
+                                        page_max_updated = Some(updated.to_string())
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            page_saved += 1;
+                        }
                         Ok(())
-                    });
-                    return Err(ie);
+                    })();
+                    match result {
+                        Ok(()) => {
+                            tx.commit()?;
+                            Ok((page_max_updated, page_saved))
+                        }
+                        Err(e) => {
+                            // Rollback errors are intentionally ignored — the
+                            // outer error is what we want to surface.
+                            let _ = tx.rollback();
+                            Err(e)
+                        }
+                    }
+                })?;
+                if let Some(updated) = page_max_updated {
+                    match max_updated_seen.as_deref() {
+                        None => max_updated_seen = Some(updated),
+                        Some(prev) if updated.as_str() > prev => {
+                            max_updated_seen = Some(updated)
+                        }
+                        _ => {}
+                    }
                 }
-            };
+                saved_issues += page_saved;
 
-            let returned = page.issues.len() as u32;
-            total_issues = page.total.or(total_issues);
-
-            // ── Persist the whole page in ONE locked block (transactional
-            // in spirit). The lock is released after this block before any
-            // tail HTTP fetch.
-            let (page_max_updated, page_saved) = db.with_conn(|conn| {
-                let mut page_max_updated: Option<String> = None;
-                let mut page_saved: u32 = 0;
+                // ── Tail / sub-resource fetches ─────────────────────────────
+                // These happen OUTSIDE the per-issue projection — by the time
+                // we reach here the issues are already persisted, so a tail
+                // failure marks the run "partial" but doesn't roll back saved
+                // issues.
+                //
+                // For each tail fetch, HTTP happens FIRST (no lock held); the
+                // returned items are persisted inside a short `with_conn`
+                // block. Each tail persist is batched (not atomic) — each
+                // helper uses `ON CONFLICT` upserts so a partial flush is
+                // safe to retry.
                 for issue in &page.issues {
-                    let raw_value = serde_json::to_value(issue).map_err(|_| {
-                        IngestionError::new(IngestionErrorCategory::Decode, "")
-                    })?;
-                    let ctx = JiraIssueProjectionContext {
-                        source_system_id,
-                        project_key,
-                        project_name,
-                        ingested_at: now_utc,
-                    };
-                    project_jira_issue(conn, &ctx, &raw_value, issue)?;
-
-                    if let Some(updated) = issue.fields.updated.as_deref() {
-                        match page_max_updated.as_deref() {
-                            None => page_max_updated = Some(updated.to_string()),
-                            Some(prev) if updated > prev => {
-                                page_max_updated = Some(updated.to_string())
-                            }
-                            _ => {}
-                        }
+                    if cancellation.is_cancelled() {
+                        break;
                     }
-                    page_saved += 1;
-                }
-                Ok((page_max_updated, page_saved))
-            })?;
-            if let Some(updated) = page_max_updated {
-                match max_updated_seen.as_deref() {
-                    None => max_updated_seen = Some(updated),
-                    Some(prev) if updated.as_str() > prev => {
-                        max_updated_seen = Some(updated)
-                    }
-                    _ => {}
-                }
-            }
-            saved_issues += page_saved;
+                    let work_item_id_for_tail = stable_id(
+                        "wi",
+                        &[source_system_id, JIRA_WORK_ITEM_KIND, &issue.id],
+                    );
 
-            // ── Tail / sub-resource fetches ─────────────────────────────────
-            // These happen OUTSIDE the per-issue projection — by the time we
-            // reach here the issues are already persisted, so a tail failure
-            // marks the run "partial" but doesn't roll back saved issues.
-            //
-            // For each tail fetch, HTTP happens FIRST (no lock held); the
-            // returned items are persisted inside a short `with_conn` block.
-            for issue in &page.issues {
-                if cancellation.is_cancelled() {
-                    break;
-                }
-                let work_item_id_for_tail = stable_id(
-                    "wi",
-                    &[source_system_id, JIRA_WORK_ITEM_KIND, &issue.id],
-                );
-
-                // Comments tail.
-                if let Some(comment) = issue.fields.comment.as_ref() {
-                    let total = comment.total.unwrap_or(0) as usize;
-                    let inline = comment.comments.len();
-                    if total > inline {
-                        let mut start_at_tail = inline as u32;
-                        loop {
-                            if cancellation.is_cancelled() {
-                                break;
-                            }
-                            // HTTP (no lock held).
-                            let page_tail = match self.client.get_issue_comments_page(
-                                &issue.key,
-                                start_at_tail,
-                                self.page_size,
-                            ) {
-                                Ok(p) => p,
-                                Err(err) => {
-                                    let ie: IngestionError = err.into();
-                                    tail_errors
-                                        .push(format!("comments {}: {}", issue.key, ie));
+                    // Comments tail.
+                    if let Some(comment) = issue.fields.comment.as_ref() {
+                        let total = comment.total.unwrap_or(0) as usize;
+                        let inline = comment.comments.len();
+                        if total > inline {
+                            let mut start_at_tail = inline as u32;
+                            loop {
+                                if cancellation.is_cancelled() {
                                     break;
                                 }
-                            };
-                            let returned = page_tail.comments.len() as u32;
-                            // Persist all returned comments inside ONE locked block.
-                            db.with_conn(|conn| {
-                                let ctx = JiraIssueProjectionContext {
-                                    source_system_id,
-                                    project_key,
-                                    project_name,
-                                    ingested_at: now_utc,
+                                // HTTP (no lock held).
+                                let page_tail = match self.client.get_issue_comments_page(
+                                    &issue.key,
+                                    start_at_tail,
+                                    self.page_size,
+                                ) {
+                                    Ok(p) => p,
+                                    Err(err) => {
+                                        let ie: IngestionError = err.into();
+                                        tail_errors
+                                            .push(format!("comments {}: {}", issue.key, ie));
+                                        break;
+                                    }
                                 };
-                                for c in &page_tail.comments {
-                                    persist_jira_comment(
-                                        conn,
-                                        &ctx,
-                                        &work_item_id_for_tail,
-                                        &issue.key,
-                                        c,
-                                    )
-                                    .map_err(IngestionError::from)?;
-                                }
-                                Ok(())
-                            })?;
-                            let next = start_at_tail.saturating_add(returned);
-                            let reached_total = page_tail
-                                .total
-                                .map(|t| next as usize >= t as usize)
-                                .unwrap_or(false);
-                            if returned == 0 || reached_total || next <= start_at_tail {
-                                break;
-                            }
-                            start_at_tail = next;
-                        }
-                    }
-                }
-
-                if cancellation.is_cancelled() {
-                    break;
-                }
-
-                // Worklogs tail.
-                if let Some(worklog) = issue.fields.worklog.as_ref() {
-                    let total = worklog.total.unwrap_or(0) as usize;
-                    let inline = worklog.worklogs.len();
-                    if total > inline {
-                        let mut start_at_tail = inline as u32;
-                        loop {
-                            if cancellation.is_cancelled() {
-                                break;
-                            }
-                            let page_tail = match self.client.get_issue_worklogs_page(
-                                &issue.key,
-                                start_at_tail,
-                                self.page_size,
-                            ) {
-                                Ok(p) => p,
-                                Err(err) => {
-                                    let ie: IngestionError = err.into();
-                                    tail_errors
-                                        .push(format!("worklogs {}: {}", issue.key, ie));
+                                let returned = page_tail.comments.len() as u32;
+                                // Batched (not atomic). persist_jira_comment uses
+                                // upserts so retry after partial flush is safe.
+                                db.with_conn(|conn| {
+                                    for c in &page_tail.comments {
+                                        persist_jira_comment(
+                                            conn,
+                                            &ctx,
+                                            &work_item_id_for_tail,
+                                            &issue.key,
+                                            c,
+                                        )
+                                        .map_err(IngestionError::from)?;
+                                    }
+                                    Ok(())
+                                })?;
+                                let next = start_at_tail.saturating_add(returned);
+                                let reached_total = page_tail
+                                    .total
+                                    .map(|t| next as usize >= t as usize)
+                                    .unwrap_or(false);
+                                if returned == 0 || reached_total || next <= start_at_tail {
                                     break;
                                 }
-                            };
-                            let returned = page_tail.worklogs.len() as u32;
-                            db.with_conn(|conn| {
-                                let ctx = JiraIssueProjectionContext {
-                                    source_system_id,
-                                    project_key,
-                                    project_name,
-                                    ingested_at: now_utc,
-                                };
-                                for w in &page_tail.worklogs {
-                                    persist_jira_worklog(
-                                        conn,
-                                        &ctx,
-                                        &work_item_id_for_tail,
-                                        w,
-                                    )
-                                    .map_err(IngestionError::from)?;
-                                }
-                                Ok(())
-                            })?;
-                            let next = start_at_tail.saturating_add(returned);
-                            let reached_total = page_tail
-                                .total
-                                .map(|t| next as usize >= t as usize)
-                                .unwrap_or(false);
-                            if returned == 0 || reached_total || next <= start_at_tail {
-                                break;
+                                start_at_tail = next;
                             }
-                            start_at_tail = next;
                         }
                     }
-                }
 
-                if cancellation.is_cancelled() {
-                    break;
-                }
+                    if cancellation.is_cancelled() {
+                        break;
+                    }
 
-                // Remote links (opt-in).
-                if self.options.fetch_remote_links {
-                    match self.client.get_issue_remote_links(&issue.key) {
-                        Ok(links) => {
-                            let fetched_any = db.with_conn(|conn| {
-                                let ctx = JiraIssueProjectionContext {
-                                    source_system_id,
-                                    project_key,
-                                    project_name,
-                                    ingested_at: now_utc,
+                    // Worklogs tail.
+                    if let Some(worklog) = issue.fields.worklog.as_ref() {
+                        let total = worklog.total.unwrap_or(0) as usize;
+                        let inline = worklog.worklogs.len();
+                        if total > inline {
+                            let mut start_at_tail = inline as u32;
+                            loop {
+                                if cancellation.is_cancelled() {
+                                    break;
+                                }
+                                let page_tail = match self.client.get_issue_worklogs_page(
+                                    &issue.key,
+                                    start_at_tail,
+                                    self.page_size,
+                                ) {
+                                    Ok(p) => p,
+                                    Err(err) => {
+                                        let ie: IngestionError = err.into();
+                                        tail_errors
+                                            .push(format!("worklogs {}: {}", issue.key, ie));
+                                        break;
+                                    }
                                 };
-                                let mut any = false;
-                                for link in &links {
-                                    match persist_jira_remote_link(
-                                        conn,
-                                        &ctx,
-                                        &work_item_id_for_tail,
-                                        &issue.key,
-                                        link,
-                                    ) {
-                                        Ok(true) => any = true,
-                                        Ok(false) => {}
-                                        Err(err) => {
-                                            return Err(err.into());
+                                let returned = page_tail.worklogs.len() as u32;
+                                // Batched (not atomic). persist_jira_worklog uses
+                                // upserts so retry after partial flush is safe.
+                                db.with_conn(|conn| {
+                                    for w in &page_tail.worklogs {
+                                        persist_jira_worklog(
+                                            conn,
+                                            &ctx,
+                                            &work_item_id_for_tail,
+                                            w,
+                                        )
+                                        .map_err(IngestionError::from)?;
+                                    }
+                                    Ok(())
+                                })?;
+                                let next = start_at_tail.saturating_add(returned);
+                                let reached_total = page_tail
+                                    .total
+                                    .map(|t| next as usize >= t as usize)
+                                    .unwrap_or(false);
+                                if returned == 0 || reached_total || next <= start_at_tail {
+                                    break;
+                                }
+                                start_at_tail = next;
+                            }
+                        }
+                    }
+
+                    if cancellation.is_cancelled() {
+                        break;
+                    }
+
+                    // Remote links (opt-in).
+                    if self.options.fetch_remote_links {
+                        match self.client.get_issue_remote_links(&issue.key) {
+                            Ok(links) => {
+                                // Batched (not atomic). persist_jira_remote_link
+                                // uses upserts so retry after partial flush is safe.
+                                let fetched_any = db.with_conn(|conn| {
+                                    let mut any = false;
+                                    for link in &links {
+                                        match persist_jira_remote_link(
+                                            conn,
+                                            &ctx,
+                                            &work_item_id_for_tail,
+                                            &issue.key,
+                                            link,
+                                        ) {
+                                            Ok(true) => any = true,
+                                            Ok(false) => {}
+                                            Err(err) => {
+                                                return Err(err.into());
+                                            }
                                         }
                                     }
+                                    Ok(any)
+                                })?;
+                                if fetched_any {
+                                    any_remote_link_fetched = true;
                                 }
-                                Ok(any)
-                            })?;
-                            if fetched_any {
-                                any_remote_link_fetched = true;
                             }
-                        }
-                        Err(err) => {
-                            let ie: IngestionError = err.into();
-                            tail_errors.push(format!("remotelinks {}: {}", issue.key, ie));
-                            remote_links_had_error = true;
+                            Err(err) => {
+                                let ie: IngestionError = err.into();
+                                tail_errors.push(format!("remotelinks {}: {}", issue.key, ie));
+                                remote_links_had_error = true;
+                            }
                         }
                     }
                 }
+
+                pages += 1;
+                any_page_persisted = any_page_persisted || returned > 0;
+
+                let progress_json = serde_json::json!({
+                    "phase": "searching",
+                    "current_page": pages,
+                    "total_pages": total_issues.map(|t| div_ceil_u32(t, self.page_size.max(1))),
+                    "saved_issues": saved_issues,
+                    "total_issues": total_issues,
+                })
+                .to_string();
+                let counts_json = serde_json::json!({
+                    "saved_issues": saved_issues,
+                    "total_issues": total_issues,
+                    "pages": pages,
+                })
+                .to_string();
+                db.with_conn(|conn| {
+                    update_progress(conn, &run_id, &progress_json, &counts_json)?;
+                    Ok(())
+                })?;
+
+                if should_stop_paginate(start_at, self.page_size, returned, page.total) {
+                    break;
+                }
+                let next_start = start_at.saturating_add(returned);
+                if next_start <= start_at {
+                    break;
+                }
+                start_at = next_start;
             }
+            Ok(())
+        })();
 
-            pages += 1;
-            any_page_persisted = any_page_persisted || returned > 0;
-
-            let progress_json = serde_json::json!({
-                "phase": "searching",
-                "current_page": pages,
-                "total_pages": total_issues.map(|t| div_ceil_u32(t, self.page_size.max(1))),
-                "saved_issues": saved_issues,
-                "total_issues": total_issues,
-            })
-            .to_string();
+        // ── Single finalize on error. Any `?` inside the loop body — search
+        // HTTP error, storage error during projection, storage error during
+        // tail persist, or progress update failure — lands here. We mark the
+        // run "partial" with a fresh timestamp and propagate the error.
+        if let Err(ie) = loop_result {
             let counts_json = serde_json::json!({
                 "saved_issues": saved_issues,
                 "total_issues": total_issues,
                 "pages": pages,
             })
             .to_string();
-            db.with_conn(|conn| {
-                update_progress(conn, &run_id, &progress_json, &counts_json)?;
+            let finished_at = now_utc_rfc3339();
+            let ie_str = format!("{ie}");
+            let _ = db.with_conn(|conn| {
+                let _ = finish_run(
+                    conn,
+                    &run_id,
+                    &finished_at,
+                    "partial",
+                    &counts_json,
+                    Some(&ie_str),
+                );
                 Ok(())
-            })?;
-
-            if should_stop_paginate(start_at, self.page_size, returned, page.total) {
-                break;
-            }
-            let next_start = start_at.saturating_add(returned);
-            if next_start <= start_at {
-                break;
-            }
-            start_at = next_start;
+            });
+            return Err(ie);
         }
 
         let (status, error_summary): (&str, Option<String>) = if cancelled_mid_loop {
@@ -1774,6 +1794,9 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         .to_string();
 
         // ── Final writes: advance cursors + finish_run in one locked block.
+        // Capture a fresh timestamp so `finished_at` reflects the actual end
+        // of the run rather than the start-of-run value.
+        let finished_at = now_utc_rfc3339();
         let fetch_remote_links = self.options.fetch_remote_links;
         let project_key_owned = project_key.to_string();
         db.with_conn(|conn| {
@@ -1818,7 +1841,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             finish_run(
                 conn,
                 &run_id,
-                now_utc,
+                &finished_at,
                 status,
                 &final_counts,
                 error_summary.as_deref(),
@@ -3582,5 +3605,178 @@ mod tests {
         // Release the worker and let it finish.
         release_tx.send(()).expect("signal release");
         handle.join().expect("worker thread joined");
+    }
+
+    // ── R2-1 regression: storage hiccup mid-loop finalizes the run ────────
+    //
+    // The page-loop body is wrapped in an IIFE that funnels every storage or
+    // HTTP error into a single finalize block. Without that wrapper a
+    // `db.with_conn(...)?` early-return left `ingestion_runs.status='running'`
+    // forever. This fake DbAccess succeeds for the setup block (`start_run` +
+    // `seed_amp_field_mappings` + `read_cursor`) and the projection block,
+    // but fails on the next `with_conn` call — specifically the per-page
+    // `update_progress`. The run must still be marked `partial` with a
+    // non-empty `error_summary`, and `ingest_project` must return Err.
+    #[test]
+    fn with_conn_error_during_projection_finalizes_run_as_partial() {
+        /// Wraps a real `Connection` but fails after a configured number of
+        /// successful `with_conn` calls. The failure call itself is also
+        /// counted, so subsequent calls (e.g. the post-loop finalize) succeed
+        /// and can persist the partial-run row.
+        struct FailingDbAccess<'a> {
+            inner: &'a Connection,
+            calls: std::cell::Cell<u32>,
+            fail_after: u32,
+            failed_once: std::cell::Cell<bool>,
+        }
+        impl<'a> DbAccess for FailingDbAccess<'a> {
+            fn with_conn<F, R>(&self, f: F) -> Result<R, IngestionError>
+            where
+                F: FnOnce(&Connection) -> Result<R, IngestionError>,
+            {
+                let next = self.calls.get() + 1;
+                self.calls.set(next);
+                if next == self.fail_after && !self.failed_once.get() {
+                    self.failed_once.set(true);
+                    return Err(IngestionError::new(
+                        IngestionErrorCategory::Storage,
+                        "",
+                    ));
+                }
+                f(self.inner)
+            }
+        }
+
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let client = FakeJiraClient::with_pages(vec![page1]);
+        let service = JiraIssueIngestionService::new(&client);
+
+        // Call order in ingest_project:
+        //   1. setup block (start_run + seed + read_cursor)
+        //   2. page projection (per-page txn)
+        //   3. update_progress
+        //   …after that the loop terminates on page.total=2 and we hit the
+        //   final cursors+finish_run block.
+        // Failing on the 3rd call exercises the new IIFE → single-finalize
+        // path without short-circuiting the projection itself.
+        let db = FailingDbAccess {
+            inner: &conn,
+            calls: std::cell::Cell::new(0),
+            fail_after: 3,
+            failed_once: std::cell::Cell::new(false),
+        };
+
+        let flag = CancellationFlag::new();
+        let err = service
+            .ingest_project(&db, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect_err("expected storage error to surface");
+        assert_eq!(err.category(), IngestionErrorCategory::Storage);
+
+        // Exactly one ingestion_runs row, marked partial with a non-empty
+        // error_summary. status must NOT be 'running'.
+        let rows: Vec<(String, Option<String>)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT status, error_summary FROM ingestion_runs
+                      WHERE source_system_id = 'srcsys_1' AND connector = ?1",
+                )
+                .expect("prep");
+            let rs = stmt
+                .query_map([JIRA_ISSUE_CONNECTOR], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                })
+                .expect("query");
+            rs.map(|r| r.expect("row")).collect()
+        };
+        assert_eq!(rows.len(), 1, "expected exactly one ingestion_runs row");
+        assert_eq!(rows[0].0, "partial");
+        assert!(
+            rows[0]
+                .1
+                .as_deref()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false),
+            "expected non-empty error_summary, got {:?}",
+            rows[0].1
+        );
+
+        // started_at and finished_at must both be set (no run left at running).
+        let (started_at, finished_at): (String, Option<String>) = conn
+            .query_row(
+                "SELECT started_at, finished_at FROM ingestion_runs
+                  WHERE source_system_id = 'srcsys_1' AND connector = ?1",
+                [JIRA_ISSUE_CONNECTOR],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("timestamps");
+        assert_eq!(started_at, NOW);
+        assert!(
+            finished_at.is_some(),
+            "finished_at must be set after partial finalize"
+        );
+    }
+
+    // ── R2-2 regression: per-page projection is wrapped in a transaction ──
+    //
+    // If projection of any issue in a page fails, every other issue in that
+    // page must be rolled back. The page-projection `with_conn` block uses
+    // `conn.unchecked_transaction()` to enforce that. We trigger a projection
+    // failure by sending a page that contains a malformed issue (empty `id`
+    // / `key`) AFTER a real issue. `project_jira_issue` returns
+    // `ProjectionError::Invalid`, which the inner closure surfaces as Err and
+    // the surrounding match rolls back the transaction.
+    #[test]
+    fn page_projection_rollback_keeps_no_partial_issues() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Build a page with one valid AMP-1 issue followed by an invalid
+        // issue (missing key). The valid issue must NOT survive after
+        // rollback because the whole page is one transaction.
+        let mut page = load_amp_search_page();
+        page.total = Some(2);
+        // Replace the second issue with one that has an empty key — this
+        // triggers `ProjectionError::Invalid` partway through the page.
+        if let Some(second) = page.issues.get_mut(1) {
+            second.key = "".to_string();
+        }
+        let client = FakeJiraClient::with_pages(vec![page]);
+        let service = JiraIssueIngestionService::new(&client);
+
+        let flag = CancellationFlag::new();
+        let err = service
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect_err("expected projection error to roll back the page");
+        // Invalid issue maps to Schema (see IngestionError::From<ProjectionError>).
+        assert_eq!(err.category(), IngestionErrorCategory::Schema);
+
+        // No issues from that page should be persisted — the transaction
+        // was rolled back. Without the transaction, AMP-1 would survive.
+        let wi_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_items WHERE project_key = 'AMP'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count wi");
+        assert_eq!(
+            wi_count, 0,
+            "no work_items must remain after a mid-page projection rollback"
+        );
+
+        // The run itself was finalized as partial by the IIFE finalize block.
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM ingestion_runs
+                  WHERE source_system_id = 'srcsys_1' AND connector = ?1",
+                [JIRA_ISSUE_CONNECTOR],
+                |r| r.get(0),
+            )
+            .expect("status");
+        assert_eq!(status, "partial");
     }
 }

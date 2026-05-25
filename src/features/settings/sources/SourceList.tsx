@@ -118,9 +118,6 @@ export function SourceList({
                           Last successful issue sync: {progress.last_successful_issue_sync_at}
                         </div>
                       )}
-                      <div className="text-xs italic text-subtext">
-                        Optional sub-resources are opt-in via the run options.
-                      </div>
                       {progress?.error_summary && (
                         <div className="text-xs text-red">
                           Error: {progress.error_summary}
