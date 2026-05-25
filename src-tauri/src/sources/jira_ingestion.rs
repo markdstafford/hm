@@ -1880,6 +1880,32 @@ fn days_to_civil(days: i64) -> (i64, u32, u32) {
     (y_final, m, d)
 }
 
+/// Format a unix-epoch second count as an RFC 3339 timestamp in UTC. Uses the
+/// same days-from-civil math as [`subtract_seconds_rfc3339`] so we do not pull
+/// in a date/time crate just to print "now".
+pub fn format_unix_seconds_rfc3339(secs: u64) -> String {
+    let total_secs = secs as i64;
+    let days = total_secs.div_euclid(86_400);
+    let secs_of_day = total_secs.rem_euclid(86_400);
+    let (y, m, d) = days_to_civil(days);
+    let h = (secs_of_day / 3600) as u32;
+    let min = ((secs_of_day % 3600) / 60) as u32;
+    let s = (secs_of_day % 60) as u32;
+    format!("{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{s:02}Z")
+}
+
+/// Return the current UTC time as an RFC 3339 string. Falls back to the unix
+/// epoch if the system clock is set before 1970, which is a degenerate state
+/// we don't try to recover from.
+pub fn now_utc_rfc3339() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format_unix_seconds_rfc3339(secs)
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

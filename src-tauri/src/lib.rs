@@ -35,6 +35,11 @@ pub fn run() {
         commands::source_credential_delete,
         commands::source_config_remove,
         commands::jira_source_test_connection,
+        commands::jira_issue_ingestion_run,
+        commands::jira_issue_ingestion_cancel,
+        commands::jira_issue_ingestion_status,
+        commands::jira_issue_ingestion_progress,
+        commands::jira_issues_list,
     ]);
 
     #[cfg(debug_assertions)]
@@ -59,6 +64,9 @@ pub fn run() {
 
             // Production keychain secret store (service namespace "hm")
             app.manage(ManagedSecretStore(Arc::new(KeychainSecretStore::new("hm"))));
+
+            // In-memory map of active Jira ingestion cancellation flags.
+            app.manage(commands::ActiveIngestionRuns::default());
 
             Ok(())
         })
@@ -104,6 +112,11 @@ mod tests {
                     commands::source_credential_delete,
                     commands::source_config_remove,
                     commands::jira_source_test_connection,
+                    commands::jira_issue_ingestion_run,
+                    commands::jira_issue_ingestion_cancel,
+                    commands::jira_issue_ingestion_status,
+                    commands::jira_issue_ingestion_progress,
+                    commands::jira_issues_list,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)

@@ -23,6 +23,33 @@ export const commands = {
 	sourceCredentialDelete: (credentialRef: string) => typedError<null, string>(__TAURI_INVOKE("source_credential_delete", { credentialRef })),
 	sourceConfigRemove: (sourceId: string) => typedError<null, string>(__TAURI_INVOKE("source_config_remove", { sourceId })),
 	jiraSourceTestConnection: (source: JiraSourceConfig, pendingPat: string | null) => typedError<JiraConnectionTestResult, string>(__TAURI_INVOKE("jira_source_test_connection", { source, pendingPat })),
+	jiraIssueIngestionRun: (sourceId: string) => typedError<JiraIssueIngestionRunResult, string>(__TAURI_INVOKE("jira_issue_ingestion_run", { sourceId })),
+	jiraIssueIngestionCancel: (sourceId: string, runId: string) => typedError<null, string>(__TAURI_INVOKE("jira_issue_ingestion_cancel", { sourceId, runId })),
+	jiraIssueIngestionStatus: (sourceId: string) => typedError<{
+	run_id: string,
+	status: string,
+	phase: string,
+	saved_issues: number,
+	total_issues: number | null,
+	current_page: number | null,
+	total_pages: number | null,
+	message: string,
+	last_successful_issue_sync_at: string | null,
+	error_summary: string | null,
+} | null, string>(__TAURI_INVOKE("jira_issue_ingestion_status", { sourceId })),
+	jiraIssueIngestionProgress: (sourceId: string) => typedError<{
+	run_id: string,
+	status: string,
+	phase: string,
+	saved_issues: number,
+	total_issues: number | null,
+	current_page: number | null,
+	total_pages: number | null,
+	message: string,
+	last_successful_issue_sync_at: string | null,
+	error_summary: string | null,
+} | null, string>(__TAURI_INVOKE("jira_issue_ingestion_progress", { sourceId })),
+	jiraIssuesList: (filter: JiraIssueListFilter) => typedError<JiraIssueListItem[], string>(__TAURI_INVOKE("jira_issues_list", { filter })),
 };
 
 /* Types */
@@ -99,6 +126,42 @@ export type JiraConnectionTestResult = {
 };
 
 export type JiraConnectionTestStatus = "NotTested" | "Testing" | "Success" | "Error" | "Unavailable";
+
+export type JiraIssueIngestionProgress = {
+	run_id: string,
+	status: string,
+	phase: string,
+	saved_issues: number,
+	total_issues: number | null,
+	current_page: number | null,
+	total_pages: number | null,
+	message: string,
+	last_successful_issue_sync_at: string | null,
+	error_summary: string | null,
+};
+
+export type JiraIssueIngestionRunResult = {
+	run_id: string,
+	status: string,
+	saved_issues: number,
+	total_issues: number | null,
+};
+
+export type JiraIssueListFilter = {
+	source_id: string | null,
+	project_key: string | null,
+	limit: number | null,
+};
+
+export type JiraIssueListItem = {
+	work_item_id: string,
+	key: string,
+	title: string,
+	status_name: string | null,
+	assignee_display_name: string | null,
+	updated_at_source: string | null,
+	project_key: string | null,
+};
 
 export type JiraProjectFilter = {
 	key: string,
