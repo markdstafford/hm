@@ -1,5 +1,7 @@
 import type { SourceConfig } from "../../../sources/types";
+import { Button } from "../../../ui/buttons/Button";
 import { Card } from "../../../ui/layout/Card";
+import { AlertDialog } from "../../../ui/overlays/AlertDialog";
 
 interface SourceListProps {
   sources: SourceConfig[];
@@ -26,25 +28,43 @@ export function SourceList({
     );
   }
 
-  return (
-    <ul className="space-y-3">
-      {sources.map((source) => {
-        const jira = source; // SourceConfig is { kind: "Jira" } & JiraSourceConfig
-        const host = (() => {
-          try { return new URL(jira.server_url).hostname; } catch { return jira.server_url; }
-        })();
-        const displayName = jira.name || host;
-        const projectSummary = jira.projects.length === 0
-          ? "No projects selected"
-          : jira.projects.length === 1
-          ? jira.projects[0].key
-          : `${jira.projects.length} projects: ${jira.projects.map(p => p.key).join(", ")}`;
-        const isPendingRemove = pendingRemoveId === jira.id;
+  const pendingSource = pendingRemoveId
+    ? sources.find((s) => s.id === pendingRemoveId)
+    : undefined;
+  const pendingDisplayName = pendingSource
+    ? pendingSource.name ||
+      (() => {
+        try {
+          return new URL(pendingSource.server_url).hostname;
+        } catch {
+          return pendingSource.server_url;
+        }
+      })()
+    : "";
 
-        return (
-          <li key={jira.id}>
-            <Card>
-              <div className="flex flex-col gap-2">
+  return (
+    <>
+      <ul className="space-y-3">
+        {sources.map((source) => {
+          const jira = source; // SourceConfig is { kind: "Jira" } & JiraSourceConfig
+          const host = (() => {
+            try {
+              return new URL(jira.server_url).hostname;
+            } catch {
+              return jira.server_url;
+            }
+          })();
+          const displayName = jira.name || host;
+          const projectSummary =
+            jira.projects.length === 0
+              ? "No projects selected"
+              : jira.projects.length === 1
+              ? jira.projects[0].key
+              : `${jira.projects.length} projects: ${jira.projects.map((p) => p.key).join(", ")}`;
+
+          return (
+            <li key={jira.id}>
+              <Card>
                 <div className="flex items-start justify-between gap-2">
                   <div className="space-y-0.5 min-w-0">
                     <div className="font-medium text-sm text-text truncate">{displayName}</div>
@@ -73,32 +93,41 @@ export function SourceList({
                     </button>
                   </div>
                 </div>
-                {isPendingRemove && (
-                  <div className="rounded bg-surface p-2 text-sm space-y-2">
-                    <p className="text-text">Remove {displayName}?</p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onRemoveConfirm(jira.id)}
-                        className="px-3 py-1 rounded bg-red text-on-destructive text-xs font-medium"
-                      >
-                        Remove source
-                      </button>
-                      <button
-                        type="button"
-                        onClick={onRemoveCancel}
-                        className="px-3 py-1 rounded text-subtext hover:text-text text-xs font-medium"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </Card>
-          </li>
-        );
-      })}
-    </ul>
+              </Card>
+            </li>
+          );
+        })}
+      </ul>
+
+      <AlertDialog.Root
+        open={!!pendingSource}
+        onOpenChange={(open) => {
+          if (!open) onRemoveCancel();
+        }}
+      >
+        <AlertDialog.Content>
+          <AlertDialog.Title className="text-sm font-semibold text-text">
+            Remove source?
+          </AlertDialog.Title>
+          <AlertDialog.Description className="text-xs text-subtext mt-2">
+            Removes <span className="font-mono">{pendingDisplayName}</span>. The
+            credential secret stored in the OS keychain is also deleted.
+          </AlertDialog.Description>
+          <div className="flex justify-end gap-2 mt-4">
+            <AlertDialog.Cancel asChild>
+              <Button variant="ghost">Cancel</Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action asChild>
+              <Button
+                variant="destructive"
+                onClick={() => pendingSource && onRemoveConfirm(pendingSource.id)}
+              >
+                Remove source
+              </Button>
+            </AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    </>
   );
 }

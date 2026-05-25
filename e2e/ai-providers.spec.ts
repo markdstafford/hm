@@ -20,9 +20,11 @@ test("YAML view toggle renders the textarea editor", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /yaml editor/i })).toBeVisible();
   const textarea = page.getByRole("textbox", { name: /yaml/i });
   await expect(textarea).toBeVisible();
-  // Default content for an empty config is the four top-level keys.
-  await expect(textarea).toContainText("credentials:");
-  await expect(textarea).toContainText("endpoints:");
-  await expect(textarea).toContainText("profiles:");
-  await expect(textarea).toContainText("routing:");
+  // Default content for an empty config is the four top-level keys. The
+  // textarea is a form control so the value lives on `.value`, not in
+  // text content — use toHaveValue rather than toContainText.
+  await expect(textarea).toHaveValue(/credentials:/);
+  await expect(textarea).toHaveValue(/endpoints:/);
+  await expect(textarea).toHaveValue(/profiles:/);
+  await expect(textarea).toHaveValue(/routing:/);
 });
