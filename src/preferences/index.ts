@@ -2,7 +2,7 @@ import {
   isLightTheme,
   isDarkTheme,
   CATPPUCCIN_ACCENTS,
-} from "./theme";
+} from "../theme";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type ThemeBrightness = "light" | "dark";

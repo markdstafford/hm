@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { loadSourcesConfig, removeSource } from "../../sources/storage";
-import type { SourcesConfig, JiraSourceConfig } from "../../sources/types";
+import { loadSourcesConfig, removeSource } from "../../../sources/storage";
+import type { SourcesConfig, JiraSourceConfig } from "../../../sources/types";
 import { SourceList } from "./SourceList";
 import { AddSourceFlow } from "./AddSourceFlow";
 import { JiraSourceForm } from "./JiraSourceForm";
 
 type Mode = "list" | "choose-kind" | "new-jira" | "edit-jira";
 
-export function SourcesSettings() {
+export function SourcesCategory() {
   const [config, setConfig] = useState<SourcesConfig>({ version: 1, sources: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +86,7 @@ export function SourcesSettings() {
   return (
     <section aria-labelledby="sources-heading" className="space-y-6">
       <div>
-        <h1 id="sources-heading" className="text-2xl font-semibold text-text">Sources</h1>
+        <h1 id="sources-heading" className="text-lg font-semibold text-text">Sources</h1>
         <p className="text-sm text-subtext mt-1">
           Configure the systems hm reads from. Secrets are stored in the OS keychain.
         </p>

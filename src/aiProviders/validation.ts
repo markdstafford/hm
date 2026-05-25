@@ -2,6 +2,7 @@ import type { AiProviderConfig } from "./types";
 
 const NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 const TASK_SEGMENT_PATTERN = /^[a-z0-9_-]+$/;
+const ENV_VAR_PATTERN = /^[A-Z0-9_]+$/;
 const SECRET_SHAPED_KEYS = ["api_key", "token", "secret", "authorization", "password"];
 
 export function validateAiProviderConfig(config: AiProviderConfig): string[] {
@@ -12,9 +13,28 @@ export function validateAiProviderConfig(config: AiProviderConfig): string[] {
   checkDuplicates(config.endpoints.map(e => e.name), "endpoint", errors);
   checkDuplicates(config.profiles.map(p => p.name), "profile", errors);
 
-  // Validate names
+  // Validate names + credential source contents
   for (const c of config.credentials) {
     if (!isValidName(c.name)) errors.push(`Invalid credential name: ${c.name}`);
+    // Mirror src-tauri/src/ai/config.rs::validate(): keychain key_ref must
+    // equal `ai.credentials.<name>` so the backend never has to guess where
+    // a credential's secret lives, and env var names must be POSIX-shape.
+    if (c.source.type === "Keychain") {
+      const expected = `ai.credentials.${c.name}`;
+      if (c.source.key_ref !== expected) {
+        errors.push(
+          `Credential "${c.name}" keychain key_ref must be ${expected} but got ${c.source.key_ref}`,
+        );
+      }
+    } else if (c.source.type === "Env") {
+      if (!c.source.var_name) {
+        errors.push(`Credential "${c.name}" env var name must not be empty`);
+      } else if (!ENV_VAR_PATTERN.test(c.source.var_name)) {
+        errors.push(
+          `Credential "${c.name}" env var name may only contain [A-Z0-9_]: ${c.source.var_name}`,
+        );
+      }
+    }
   }
   for (const e of config.endpoints) {
     if (!isValidName(e.name)) errors.push(`Invalid endpoint name: ${e.name}`);
@@ -64,7 +84,16 @@ function isValidName(name: string): boolean {
 function isValidUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname.length > 0;
+    // Match src-tauri/src/ai/config.rs::validate_url(): http/https, non-empty
+    // host, and explicitly no query string or fragment. The Rust side rejects
+    // both, so accepting them here would let "saved" configs fail only when
+    // the user is online inside Tauri.
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.hostname.length > 0 &&
+      parsed.search === "" &&
+      parsed.hash === ""
+    );
   } catch {
     return false;
   }
@@ -87,8 +116,19 @@ function checkSettingsForSecrets(obj: Record<string, unknown>, errors: string[])
     if (SECRET_SHAPED_KEYS.some(sk => key.toLowerCase().includes(sk))) {
       errors.push(`Secret-shaped settings key: ${key}`);
     }
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      checkSettingsForSecrets(value as Record<string, unknown>, errors);
-    }
+    walkSettingsValue(value, errors);
+  }
+}
+
+// Recurse into both objects and arrays. The Rust validator
+// (src-tauri/src/ai/config.rs::validate_settings_no_secrets) walks arrays too,
+// so { foo: [{ api_key: ... }] } passes the TS preflight previously and only
+// failed at backend save time. Mirror the recursion here so YAML import and
+// form save catch nested secrets up front.
+function walkSettingsValue(value: unknown, errors: string[]) {
+  if (Array.isArray(value)) {
+    for (const item of value) walkSettingsValue(item, errors);
+  } else if (value && typeof value === "object") {
+    checkSettingsForSecrets(value as Record<string, unknown>, errors);
   }
 }

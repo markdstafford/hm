@@ -109,27 +109,42 @@ Two pieces of managed Tauri state are registered in `lib.rs::run()`:
 - `SettingsError::Keychain` and `SettingsError::Database` Display implementations intentionally omit internal details.
 - `KeychainSecretStore` error messages never include the key value or secret value.
 
-## Settings UI (added 2026-05-22)
+## Settings UI (added 2026-05-22, refactored 2026-05-24 in PR #30)
+
+Settings is a page-mode feature mounted inside the standard `AppShell` (see `context-agent/design-system.md` → "Settings UI patterns" for the canonical contract). The legacy Radix Dialog `SettingsPanel` was removed in PR #30.
 
 ### Module layout
 
 ```
 src/
-  preferences.ts       AppPreferences type, ThemeMode, DEFAULT_PREFERENCES, normalizePreferences, mergePreferences, resolvedPreferences
-  preferences.test.ts  Unit tests for normalize/merge helpers (pure functions, no Tauri dependency)
-  theme.ts             applyTheme(mode, _prefersDark) — sets/removes data-theme on <html>; applyFonts(uiFont, monoFont) — overrides --font-sans/--font-mono CSS vars on :root
-  windowState.ts       restoreWindowState(prefs), registerWindowListeners(onStateCapture) — listeners debounced 500ms; both guarded for non-Tauri environments
-  settings/
-    settingsTypes.ts       SettingsCategory, SettingsPanelProps
-    settingsStorage.ts     loadPreferences(), savePreferences(current, patch) — wraps Tauri commands with normalize + merge logic
-    SettingsPanel.tsx      Radix Dialog shell: sidebar (General category), content area, close button, Escape handler, cross-fade animation
-    GeneralSettings.tsx    Radix Select controls for themeMode, uiFont, monoFont; SettingRow layout component
-    SettingsPanel.test.tsx Component tests: render, open/close, controls, onUpdatePreferences calls, axe
+  preferences/
+    index.ts             AppPreferences types, DEFAULT_PREFERENCES, normalize/merge/resolve helpers
+    index.test.ts        Unit tests for normalize/merge (pure, no Tauri)
+    storage.ts           loadPreferences(), savePreferences(current, patch) — wraps Tauri commands with normalize + merge
+  theme.ts               applyColorScheme(), applyFonts() — paint theme + font CSS vars on <html>/:root
+  windowState.ts         restoreWindowState(prefs), registerWindowListeners(onStateCapture) — debounced 500ms; non-Tauri-guarded
+  features/settings/
+    categories.ts                SettingsCategory union + SETTINGS_CATEGORIES metadata + getCategoryLabel
+    SettingsSidebar.tsx          NavSection of category NavItems (active = current)
+    SettingsPage.tsx             Composes the main pane: dispatches on active category; also exports <SettingsBreadcrumb>
+    general/GeneralCategory.tsx        SettingRow + Select for uiFont, monoFont
+    appearance/AppearanceCategory.tsx  SettingRow + Select for themeMode / lightTheme / darkTheme / Catppuccin accent
+    sources/                            Ported from old src/settings/sources — uses Card + Form primitives
+      SourcesCategory.tsx              List + Add flow + JiraSourceForm dispatcher
+      SourceList.tsx                   Card-per-row list with AlertDialog confirmation on remove
+      AddSourceFlow.tsx                Card-tile picker (Jira active; GitHub/Documents "coming later")
+      JiraSourceForm.tsx               Form-primitive wrapped; preserves the existing save/test logic
+      ConnectionTestStatus.tsx, ProjectMultiSelect.tsx — unchanged from pre-refactor
+    ai-providers/                       New profile-centric flow (replaces 4-section editor)
+      AiProvidersCategory.tsx          Orchestrator: load/save, smoke-state, list/form/yaml view switch, remove AlertDialog
+      ProfileList.tsx                  Card-per-profile rows with effort pill, routing badges, smoke status, row actions
+      ProfileForm.tsx                  Unified add/edit form with cascade-rename warning and routing checkboxes
+      YamlAdvancedView.tsx             Textarea editor that round-trips against autocatalyst.yaml ai: section
 ```
 
 ### App.tsx integration
 
-App.tsx owns `AppPreferences` state. On mount: `loadPreferences()` → `setPrefs()` → `restoreWindowState()`. Also on mount (Tauri only): `registerWindowListeners()` registers debounced move/resize handlers that call `savePreferences` and `setPrefs` — a `prefsRef` keeps the callbacks current without stale closures. On themeMode change: `applyTheme()` + media-query listener cleanup. On font change: `applyFonts()`. `updatePreferences(patch)` merges + writes via `savePreferences` + surfaces save errors in a timed alert. SettingsPanel receives `prefs` and `onUpdatePreferences` as props.
+App.tsx owns `AppPreferences` state plus `settingsPage: SettingsCategory | null`. The settings cog flips `settingsPage` to `"general"`; the close-X (rendered via `<IconButton>`) returns to `null`. When `inSettings`, the AppShell's sidebar renders `<SettingsSidebar>`; the main title-bar starts with `<SettingsBreadcrumb>` and ends with the close-X. `updatePreferences(patch)` merges + writes via `savePreferences` and surfaces save errors in a timed alert. AI providers and Sources own their own data loading inside their category components.
 
 ### Window state caveats
 
@@ -170,9 +185,9 @@ All commands appear in both `collect_commands!` invocations in `src-tauri/src/li
 
 **Data layer** (`src/sources/`): `types.ts`, `defaults.ts`, `validation.ts`, `storage.ts`
 
-**UI** (`src/settings/sources/`): `SourcesSettings.tsx`, `SourceList.tsx`, `AddSourceFlow.tsx`, `JiraSourceForm.tsx`, `ConnectionTestStatus.tsx`, `ProjectMultiSelect.tsx`
+**UI** (`src/features/settings/sources/`): `SourcesCategory.tsx`, `SourceList.tsx`, `AddSourceFlow.tsx`, `JiraSourceForm.tsx`, `ConnectionTestStatus.tsx`, `ProjectMultiSelect.tsx`. The JiraSourceForm uses the `<Form>` compound primitive; the source rows use `<Card>` with an `<AlertDialog>` for destructive confirm.
 
-**Settings wiring**: `settingsTypes.ts` includes `"sources"`; `SettingsPanel.tsx` inserts Sources between Appearance and AI providers.
+**Settings wiring**: `src/features/settings/categories.ts` declares the `"sources"` id; `SettingsPage.tsx` dispatches it to `SourcesCategory`. Sidebar order is General → Appearance → Sources → AI providers.
 
 ### Security policy for sources
 
@@ -217,20 +232,23 @@ src-tauri/src/ai/
   runners/openai_chat_completions.rs OpenAI-compatible Chat Completions direct API runner
 ```
 
-### Settings UI layout
+### Settings UI layout (refactored 2026-05-24 in PR #30)
 
 ```
 src/aiProviders/
   types.ts              domain type aliases from generated bindings
   defaults.ts           EMPTY_AI_PROVIDER_CONFIG, RUNNER_LABELS, EMPTY_STATES
-  validation.ts         validateAiProviderConfig() — client-side validation mirrors Rust rules
+  validation.ts         validateAiProviderConfig() — checks duplicates, ref integrity, secret-shaped settings keys, supported combos
   storage.ts            async command wrappers with Tauri env guard
+  yaml/
+    serialize.ts        configToYaml() — emits the autocatalyst.yaml-style ai: section shape with ${KEYCHAIN:…} / ${ENV_VAR} sigils
+    parse.ts            yamlToConfig() — accepts both unwrapped and ai:-wrapped roots; refuses plaintext secrets, empty configs, secret-shaped settings keys; runs validateAiProviderConfig at the end
 
-src/settings/
-  AiProvidersSettings.tsx      container: loads config, auto-saves on each change
-  aiProviders/
-    CredentialsSection.tsx     credentials CRUD + keychain secret set (secret never enters config)
-    EndpointsSection.tsx       endpoint CRUD with credential picker
-    ProfilesSection.tsx        profile CRUD + per-row smoke test with NotRun/Running/Success/Error states
-    RoutingSection.tsx         task-to-profile routing CRUD with dotted-name validation
+src/features/settings/ai-providers/
+  AiProvidersCategory.tsx   orchestrator: list/form/yaml view switch, transactional secret + config save, AlertDialog on remove
+  ProfileList.tsx           Card-per-profile rows with effort pill, routing badges, smoke status, Edit/Test/Remove IconButtons
+  ProfileForm.tsx           unified add/edit form. Bundles credential + endpoint + profile + routing in one Form. Emits a ProfileFormSavePayload with optional pendingSecret so the orchestrator can persist secrets transactionally; preserves unknown profile.settings keys (_yaml_runner, thinking, beta header filters) across form-edit.
+  YamlAdvancedView.tsx      textarea editor that round-trips through serialize/parse with cross-reference validation on Apply
 ```
+
+The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `ProfilesSection` / `RoutingSection` under `src/settings/aiProviders/`) was deleted in PR #30. Schema notes on the runner-flavor distinction (`anthropic_direct` vs `claude_agent_sdk`) — the binding's `AiRunner` enum only distinguishes anthropic/openai families; the YAML view preserves the original runner spelling via `profile.settings._yaml_runner` for lossless round-trip.

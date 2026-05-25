@@ -1,4 +1,4 @@
-import type { JiraConnectionTestResult } from "../../sources/types";
+import type { JiraConnectionTestResult } from "../../../sources/types";
 
 interface ConnectionTestStatusProps {
   result: JiraConnectionTestResult | null;

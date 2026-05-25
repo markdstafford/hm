@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Tooltip } from "../overlays/Tooltip";
 
 type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
@@ -12,7 +12,7 @@ type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
 // stays focusable and continues to dispatch pointer events. That is what lets
 // the wrapping Radix Tooltip attach to "(coming soon)" buttons — disabled
 // native buttons are not reliable Tooltip triggers.
-export function IconButton({
+export const IconButton = forwardRef<HTMLButtonElement, Props>(function IconButton({
   label,
   children,
   dimmed = false,
@@ -22,7 +22,7 @@ export function IconButton({
   onClick,
   onKeyDown,
   ...rest
-}: Props) {
+}, ref) {
   function handleClick(e: MouseEvent<HTMLButtonElement>) {
     if (disabled) {
       e.preventDefault();
@@ -40,6 +40,7 @@ export function IconButton({
   return (
     <Tooltip content={label}>
       <button
+        ref={ref}
         type="button"
         aria-label={label}
         aria-disabled={disabled || undefined}
@@ -56,4 +57,4 @@ export function IconButton({
       </button>
     </Tooltip>
   );
-}
+});
