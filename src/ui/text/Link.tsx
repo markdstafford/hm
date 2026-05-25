@@ -1,15 +1,17 @@
+import { ExternalLink } from "lucide-react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 
 type Props = AnchorHTMLAttributes<HTMLAnchorElement> & {
   href: string;
   children: ReactNode;
+  showExternalIcon?: boolean;
 };
 
 function isExternal(href: string): boolean {
   return /^https?:\/\//i.test(href);
 }
 
-export function Link({ href, children, className = "", ...rest }: Props) {
+export function Link({ href, children, className = "", showExternalIcon = true, ...rest }: Props) {
   const external = isExternal(href);
   return (
     <a
@@ -20,6 +22,9 @@ export function Link({ href, children, className = "", ...rest }: Props) {
       {...rest}
     >
       {children}
+      {external && showExternalIcon && (
+        <ExternalLink size={11} aria-hidden className="inline-block ml-1 align-[-1px]" />
+      )}
     </a>
   );
 }

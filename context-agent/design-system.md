@@ -239,7 +239,7 @@ Composable pieces used by the shell's sidebar column.
 | Component | Wraps | Purpose |
 | --- | --- | --- |
 | `Heading` | native `<h1>`–`<h6>` | Page and section titles. `level` 1–6 maps to the typography scale. |
-| `Link` | native `<a>` | Inline link. External URLs (matched by `^https?://`) get `target="_blank"` and `rel="noreferrer noopener"`; relative URLs render plain. |
+| `Link` | native `<a>` | Inline link. External URLs (matched by `^https?://`) get `target="_blank"`, `rel="noreferrer noopener"`, and a trailing `ExternalLink` icon (from `lucide-react`) so users can spot off-app navigation at a glance; relative URLs render plain. Pass `showExternalIcon={false}` to suppress the icon when the surrounding context already implies external-ness (e.g. a logo grid or a list of source links). |
 | `InlineCode` | native `<code>` | Inline `<code>` with mono font and subtle surface background. |
 | `CodeBlock` | `shiki` (async) | Fenced code block with syntax highlighting. Theme follows `data-theme-mode` on `<html>` (Catppuccin Latte for light, Macchiato for dark). Renders an unstyled `<pre><code>` fallback while shiki resolves. |
 | `Markdown` | `react-markdown` + `remark-gfm` | Display-only Markdown. Renders GFM (tables, task lists). Single newlines do NOT produce `<br>`. Image nodes render as `<span class="italic text-subtext">[image: alt]</span>` (no remote fetches at v1). |
