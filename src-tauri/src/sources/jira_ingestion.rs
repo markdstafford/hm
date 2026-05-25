@@ -1217,10 +1217,20 @@ pub fn project_jira_issue(
 
 // ── Ingestion service ──────────────────────────────────────────────────────────
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::ingestion::errors::{IngestionError, IngestionErrorCategory};
 use crate::ingestion::runs::{
     finish_run, read_cursor, start_run, update_progress, upsert_cursor,
 };
+
+/// Process-static counter mixed into `run_id` so two runs for the same
+/// `(source_system_id, project_key)` started within the same wall-clock
+/// second do not collide on the primary key. `start_run` uses INSERT, not
+/// UPSERT, so colliding ids would surface as a hard error. Resets per
+/// process, which is safe because timestamps drift across restarts and the
+/// FNV-1a content hash still emits distinct ids.
+static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 use crate::sources::jira_client::{JiraApiClient, JiraSearchRequest};
 use crate::sources::jira_errors::JiraApiError;
 use crate::sources::jira_types::{JiraPagedComments, JiraPagedWorklogs, JiraSearchPage};
@@ -1390,7 +1400,12 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         now_utc: &str,
         cancellation: &CancellationFlag,
     ) -> Result<JiraIssueIngestionSummary, IngestionError> {
-        let run_id = stable_id("run", &[source_system_id, project_key, now_utc]);
+        let seq = RUN_ID_SEQ.fetch_add(1, Ordering::Relaxed);
+        let seq_str = seq.to_string();
+        let run_id = stable_id(
+            "run",
+            &[source_system_id, project_key, now_utc, &seq_str],
+        );
         let requested_projects_json =
             serde_json::json!([project_key]).to_string();
 
@@ -1459,7 +1474,6 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         // Tracks whether any remote-link fetch failed across the run. Used to
         // decide whether to advance the per-project remote-links cursor.
         let mut remote_links_had_error = false;
-        let mut any_remote_link_fetched = false;
 
         // Shared projection context — all four `with_conn` blocks below build
         // an identical `JiraIssueProjectionContext` from these inputs, so we
@@ -1683,28 +1697,24 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                             Ok(links) => {
                                 // Batched (not atomic). persist_jira_remote_link
                                 // uses upserts so retry after partial flush is safe.
-                                let fetched_any = db.with_conn(|conn| {
-                                    let mut any = false;
+                                // A successful empty response is still a successful
+                                // remote-link scan, so we no longer track whether
+                                // any link was actually persisted — the cursor
+                                // advances whenever the scan returns without error.
+                                db.with_conn(|conn| {
                                     for link in &links {
-                                        match persist_jira_remote_link(
+                                        if let Err(err) = persist_jira_remote_link(
                                             conn,
                                             &ctx,
                                             &work_item_id_for_tail,
                                             &issue.key,
                                             link,
                                         ) {
-                                            Ok(true) => any = true,
-                                            Ok(false) => {}
-                                            Err(err) => {
-                                                return Err(err.into());
-                                            }
+                                            return Err(err.into());
                                         }
                                     }
-                                    Ok(any)
+                                    Ok(())
                                 })?;
-                                if fetched_any {
-                                    any_remote_link_fetched = true;
-                                }
                             }
                             Err(err) => {
                                 let ie: IngestionError = err.into();
@@ -1821,9 +1831,11 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 }
             }
 
-            // Separate cursor for remote-link sync: only advances when remote-link
-            // sync was enabled, fetched at least one link, and saw no errors.
-            if fetch_remote_links && any_remote_link_fetched && !remote_links_had_error {
+            // Separate cursor for remote-link sync: advances whenever remote-link
+            // sync was enabled and the scan completed without error. A successful
+            // scan that returned zero links is still a completed sync, so the
+            // next run should not redo the scan from scratch.
+            if fetch_remote_links && !remote_links_had_error {
                 let remote_links_cursor_key =
                     format!("project:{}:remotelinks", project_key_owned);
                 let value = serde_json::json!({ "last_synced": now_utc }).to_string();
@@ -3204,6 +3216,122 @@ mod tests {
             "remotelinks cursor missing: {keys:?}"
         );
         assert_eq!(keys.len(), 2, "expected exactly two cursors: {keys:?}");
+    }
+
+    #[test]
+    fn enabled_remote_links_cursor_advances_even_when_zero_links_returned() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_zero");
+
+        // AMP fixture with total=2 so pagination terminates cleanly. The
+        // remote-link map is left empty — every issue returns Ok(vec![]).
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let client = FakeJiraClient::with_pages(vec![page1]);
+
+        let service = JiraIssueIngestionService::with_options(
+            &client,
+            JiraIngestionOptions {
+                fetch_remote_links: true,
+                ..JiraIngestionOptions::default()
+            },
+        );
+        let flag = CancellationFlag::new();
+        service
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_zero",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
+            .expect("ingest");
+
+        // The remote-link endpoint must have been called (zero-link returns
+        // are still successful scans).
+        assert!(
+            !client.remote_link_calls().is_empty(),
+            "expected remote_links endpoint to be called when option enabled",
+        );
+        // No links were returned, so no rows persisted.
+        let rl_count: i64 = conn
+            .query_row("SELECT count(*) FROM jira_remote_links", [], |r| r.get(0))
+            .expect("count rl");
+        assert_eq!(rl_count, 0);
+
+        // Cursor must exist and have a non-null last_successful_sync_at — the
+        // empty-but-successful scan should still advance it.
+        use rusqlite::OptionalExtension;
+        let last: Option<String> = conn
+            .query_row(
+                "SELECT last_successful_sync_at FROM ingestion_cursors
+                   WHERE source_system_id = ?1 AND connector = ?2 AND cursor_key = ?3",
+                rusqlite::params![
+                    "srcsys_zero",
+                    JIRA_ISSUE_CONNECTOR,
+                    "project:AMP:remotelinks",
+                ],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .expect("query cursor")
+            .flatten();
+        assert!(
+            last.is_some(),
+            "remote-links cursor must advance on successful zero-link sync",
+        );
+    }
+
+    #[test]
+    fn two_quick_runs_for_same_source_project_in_same_second_do_not_collide() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_dupe");
+
+        // Empty search pages — both runs short-circuit after one empty page.
+        // The point of this test is that two runs with an identical
+        // `(source_system_id, project_key, now_utc)` tuple must produce
+        // distinct `run_id`s and both rows must persist successfully.
+        let same_now = "2026-05-25T18:00:00Z";
+
+        let client1 = FakeJiraClient::with_pages(vec![]);
+        let service1 = JiraIssueIngestionService::new(&client1);
+        let flag1 = CancellationFlag::new();
+        let r1 = service1.ingest_project(
+            &BorrowedConnDbAccess(&conn),
+            "srcsys_dupe",
+            "AMP",
+            Some("AMP"),
+            same_now,
+            &flag1,
+        );
+        assert!(r1.is_ok(), "first run must succeed: {r1:?}");
+
+        let client2 = FakeJiraClient::with_pages(vec![]);
+        let service2 = JiraIssueIngestionService::new(&client2);
+        let flag2 = CancellationFlag::new();
+        let r2 = service2.ingest_project(
+            &BorrowedConnDbAccess(&conn),
+            "srcsys_dupe",
+            "AMP",
+            Some("AMP"),
+            same_now,
+            &flag2,
+        );
+        assert!(
+            r2.is_ok(),
+            "second run with same source/project/wall-clock-second must succeed: {r2:?}",
+        );
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM ingestion_runs
+                   WHERE source_system_id = 'srcsys_dupe' AND connector = ?1",
+                [JIRA_ISSUE_CONNECTOR],
+                |r| r.get(0),
+            )
+            .expect("count runs");
+        assert_eq!(count, 2, "both runs should be persisted with distinct ids");
     }
 
     // -- Redaction tests --------------------------------------------------

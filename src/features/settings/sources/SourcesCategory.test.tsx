@@ -173,6 +173,56 @@ describe("SourcesCategory", () => {
     );
   });
 
+  it("shows live progress and Cancel sync while jira_issue_ingestion_run is still pending", async () => {
+    vi.mocked(commands.sourceConfigGet).mockResolvedValue({
+      status: "ok",
+      data: { version: 1, sources: [JIRA_SOURCE] },
+    });
+    // jiraIssueIngestionRun never resolves during this test, simulating the
+    // synchronous Rust command blocking for the full ingestion duration.
+    vi.mocked(commands.jiraIssueIngestionRun).mockImplementation(
+      () => new Promise(() => {}),
+    );
+    let progressCalls = 0;
+    vi.mocked(commands.jiraIssueIngestionProgress).mockImplementation(async () => {
+      progressCalls += 1;
+      if (progressCalls === 1) return { status: "ok", data: null };
+      return {
+        status: "ok",
+        data: {
+          run_id: "run_pending_1",
+          status: "running",
+          phase: "searching",
+          saved_issues: 3,
+          total_issues: 10,
+          current_page: 1,
+          total_pages: 2,
+          message: "Syncing issues",
+          last_successful_issue_sync_at: null,
+          error_summary: null,
+        },
+      };
+    });
+
+    render(<SourcesCategory />);
+    const runButton = await screen.findByRole("button", { name: /Run sync now/i });
+    await userEvent.click(runButton);
+
+    // Cancel button must appear without waiting for the run promise to resolve.
+    const cancelButton = await screen.findByRole("button", { name: /Cancel sync/i });
+    expect(cancelButton).toBeInTheDocument();
+    expect(screen.getByText(/3 of 10 issues saved/i)).toBeInTheDocument();
+
+    // Click Cancel and assert it uses run_id from the progress response.
+    await userEvent.click(cancelButton);
+    await waitFor(() =>
+      expect(commands.jiraIssueIngestionCancel).toHaveBeenCalledWith(
+        JIRA_SOURCE.id,
+        "run_pending_1",
+      ),
+    );
+  });
+
   it("does not render credential refs or PAT-shaped text in source rows", async () => {
     vi.mocked(commands.sourceConfigGet).mockResolvedValue({
       status: "ok",

@@ -28,6 +28,16 @@ export function SourcesCategory() {
     Record<string, JiraIssueIngestionProgress | null>
   >({});
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fastPollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (fastPollTimerRef.current) {
+        clearInterval(fastPollTimerRef.current);
+        fastPollTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     loadSourcesConfig()
@@ -117,13 +127,40 @@ export function SourcesCategory() {
     setMode("list");
   }
 
-  async function handleRunSync(sourceId: string) {
-    const result = await runJiraIssueIngestion(sourceId);
-    if (!result.ok) {
-      setError(result.error);
-      return;
+  function handleRunSync(sourceId: string) {
+    // Kick off the run but DO NOT await — the Rust command is synchronous and
+    // would block UI updates for the entire ingestion duration. We need to
+    // observe the `running` progress state during the run so the user sees
+    // live progress and a Cancel button.
+    const runPromise = runJiraIssueIngestion(sourceId).then((result) => {
+      if (!result.ok) setError(result.error);
+      // Final refresh once the run resolves to capture the terminal state.
+      return refreshProgress([sourceId]);
+    });
+
+    // Short-cycle poll to pick up the `running` state quickly. The standard
+    // 2s polling effect takes over once status flips to "running".
+    if (fastPollTimerRef.current) {
+      clearInterval(fastPollTimerRef.current);
+      fastPollTimerRef.current = null;
     }
-    await refreshProgress([sourceId]);
+    let attempts = 0;
+    fastPollTimerRef.current = setInterval(() => {
+      attempts += 1;
+      void refreshProgress([sourceId]);
+      if (attempts >= 8 && fastPollTimerRef.current) {
+        clearInterval(fastPollTimerRef.current);
+        fastPollTimerRef.current = null;
+      }
+    }, 250);
+
+    // Stop fast-polling if the run finishes before the cap is hit.
+    void runPromise.finally(() => {
+      if (fastPollTimerRef.current) {
+        clearInterval(fastPollTimerRef.current);
+        fastPollTimerRef.current = null;
+      }
+    });
   }
 
   async function handleCancelSync(sourceId: string, runId: string) {
