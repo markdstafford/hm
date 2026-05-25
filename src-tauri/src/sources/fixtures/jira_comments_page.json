@@ -1,0 +1,18 @@
+{
+  "startAt": 2,
+  "maxResults": 50,
+  "total": 3,
+  "comments": [
+    {
+      "id": "1003",
+      "author": {
+        "accountId": "acct-tarek",
+        "name": "tarek",
+        "displayName": "Tarek Example"
+      },
+      "body": "Third comment",
+      "created": "2026-05-22T08:00:00.000+0000",
+      "updated": "2026-05-22T08:00:00.000+0000"
+    }
+  ]
+}

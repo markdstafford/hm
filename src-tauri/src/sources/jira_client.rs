@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use crate::sources::jira_errors::JiraApiError;
 use crate::sources::jira_types::{
-    JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraProject, JiraSearchPage,
+    JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraPagedComments, JiraPagedWorklogs,
+    JiraProject, JiraRemoteLink, JiraSearchPage,
 };
 
 // ── Secret string ─────────────────────────────────────────────────────────────
@@ -143,6 +144,7 @@ pub struct JiraSearchRequest {
     pub jql: String,
     pub start_at: u32,
     pub max_results: u32,
+    pub fields: Vec<String>,
 }
 
 impl JiraSearchRequest {
@@ -151,6 +153,7 @@ impl JiraSearchRequest {
             jql: jql.into(),
             start_at: 0,
             max_results: 50,
+            fields: Vec::new(),
         }
     }
 
@@ -161,6 +164,15 @@ impl JiraSearchRequest {
 
     pub fn with_max_results(mut self, max_results: u32) -> Self {
         self.max_results = clamp_page_size(max_results);
+        self
+    }
+
+    pub fn with_fields<I, S>(mut self, fields: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.fields = fields.into_iter().map(Into::into).collect();
         self
     }
 }
@@ -344,6 +356,9 @@ impl JiraApiClient {
             "maxResults",
             &clamp_page_size(request.max_results).to_string(),
         );
+        if !request.fields.is_empty() {
+            serializer.append_pair("fields", &request.fields.join(","));
+        }
         self.get_json(&format!("/rest/api/2/search?{}", serializer.finish()))
     }
 
@@ -364,6 +379,7 @@ impl JiraApiClient {
                 start_at,
                 max_results: page_size,
                 jql: request.jql.clone(),
+                fields: request.fields.clone(),
             })?;
             let returned = page.issues.len();
             let stop =
@@ -426,6 +442,43 @@ impl JiraApiClient {
             start_at = next_start;
         }
         Ok(histories)
+    }
+
+    /// Fetch one page of comments for an issue.
+    pub fn get_issue_comments_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraPagedComments, JiraApiError> {
+        let issue = encode_path_segment(issue_id_or_key)?;
+        let max_results = clamp_page_size(max_results);
+        self.get_json(&format!(
+            "/rest/api/2/issue/{issue}/comment?startAt={start_at}&maxResults={max_results}"
+        ))
+    }
+
+    /// Fetch one page of worklogs for an issue.
+    pub fn get_issue_worklogs_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraPagedWorklogs, JiraApiError> {
+        let issue = encode_path_segment(issue_id_or_key)?;
+        let max_results = clamp_page_size(max_results);
+        self.get_json(&format!(
+            "/rest/api/2/issue/{issue}/worklog?startAt={start_at}&maxResults={max_results}"
+        ))
+    }
+
+    /// Fetch all remote links for an issue (Jira Data Center returns a JSON array, not paginated).
+    pub fn get_issue_remote_links(
+        &self,
+        issue_id_or_key: &str,
+    ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
+        let issue = encode_path_segment(issue_id_or_key)?;
+        self.get_json(&format!("/rest/api/2/issue/{issue}/remotelink"))
     }
 
     #[cfg(test)]
@@ -1178,6 +1231,152 @@ mod tests {
             sleeps,
             vec![400],
             "X-RateLimit-Remaining: 0 should trigger fallback_delay_ms=400"
+        );
+    }
+
+    const AMP_FIELDS: &[&str] = &[
+        "summary",
+        "status",
+        "resolution",
+        "assignee",
+        "reporter",
+        "priority",
+        "labels",
+        "components",
+        "issuetype",
+        "project",
+        "description",
+        "created",
+        "updated",
+        "resolutiondate",
+        "duedate",
+        "fixVersions",
+        "subtasks",
+        "watches",
+        "customfield_14051",
+        "customfield_14353",
+        "customfield_12751",
+        "customfield_14655",
+        "customfield_10857",
+        "customfield_10858",
+        "customfield_10859",
+        "customfield_10557",
+        "comment",
+        "issuelinks",
+        "worklog",
+    ];
+
+    #[test]
+    fn search_issues_page_includes_fields_query_when_set() {
+        let base_url = spawn_json_server(|request| {
+            let url = request.url().to_string();
+            let expected = "&fields=summary%2Cstatus%2Cresolution%2Cassignee%2Creporter%2Cpriority%2Clabels%2Ccomponents%2Cissuetype%2Cproject%2Cdescription%2Ccreated%2Cupdated%2Cresolutiondate%2Cduedate%2CfixVersions%2Csubtasks%2Cwatches%2Ccustomfield_14051%2Ccustomfield_14353%2Ccustomfield_12751%2Ccustomfield_14655%2Ccustomfield_10857%2Ccustomfield_10858%2Ccustomfield_10859%2Ccustomfield_10557%2Ccomment%2Cissuelinks%2Cworklog";
+            assert!(
+                url.contains(expected),
+                "expected fields query, got url={url}"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_amp_search_page.json"),
+                ))
+                .unwrap();
+        });
+        let page = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .search_issues_page(
+                JiraSearchRequest::new("project = AMP").with_fields(AMP_FIELDS.iter().copied()),
+            )
+            .unwrap();
+        assert_eq!(page.issues[0].key, "AMP-1");
+    }
+
+    #[test]
+    fn search_issues_page_omits_fields_when_unset() {
+        let base_url = spawn_json_server(|request| {
+            let url = request.url().to_string();
+            assert!(
+                !url.contains("fields="),
+                "expected no fields query, got url={url}"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_search_page.json"),
+                ))
+                .unwrap();
+        });
+        let page = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .search_issues_page(JiraSearchRequest::new("project = HM"))
+            .unwrap();
+        assert_eq!(page.issues.len(), 2);
+    }
+
+    #[test]
+    fn get_issue_comments_page_calls_correct_url_and_returns_paged() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(
+                request.url(),
+                "/rest/api/2/issue/AMP-1/comment?startAt=2&maxResults=50"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_comments_page.json"),
+                ))
+                .unwrap();
+        });
+        let comments = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .get_issue_comments_page("AMP-1", 2, 50)
+            .unwrap();
+        assert_eq!(comments.total, Some(3));
+    }
+
+    #[test]
+    fn get_issue_worklogs_page_calls_correct_url_and_returns_paged() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(
+                request.url(),
+                "/rest/api/2/issue/AMP-1/worklog?startAt=1&maxResults=50"
+            );
+            request
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_worklogs_page.json"),
+                ))
+                .unwrap();
+        });
+        let worklogs = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .get_issue_worklogs_page("AMP-1", 1, 50)
+            .unwrap();
+        assert_eq!(worklogs.total, Some(2));
+    }
+
+    #[test]
+    fn get_issue_remote_links_returns_array() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(request.url(), "/rest/api/2/issue/AMP-1/remotelink");
+            request
+                .respond(json_response(
+                    200,
+                    r#"[{"id":1,"globalId":"abc","relationship":"mentioned","object":{"url":"https://docs.example.invalid/abc","title":"Doc"}}]"#,
+                ))
+                .unwrap();
+        });
+        let links = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .get_issue_remote_links("AMP-1")
+            .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(
+            links[0].object.as_ref().unwrap().url,
+            "https://docs.example.invalid/abc"
         );
     }
 }

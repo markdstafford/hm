@@ -36,6 +36,211 @@ pub struct JiraIssueFields {
     pub created: Option<String>,
     #[serde(default)]
     pub updated: Option<String>,
+    #[serde(default)]
+    pub resolution: Option<JiraNamedValue>,
+    #[serde(rename = "resolutiondate", default)]
+    pub resolution_date: Option<String>,
+    #[serde(rename = "duedate", default)]
+    pub due_date: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub components: Vec<JiraNamedValue>,
+    #[serde(rename = "fixVersions", default)]
+    pub fix_versions: Vec<JiraVersion>,
+    #[serde(default)]
+    pub subtasks: Vec<JiraSubtask>,
+    #[serde(default)]
+    pub watches: Option<JiraWatches>,
+    #[serde(default)]
+    pub votes: Option<JiraVotes>,
+    #[serde(default)]
+    pub comment: Option<JiraPagedComments>,
+    #[serde(rename = "issuelinks", default)]
+    pub issue_links: Vec<JiraIssueLink>,
+    #[serde(default)]
+    pub worklog: Option<JiraPagedWorklogs>,
+    /// Captures everything else (custom fields, sprint, customer name, etc.) as raw JSON.
+    #[serde(flatten)]
+    pub raw_extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraVersion {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub released: Option<bool>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraSubtask {
+    pub id: String,
+    pub key: String,
+    #[serde(default)]
+    pub fields: JiraSubtaskFields,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct JiraSubtaskFields {
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub status: Option<JiraNamedValue>,
+    #[serde(rename = "issuetype", default)]
+    pub issue_type: Option<JiraNamedValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JiraWatches {
+    #[serde(rename = "watchCount", default)]
+    pub watch_count: u32,
+    #[serde(rename = "isWatching", default)]
+    pub is_watching: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JiraVotes {
+    #[serde(default)]
+    pub votes: u32,
+    #[serde(rename = "hasVoted", default)]
+    pub has_voted: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraPagedComments {
+    #[serde(rename = "startAt", default)]
+    pub start_at: u32,
+    #[serde(rename = "maxResults", default)]
+    pub max_results: u32,
+    #[serde(default)]
+    pub total: Option<u32>,
+    #[serde(default)]
+    pub comments: Vec<JiraComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraComment {
+    pub id: String,
+    #[serde(default)]
+    pub author: Option<JiraUser>,
+    #[serde(rename = "updateAuthor", default)]
+    pub update_author: Option<JiraUser>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub visibility: Option<serde_json::Value>,
+    #[serde(default)]
+    pub created: Option<String>,
+    #[serde(default)]
+    pub updated: Option<String>,
+    #[serde(flatten)]
+    pub raw_extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraPagedWorklogs {
+    #[serde(rename = "startAt", default)]
+    pub start_at: u32,
+    #[serde(rename = "maxResults", default)]
+    pub max_results: u32,
+    #[serde(default)]
+    pub total: Option<u32>,
+    #[serde(default)]
+    pub worklogs: Vec<JiraWorklog>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraWorklog {
+    pub id: String,
+    #[serde(default)]
+    pub author: Option<JiraUser>,
+    #[serde(rename = "updateAuthor", default)]
+    pub update_author: Option<JiraUser>,
+    #[serde(default)]
+    pub started: Option<String>,
+    #[serde(rename = "timeSpentSeconds", default)]
+    pub time_spent_seconds: Option<u64>,
+    #[serde(default)]
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub created: Option<String>,
+    #[serde(default)]
+    pub updated: Option<String>,
+    #[serde(flatten)]
+    pub raw_extra: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraIssueLink {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(rename = "type", default)]
+    pub type_: Option<JiraIssueLinkType>,
+    #[serde(rename = "inwardIssue", default)]
+    pub inward_issue: Option<JiraLinkedIssueRef>,
+    #[serde(rename = "outwardIssue", default)]
+    pub outward_issue: Option<JiraLinkedIssueRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JiraIssueLinkType {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub inward: Option<String>,
+    #[serde(default)]
+    pub outward: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraLinkedIssueRef {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub key: String,
+    #[serde(default)]
+    pub fields: Option<JiraLinkedIssueFields>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraLinkedIssueFields {
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub status: Option<JiraNamedValue>,
+    #[serde(rename = "issuetype", default)]
+    pub issue_type: Option<JiraNamedValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraRemoteLink {
+    #[serde(default)]
+    pub id: Option<u64>,
+    #[serde(rename = "self", default)]
+    pub self_url: Option<String>,
+    #[serde(rename = "globalId", default)]
+    pub global_id: Option<String>,
+    #[serde(default)]
+    pub relationship: Option<String>,
+    #[serde(default)]
+    pub object: Option<JiraRemoteLinkObject>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraRemoteLinkObject {
+    pub url: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(flatten)]
+    pub raw_extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -208,6 +413,75 @@ mod tests {
             !err_msg.to_ascii_lowercase().contains("authorization"),
             "error contained auth: {err_msg}"
         );
+    }
+
+    #[test]
+    fn parses_amp_search_page_fixture_with_custom_fields_and_inline_collections() {
+        let page: JiraSearchPage =
+            serde_json::from_str(include_str!("fixtures/jira_amp_search_page.json")).unwrap();
+        assert_eq!(page.issues.len(), 2);
+
+        let amp1 = &page.issues[0];
+        assert_eq!(amp1.key, "AMP-1");
+        assert_eq!(amp1.fields.labels, vec!["ingestion", "jira"]);
+
+        let comments = amp1.fields.comment.as_ref().expect("comments present");
+        assert_eq!(comments.total, Some(3));
+        assert_eq!(comments.comments.len(), 2);
+
+        assert_eq!(amp1.fields.issue_links.len(), 1);
+        let outward = amp1.fields.issue_links[0]
+            .outward_issue
+            .as_ref()
+            .expect("outward issue present");
+        assert_eq!(outward.key, "AMP-9");
+
+        let worklog = amp1.fields.worklog.as_ref().expect("worklog present");
+        assert_eq!(worklog.total, Some(1));
+
+        let parent_link = amp1
+            .fields
+            .raw_extra
+            .get("customfield_14051")
+            .expect("customfield_14051 retained in raw_extra");
+        assert_eq!(parent_link.as_str(), Some("AMP-100"));
+
+        assert_eq!(amp1.fields.subtasks.len(), 1);
+        assert_eq!(amp1.fields.subtasks[0].key, "AMP-3");
+
+        let watches = amp1.fields.watches.as_ref().expect("watches present");
+        assert_eq!(watches.watch_count, 2);
+
+        let votes = amp1.fields.votes.as_ref().expect("votes present");
+        assert_eq!(votes.votes, 1);
+    }
+
+    #[test]
+    fn parses_paginated_comments_fixture() {
+        let comments: JiraPagedComments =
+            serde_json::from_str(include_str!("fixtures/jira_comments_page.json")).unwrap();
+        assert_eq!(comments.start_at, 2);
+        assert_eq!(comments.total, Some(3));
+        assert_eq!(comments.comments.len(), 1);
+    }
+
+    #[test]
+    fn parses_paginated_worklogs_fixture() {
+        let worklogs: JiraPagedWorklogs =
+            serde_json::from_str(include_str!("fixtures/jira_worklogs_page.json")).unwrap();
+        assert_eq!(worklogs.worklogs.len(), 1);
+        assert_eq!(worklogs.worklogs[0].time_spent_seconds, Some(600));
+    }
+
+    #[test]
+    fn unknown_custom_field_shapes_remain_in_raw_extra() {
+        let issue: JiraIssue = serde_json::from_value(serde_json::json!({
+            "id": "99",
+            "key": "AMP-99",
+            "fields": { "customfield_99999": [{ "weird": "shape" }] }
+        }))
+        .unwrap();
+        assert!(issue.fields.raw_extra.contains_key("customfield_99999"));
     }
 
     #[test]
