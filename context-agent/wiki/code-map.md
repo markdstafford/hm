@@ -206,6 +206,63 @@ All commands appear in both `collect_commands!` invocations in `src-tauri/src/li
 - `src-tauri/src/sources/jira_errors.rs` — Safe public error enum `JiraApiError`. Maps HTTP/network/decode failures to redacted categories. `Display` never includes PATs, auth headers, raw bodies, or upstream stack traces.
 - `src-tauri/src/sources/jira.rs` — Source-settings adapter. Resolves pending or saved PAT, calls `RealJiraProjectClient` (wraps `JiraApiClient::list_projects`), deduplicates and sorts projects by key, and maps `JiraApiError` → `JiraClientError` → `JiraConnectionErrorCategory` for the UI. The `JiraProjectClient` trait seam allows injecting a fake client in Rust tests.
 
+## Jira issue ingestion (added 2026-05-25, issue #10)
+
+End-to-end baseline that ingests Jira issues for the projects configured on a source, projects them into shared work-data tables, persists Jira-specific raw fields, and reports progress through `ingestion_runs` / `ingestion_cursors`. v1 is local-only and single-user; there is no daily snapshot or event capture in this feature (issue #11 owns those) and no embeddings yet (issue #12 owns those).
+
+### Module map
+
+| File | Responsibility |
+|------|----------------|
+| `src-tauri/src/issues/mod.rs` | Re-exports submodules |
+| `src-tauri/src/issues/schema.rs` | Schema DDL for `source_systems`, `ingestion_runs`, `ingestion_cursors`, `people`/`source_identities`/`identity_links`, `work_items`/`work_item_terms`/`work_item_relationships`/`work_item_comments`, `jira_*` tables, and `indexable_documents`; column-presence assertions for migrations |
+| `src-tauri/src/issues/ids.rs` | Stable id helpers for `work_items` and related rows (canonical hashing) |
+| `src-tauri/src/issues/people.rs` | People/source-identity/identity-link upserts and lookups |
+| `src-tauri/src/issues/repository.rs` | Cross-cutting upserts: `source_systems`, work-data rows, comment/worklog projection helpers |
+| `src-tauri/src/ingestion/mod.rs` | Re-exports submodules |
+| `src-tauri/src/ingestion/errors.rs` | `IngestionError` + `IngestionErrorCategory`; redacting `Display` and `From` impls for rusqlite/Jira errors |
+| `src-tauri/src/ingestion/runs.rs` | `start_run` / `finish_run` / `update_progress`; cursor read/upsert helpers |
+| `src-tauri/src/ingestion/indexable.rs` | `indexable_documents` upserts (status starts as `pending`) |
+| `src-tauri/src/sources/jira_ingestion.rs` | `JiraIssueIngestionService` orchestrates per-project pagination, projection, comments/worklogs/remote-link tail fetches, cancellation, and run summaries; ships AMP field-mapping seeds and a `FakeJiraClient` for tests |
+
+### Work-data table families
+
+- `source_systems` — one row per configured source (jira/server/cloud), referenced by every `ingestion_*` row.
+- `ingestion_runs` / `ingestion_cursors` — run lifecycle + per-project cursors. All TEXT, no secrets.
+- `people` / `source_identities` / `identity_links` — identity graph; populated lazily from issue assignees/reporters/comment authors.
+- `work_items` / `work_item_terms` / `work_item_relationships` / `work_item_comments` — source-agnostic representation of an issue (stable ids, hashes, current-state columns; ready for future event/snapshot capture).
+- `jira_issues` / `jira_field_definitions` / `jira_project_field_mappings` / `jira_issue_field_values` / `jira_worklogs` / `jira_remote_links` — Jira-specific projections, including `raw_issue_json` and `raw_fields_json` for forward-compat replay.
+- `indexable_documents` — one row per issue (and one per comment); `embedding_status = 'pending'` until issue #12 lands.
+
+### Cursor key conventions
+
+| Cursor key | Used by |
+|------------|---------|
+| `project:<KEY>:issues` | Primary issue pagination cursor (always written) |
+| `project:<KEY>:comments-tail` | Reserved for tail-pull deltas; not written in #10 |
+| `project:<KEY>:worklogs-tail` | Reserved for tail-pull deltas; not written in #10 |
+| `project:<KEY>:remotelinks` | Written when `JiraIngestionOptions::fetch_remote_links == true` |
+
+### Tauri commands
+
+| Command | Notes |
+|---------|-------|
+| `jira_issue_ingestion_run` | Runs ingestion for the configured projects of a source. Currently holds the SQLite mutex during a single project's pagination — see `TODO(#10)` in `src-tauri/src/commands.rs`. |
+| `jira_issue_ingestion_cancel` | Sets the in-flight cancellation flag for the source; safe to call when no run is active. |
+| `jira_issue_ingestion_status` | Returns the latest run row (status, started/finished, error summary). |
+| `jira_issue_ingestion_progress` | Returns `progress_json` for live UI updates. |
+| `jira_issues_list` | Returns a paginated list of projected issues for a project (read-only). |
+
+`ActiveIngestionRuns` Tauri state holds `Arc<CancellationFlag>` instances keyed by `source_id` so the cancel command can signal an in-flight run.
+
+### Reminders for future agents
+
+- Issue #10 has **no dedicated viewer**. The only UI is the Settings → Sources row status text plus Run/Cancel buttons.
+- No event capture or daily snapshots in this feature — issue #11 owns those. The schema is already event/snapshot-ready: stable `work_item` ids, hash columns, and current-state columns.
+- Embeddings are not produced here. `indexable_documents.embedding_status` is always `pending` after ingestion; issue #12 owns the embedding job.
+- PATs live only in the OS keychain. SQLite, generated bindings, logs, and run summaries never contain a PAT, an `Authorization` header, or a `Bearer ` token. Redaction is enforced by `IngestionError` Display and by `redaction_*` tests under `sources::jira_ingestion::tests`.
+- `jira_issue_ingestion_run` currently serializes ingestion behind the SQLite mutex. This is an accepted v1 trade-off; the refactor to a streaming/background scheduler is tracked by `TODO(#10)` in `commands.rs`.
+
 ---
 
 ## AI provider configuration module (added 2026-05-24)

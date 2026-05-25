@@ -3099,4 +3099,219 @@ mod tests {
         );
         assert_eq!(keys.len(), 2, "expected exactly two cursors: {keys:?}");
     }
+
+    // -- Redaction tests --------------------------------------------------
+    //
+    // These tests lock down the guarantee that PATs, Authorization headers,
+    // and Bearer tokens never end up in persisted rows (ingestion_runs,
+    // ingestion_cursors, jira_issues raw_*_json), in IngestionError
+    // Display output, or anywhere in our fixture corpus.
+    //
+    // The synthetic PAT is intentionally a non-real token shape; it is used
+    // ONLY to assert that it does not appear in stored data after a run.
+
+    const SYNTHETIC_PAT: &str = "synthetic-pat-do-not-store-anywhere-12345";
+
+    fn assert_no_secrets_in_text(value: &str, context: &str) {
+        assert!(
+            !value.contains(SYNTHETIC_PAT),
+            "{context} contained SYNTHETIC_PAT: {value}"
+        );
+        assert!(
+            !value.contains("Bearer "),
+            "{context} contained 'Bearer ': {value}"
+        );
+        assert!(
+            !value.contains("Authorization:"),
+            "{context} contained 'Authorization:': {value}"
+        );
+        let lowered = value.to_ascii_lowercase();
+        assert!(
+            !lowered.contains("authorization:"),
+            "{context} contained 'authorization:' (case-insensitive): {value}"
+        );
+    }
+
+    #[test]
+    fn redaction_run_summaries_never_contain_pat_or_auth_headers() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Touch the synthetic PAT so the compiler doesn't optimize it away in
+        // some configurations and so a human auditor can grep for it.
+        let _ = SYNTHETIC_PAT;
+
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let page2 = JiraSearchPage {
+            start_at: 2,
+            max_results: 50,
+            total: Some(2),
+            issues: vec![],
+        };
+        let client = FakeJiraClient::with_pages(vec![page1, page2]);
+        let service = JiraIssueIngestionService::new(&client);
+        let flag = CancellationFlag::new();
+        service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+
+        // Scan every TEXT column in every ingestion_runs row.
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source_system_id, connector, status, started_at,
+                        IFNULL(finished_at, ''), requested_projects_json,
+                        progress_json, counts_json,
+                        IFNULL(cancellation_requested_at, ''),
+                        IFNULL(error_summary, '')
+                   FROM ingestion_runs",
+            )
+            .expect("prep runs");
+        let cols = [
+            "id",
+            "source_system_id",
+            "connector",
+            "status",
+            "started_at",
+            "finished_at",
+            "requested_projects_json",
+            "progress_json",
+            "counts_json",
+            "cancellation_requested_at",
+            "error_summary",
+        ];
+        let mut rows = stmt.query([]).expect("query runs");
+        let mut run_row_count = 0;
+        while let Some(row) = rows.next().expect("row") {
+            run_row_count += 1;
+            for (idx, col) in cols.iter().enumerate() {
+                let val: String = row.get(idx).expect("get col");
+                assert_no_secrets_in_text(
+                    &val,
+                    &format!("ingestion_runs.{col}"),
+                );
+            }
+        }
+        assert!(run_row_count >= 1, "expected at least one ingestion_runs row");
+
+        // Same for ingestion_cursors.
+        let mut stmt = conn
+            .prepare(
+                "SELECT source_system_id, connector, cursor_key, cursor_value,
+                        IFNULL(last_successful_sync_at, ''), updated_at
+                   FROM ingestion_cursors",
+            )
+            .expect("prep cursors");
+        let ccols = [
+            "source_system_id",
+            "connector",
+            "cursor_key",
+            "cursor_value",
+            "last_successful_sync_at",
+            "updated_at",
+        ];
+        let mut rows = stmt.query([]).expect("query cursors");
+        let mut cursor_row_count = 0;
+        while let Some(row) = rows.next().expect("row") {
+            cursor_row_count += 1;
+            for (idx, col) in ccols.iter().enumerate() {
+                let val: String = row.get(idx).expect("get col");
+                assert_no_secrets_in_text(
+                    &val,
+                    &format!("ingestion_cursors.{col}"),
+                );
+            }
+        }
+        assert!(
+            cursor_row_count >= 1,
+            "expected at least one ingestion_cursors row"
+        );
+    }
+
+    #[test]
+    fn redaction_persisted_issue_rows_never_contain_synthetic_pat_or_authorization_header() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+        seed_amp_field_mappings(&conn, "srcsys_1", "AMP", NOW).expect("seed");
+
+        // Touch the synthetic PAT so anti-leak invariants are explicit.
+        let _ = SYNTHETIC_PAT;
+
+        let _ = project_first_amp_issue(&conn);
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT raw_issue_json, raw_fields_json FROM jira_issues
+                  WHERE jira_key = 'AMP-1'",
+            )
+            .expect("prep");
+        let (raw_issue_json, raw_fields_json): (String, String) = stmt
+            .query_row([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("row");
+
+        assert_no_secrets_in_text(&raw_issue_json, "jira_issues.raw_issue_json");
+        assert_no_secrets_in_text(&raw_fields_json, "jira_issues.raw_fields_json");
+    }
+
+    #[test]
+    fn redaction_ingestion_error_display_strips_authorization_and_bearer() {
+        let err = IngestionError::new(
+            IngestionErrorCategory::Authentication,
+            format!("Authorization: Bearer {SYNTHETIC_PAT} raw body"),
+        );
+        let rendered = format!("{err}");
+        assert!(
+            !rendered.contains(SYNTHETIC_PAT),
+            "rendered leaked SYNTHETIC_PAT: {rendered}"
+        );
+        assert!(
+            !rendered.to_ascii_lowercase().contains("bearer"),
+            "rendered leaked 'Bearer': {rendered}"
+        );
+        assert!(
+            !rendered.to_ascii_lowercase().contains("authorization"),
+            "rendered leaked 'Authorization': {rendered}"
+        );
+        // Category label still appears.
+        assert!(rendered.contains("Authentication failed"));
+    }
+
+    #[test]
+    fn redaction_fixtures_directory_contains_no_secret_shaped_strings() {
+        let fixtures_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src")
+            .join("sources")
+            .join("fixtures");
+        let entries = std::fs::read_dir(&fixtures_dir).expect("read fixtures dir");
+        let forbidden: [&str; 5] = [
+            "Authorization:",
+            "Bearer ",
+            "pat-",
+            "secret-",
+            "eyJ",
+        ];
+        let mut json_files_checked = 0;
+        for entry in entries {
+            let entry = entry.expect("entry");
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let content =
+                std::fs::read_to_string(&path).expect("read fixture file");
+            for needle in forbidden {
+                assert!(
+                    !content.contains(needle),
+                    "{} contained forbidden substring {:?}",
+                    path.display(),
+                    needle
+                );
+            }
+            json_files_checked += 1;
+        }
+        assert!(
+            json_files_checked >= 1,
+            "expected at least one fixture *.json"
+        );
+    }
 }

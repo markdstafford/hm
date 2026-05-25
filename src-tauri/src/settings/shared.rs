@@ -74,7 +74,7 @@ mod tests {
             ("arr", serde_json::json!([1, 2, 3])),
             ("str", serde_json::json!("hello")),
             ("num", serde_json::json!(42)),
-            ("float", serde_json::json!(3.14)),
+            ("float", serde_json::json!(2.5)),
             ("bool", serde_json::json!(true)),
             ("null-val", serde_json::json!(null)),
         ];

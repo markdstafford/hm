@@ -693,8 +693,10 @@ mod tests {
     #[test]
     fn save_validates_before_writing() {
         let conn = crate::db::open_in_memory().unwrap();
-        let mut invalid = AiProviderConfig::default();
-        invalid.version = 99;
+        let invalid = AiProviderConfig {
+            version: 99,
+            ..AiProviderConfig::default()
+        };
         let err = save_ai_provider_config(&conn, &invalid).unwrap_err();
         assert!(err.to_string().contains("unsupported config version"));
         assert!(

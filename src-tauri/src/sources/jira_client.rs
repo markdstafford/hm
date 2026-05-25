@@ -854,6 +854,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::while_let_loop)]
     fn search_issues_all_terminates_when_server_omits_total_and_returns_full_pages() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
