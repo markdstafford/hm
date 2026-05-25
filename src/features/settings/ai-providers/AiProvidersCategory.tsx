@@ -9,6 +9,7 @@ import {
   smokeTestAiProfile,
 } from "../../../aiProviders/storage";
 import type { AiProviderConfig } from "../../../aiProviders/types";
+import { validateAiProviderConfig } from "../../../aiProviders/validation";
 import { Button } from "../../../ui/buttons/Button";
 import { AlertDialog } from "../../../ui/overlays/AlertDialog";
 import { ProfileList, type SmokeState } from "./ProfileList";
@@ -46,6 +47,16 @@ export function AiProvidersCategory() {
     async (payload: ProfileFormSavePayload | { next: AiProviderConfig }) => {
       const next = payload.next;
       const pendingSecret = "pendingSecret" in payload ? payload.pendingSecret : undefined;
+      // Pre-flight the config validator before touching the keychain. A
+      // duplicate credential name (or any other validator failure) would
+      // otherwise let us overwrite an existing keychain entry and then, on
+      // config-save failure, the rollback path would delete that legit entry.
+      // Catch the problem before writing.
+      const validationErrors = validateAiProviderConfig(next);
+      if (validationErrors.length) {
+        setSaveError(validationErrors.join("\n"));
+        return;
+      }
       if (pendingSecret) {
         const secretResult = await setAiCredentialSecret(
           pendingSecret.credentialName,

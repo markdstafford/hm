@@ -149,7 +149,7 @@ function initialState(config: AiProviderConfig, mode: Mode, profileName?: string
 function validate(
   state: FormState,
   config: AiProviderConfig,
-  mode: Mode,
+  _mode: Mode,
   originalName?: string,
 ): string[] {
   const errors: string[] = [];
@@ -162,15 +162,16 @@ function validate(
   if (!state.model.trim()) errors.push("Model is required.");
   if (state.connectionMode === "new") {
     if (!state.newEndpointName.trim()) errors.push("Endpoint name is required.");
-    else if (mode === "create" && config.endpoints.some((e) => e.name === state.newEndpointName))
+    // Duplicate-name check must run regardless of profile mode. In edit mode
+    // a collision would have caused saveAiProviderConfig to fail at the
+    // validator and the persist rollback to delete the colliding (legit)
+    // credential's secret — see PR #30 review notes.
+    else if (config.endpoints.some((e) => e.name === state.newEndpointName))
       errors.push(`An endpoint named "${state.newEndpointName}" already exists.`);
     if (!state.newBaseUrl.trim()) errors.push("Base URL is required.");
     if (state.credentialMode === "new") {
       if (!state.newCredentialName.trim()) errors.push("Credential name is required.");
-      else if (
-        mode === "create" &&
-        config.credentials.some((c) => c.name === state.newCredentialName)
-      )
+      else if (config.credentials.some((c) => c.name === state.newCredentialName))
         errors.push(`A credential named "${state.newCredentialName}" already exists.`);
       if (state.newCredentialSourceKind === "Keychain" && !state.newCredentialSecret) {
         errors.push("Secret value is required for Keychain-stored credentials.");

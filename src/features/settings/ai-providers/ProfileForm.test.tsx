@@ -126,6 +126,53 @@ describe("ProfileForm", () => {
     expect(settings.effort).toBe("low");
   });
 
+  it("blocks edit-mode save when 'create new credential' would collide with an existing name", async () => {
+    // Edit mode previously skipped the duplicate-credential check, allowing
+    // the form to enqueue a write that would overwrite the colliding
+    // credential's secret. The check now runs regardless of mode.
+    const onSave = vi.fn();
+    render(
+      <ProfileForm
+        mode="edit"
+        config={CONFIG}
+        initialProfileName="p"
+        onCancel={() => {}}
+        onSave={onSave}
+      />,
+    );
+    // Switch to "Create new connection" → "Create new credential" with the
+    // existing credential name "k".
+    await userEvent.click(screen.getByRole("radio", { name: /create new connection/i }));
+    await userEvent.type(screen.getByLabelText(/Endpoint name/i), "another");
+    await userEvent.click(screen.getByRole("radio", { name: /create new credential/i }));
+    await userEvent.type(screen.getByLabelText(/Credential name/i), "k");
+    await userEvent.type(screen.getByLabelText(/Secret value/i), "sk-attacker");
+    const save = screen.getByRole("button", { name: /Save changes/ });
+    expect(save).toBeDisabled();
+    expect(screen.getByText(/A credential named "k" already exists/i)).toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("blocks edit-mode save when 'create new endpoint' would collide with an existing name", async () => {
+    const onSave = vi.fn();
+    render(
+      <ProfileForm
+        mode="edit"
+        config={CONFIG}
+        initialProfileName="p"
+        onCancel={() => {}}
+        onSave={onSave}
+      />,
+    );
+    await userEvent.click(screen.getByRole("radio", { name: /create new connection/i }));
+    // Re-use the existing endpoint name "e".
+    await userEvent.type(screen.getByLabelText(/Endpoint name/i), "e");
+    const save = screen.getByRole("button", { name: /Save changes/ });
+    expect(save).toBeDisabled();
+    expect(screen.getByText(/An endpoint named "e" already exists/i)).toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it("produces a pendingSecret when creating a new Keychain credential", async () => {
     const onSave = vi.fn();
     const emptyConfig: AiProviderConfig = {
