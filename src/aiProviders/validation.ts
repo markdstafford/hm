@@ -116,8 +116,19 @@ function checkSettingsForSecrets(obj: Record<string, unknown>, errors: string[])
     if (SECRET_SHAPED_KEYS.some(sk => key.toLowerCase().includes(sk))) {
       errors.push(`Secret-shaped settings key: ${key}`);
     }
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      checkSettingsForSecrets(value as Record<string, unknown>, errors);
-    }
+    walkSettingsValue(value, errors);
+  }
+}
+
+// Recurse into both objects and arrays. The Rust validator
+// (src-tauri/src/ai/config.rs::validate_settings_no_secrets) walks arrays too,
+// so { foo: [{ api_key: ... }] } passes the TS preflight previously and only
+// failed at backend save time. Mirror the recursion here so YAML import and
+// form save catch nested secrets up front.
+function walkSettingsValue(value: unknown, errors: string[]) {
+  if (Array.isArray(value)) {
+    for (const item of value) walkSettingsValue(item, errors);
+  } else if (value && typeof value === "object") {
+    checkSettingsForSecrets(value as Record<string, unknown>, errors);
   }
 }

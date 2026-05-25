@@ -139,6 +139,31 @@ profiles:
     expect(() => yamlToConfig(bad, PREVIOUS)).toThrow(/api_key|secret/i);
   });
 
+  it("rejects secret-shaped keys nested inside an array in profile settings", () => {
+    // The Rust validator walks arrays. Without array recursion in TS the
+    // parser previously accepted this YAML and the plaintext key would
+    // only get caught at backend save time.
+    const bad = `credentials:
+  - name: k
+    type: api_key
+    value: \${KEYCHAIN:ai.credentials.k}
+endpoints:
+  - name: e
+    protocol: openai
+    base_url: https://api.openai.com/v1
+    credential: k
+profiles:
+  - name: p
+    endpoint: e
+    model: gpt-x
+    runner: openai_direct
+    extras:
+      - harmless: ok
+      - api_key: sk-via-array
+`;
+    expect(() => yamlToConfig(bad, PREVIOUS)).toThrow(/api_key|secret/i);
+  });
+
   it("does not unwrap when the root already has known keys", () => {
     // Pathological mix: top-level routing and a stray ai: key. We must read
     // the top-level routing and not the inner ai.routing — otherwise users

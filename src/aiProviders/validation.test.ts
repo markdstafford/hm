@@ -115,6 +115,21 @@ describe("validateAiProviderConfig", () => {
     expect(errors.join("\n")).toContain("Secret-shaped settings key: access_token");
   });
 
+  it("recurses into arrays for secret-shaped keys", () => {
+    const c = validConfig();
+    // The Rust validator walks arrays too. Without array recursion in TS,
+    // this nested api_key would pass the TS preflight and only fail at
+    // backend save time.
+    c.profiles[0].settings = {
+      extras: [
+        { harmless: "ok" },
+        { api_key: "sk-snuck-in" },
+      ],
+    };
+    const errors = validateAiProviderConfig(c);
+    expect(errors.join("\n")).toContain("Secret-shaped settings key: api_key");
+  });
+
   it("rejects invalid name with space", () => {
     const c = validConfig();
     c.credentials[0].name = "bad name";
