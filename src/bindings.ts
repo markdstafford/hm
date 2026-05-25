@@ -23,7 +23,9 @@ export const commands = {
 	sourceCredentialDelete: (credentialRef: string) => typedError<null, string>(__TAURI_INVOKE("source_credential_delete", { credentialRef })),
 	sourceConfigRemove: (sourceId: string) => typedError<null, string>(__TAURI_INVOKE("source_config_remove", { sourceId })),
 	jiraSourceTestConnection: (source: JiraSourceConfig, pendingPat: string | null) => typedError<JiraConnectionTestResult, string>(__TAURI_INVOKE("jira_source_test_connection", { source, pendingPat })),
-	jiraIssueIngestionRun: (sourceId: string) => typedError<JiraIssueIngestionRunResult, string>(__TAURI_INVOKE("jira_issue_ingestion_run", { sourceId })),
+	jiraIssueIngestionRun: (sourceId: string, options: {
+	fetch_remote_links?: boolean,
+} | null) => typedError<JiraIssueIngestionRunResult, string>(__TAURI_INVOKE("jira_issue_ingestion_run", { sourceId, options })),
 	jiraIssueIngestionCancel: (sourceId: string, runId: string) => typedError<null, string>(__TAURI_INVOKE("jira_issue_ingestion_cancel", { sourceId, runId })),
 	jiraIssueIngestionStatus: (sourceId: string) => typedError<{
 	run_id: string,
@@ -126,6 +128,16 @@ export type JiraConnectionTestResult = {
 };
 
 export type JiraConnectionTestStatus = "NotTested" | "Testing" | "Success" | "Error" | "Unavailable";
+
+/**
+ *  Opt-in toggles for `jira_issue_ingestion_run`. Currently only
+ *  `fetch_remote_links` is wired through; the watcher/vote placeholders in
+ *  `JiraIngestionOptions` are not exposed on the command surface yet because
+ *  the service does not consume them.
+ */
+export type JiraIngestionRunOptions = {
+	fetch_remote_links?: boolean,
+};
 
 export type JiraIssueIngestionProgress = {
 	run_id: string,

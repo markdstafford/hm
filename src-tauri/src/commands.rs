@@ -272,6 +272,16 @@ pub struct ActiveIngestionRuns(
     pub Mutex<std::collections::HashMap<String, Arc<CancellationFlag>>>,
 );
 
+/// Opt-in toggles for `jira_issue_ingestion_run`. Currently only
+/// `fetch_remote_links` is wired through; the watcher/vote placeholders in
+/// `JiraIngestionOptions` are not exposed on the command surface yet because
+/// the service does not consume them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+pub struct JiraIngestionRunOptions {
+    #[serde(default)]
+    pub fetch_remote_links: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct JiraIssueIngestionRunResult {
     pub run_id: String,
@@ -323,6 +333,7 @@ fn source_system_id_for(source_id: &str) -> String {
 #[specta::specta]
 pub fn jira_issue_ingestion_run(
     source_id: String,
+    options: Option<JiraIngestionRunOptions>,
     db: tauri::State<'_, Mutex<rusqlite::Connection>>,
     store: tauri::State<'_, ManagedSecretStore>,
     active: tauri::State<'_, ActiveIngestionRuns>,
@@ -414,15 +425,23 @@ pub fn jira_issue_ingestion_run(
         .map_err(|e| e.to_string())?;
     }
 
-    // 6. Run each project. The service borrows the connection across page
-    // fetches, so the SQLite mutex is held for the duration of one project's
-    // ingestion. The lock is released between projects so cancel/status
-    // commands can still observe state mid-run.
-    //
-    // TODO(#10): refactor ingestion service to release the DB lock during HTTP
-    // fetches; current impl holds the SQLite mutex for the duration of a
-    // project's pages.
-    let service = JiraIssueIngestionService::new(&client);
+    // 6. Run each project. The service releases the SQLite mutex between
+    // HTTP fetches (it takes the lock only for short write batches), so
+    // status/cancel commands can read state and trip the cancellation flag
+    // while the worker is blocked on a network call.
+    let service = match options.as_ref() {
+        Some(opts) if opts.fetch_remote_links => {
+            JiraIssueIngestionService::with_options(
+                &client,
+                crate::sources::jira_ingestion::JiraIngestionOptions {
+                    fetch_remote_links: true,
+                    ..Default::default()
+                },
+            )
+        }
+        _ => JiraIssueIngestionService::new(&client),
+    };
+    let db_access = crate::ingestion::db::MutexDbAccess(&db);
     let mut last_summary = None;
     for project_key in &project_keys {
         if cancellation.is_cancelled() {
@@ -434,11 +453,10 @@ pub fn jira_issue_ingestion_run(
             .find(|p| &p.key == project_key)
             .and_then(|p| p.name.as_deref());
 
-        let conn = db.lock().map_err(|e| e.to_string())?;
         let now = now_utc_rfc3339();
         let summary = service
             .ingest_project(
-                &conn,
+                &db_access,
                 &source_system_id,
                 project_key,
                 project_name,
@@ -446,7 +464,6 @@ pub fn jira_issue_ingestion_run(
                 &cancellation,
             )
             .map_err(|e| e.to_string())?;
-        drop(conn);
         last_summary = Some(summary);
     }
 
@@ -648,6 +665,7 @@ const _: () = {
         _assert_specta::<JiraConnectionTestStatus>();
         _assert_specta::<JiraConnectionErrorCategory>();
         _assert_specta::<JiraConnectionProject>();
+        _assert_specta::<JiraIngestionRunOptions>();
         _assert_specta::<JiraIssueIngestionRunResult>();
         _assert_specta::<JiraIssueIngestionProgress>();
         _assert_specta::<JiraIssueListFilter>();

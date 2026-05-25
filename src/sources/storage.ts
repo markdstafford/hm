@@ -76,10 +76,14 @@ export async function testJiraSourceConnection(
 }
 
 export async function runJiraIssueIngestion(
-  sourceId: string
+  sourceId: string,
+  options?: { fetchRemoteLinks: boolean }
 ): Promise<{ ok: true; runId: string } | { ok: false; error: string }> {
   if (!isTauri()) return { ok: true, runId: "browser-preview" };
-  const r = await commands.jiraIssueIngestionRun(sourceId);
+  const wireOptions = options
+    ? { fetch_remote_links: options.fetchRemoteLinks }
+    : null;
+  const r = await commands.jiraIssueIngestionRun(sourceId, wireOptions);
   return r.status === "ok"
     ? { ok: true, runId: r.data.run_id }
     : { ok: false, error: r.error };

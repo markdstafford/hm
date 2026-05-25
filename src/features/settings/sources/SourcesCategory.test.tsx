@@ -160,7 +160,7 @@ describe("SourcesCategory", () => {
     const runButton = await screen.findByRole("button", { name: /Run sync now/i });
     await userEvent.click(runButton);
     await waitFor(() =>
-      expect(commands.jiraIssueIngestionRun).toHaveBeenCalledWith(JIRA_SOURCE.id),
+      expect(commands.jiraIssueIngestionRun).toHaveBeenCalledWith(JIRA_SOURCE.id, null),
     );
 
     const cancelButton = await screen.findByRole("button", { name: /Cancel sync/i });

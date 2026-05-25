@@ -216,10 +216,11 @@ End-to-end baseline that ingests Jira issues for the projects configured on a so
 |------|----------------|
 | `src-tauri/src/issues/mod.rs` | Re-exports submodules |
 | `src-tauri/src/issues/schema.rs` | Schema DDL for `source_systems`, `ingestion_runs`, `ingestion_cursors`, `people`/`source_identities`/`identity_links`, `work_items`/`work_item_terms`/`work_item_relationships`/`work_item_comments`, `jira_*` tables, and `indexable_documents`; column-presence assertions for migrations |
-| `src-tauri/src/issues/ids.rs` | Stable id helpers for `work_items` and related rows (canonical hashing) |
+| `src-tauri/src/issues/ids.rs` | Stable id helpers for `work_items` and related rows; uses FNV-1a (64-bit) — algorithm and constants are byte-stable across Rust releases, so persisted ids and content hashes remain valid after upgrades. Test-vector locks in `mod tests` enforce that. |
 | `src-tauri/src/issues/people.rs` | People/source-identity/identity-link upserts and lookups |
 | `src-tauri/src/issues/repository.rs` | Cross-cutting upserts: `source_systems`, work-data rows, comment/worklog projection helpers |
 | `src-tauri/src/ingestion/mod.rs` | Re-exports submodules |
+| `src-tauri/src/ingestion/db.rs` | `DbAccess` trait + `MutexDbAccess` wiring. Ingestion services call `db.with_conn(\|conn\| ...)` to take the SQLite mutex only for short write batches, releasing it across every HTTP call. |
 | `src-tauri/src/ingestion/errors.rs` | `IngestionError` + `IngestionErrorCategory`; redacting `Display` and `From` impls for rusqlite/Jira errors |
 | `src-tauri/src/ingestion/runs.rs` | `start_run` / `finish_run` / `update_progress`; cursor read/upsert helpers |
 | `src-tauri/src/ingestion/indexable.rs` | `indexable_documents` upserts (status starts as `pending`) |
@@ -230,7 +231,7 @@ End-to-end baseline that ingests Jira issues for the projects configured on a so
 - `source_systems` — one row per configured source (jira/server/cloud), referenced by every `ingestion_*` row.
 - `ingestion_runs` / `ingestion_cursors` — run lifecycle + per-project cursors. All TEXT, no secrets.
 - `people` / `source_identities` / `identity_links` — identity graph; populated lazily from issue assignees/reporters/comment authors.
-- `work_items` / `work_item_terms` / `work_item_relationships` / `work_item_comments` — source-agnostic representation of an issue (stable ids, hashes, current-state columns; ready for future event/snapshot capture).
+- `work_items` / `work_item_terms` / `work_item_relationships` / `work_item_comments` — source-agnostic representation of an issue (stable ids, hashes, current-state columns; ready for future event/snapshot capture). `work_items.source_kind` carries the **work-item** kind (`"jira_issue"`, future `"github_issue"`, `"github_pr"`), NOT the source-system kind. `source_identities.source_kind` carries the **source-system** kind (`"jira"`, `"github"`, `"slack"`). Mixing these silently hides ingested rows from list/filter SQL.
 - `jira_issues` / `jira_field_definitions` / `jira_project_field_mappings` / `jira_issue_field_values` / `jira_worklogs` / `jira_remote_links` — Jira-specific projections, including `raw_issue_json` and `raw_fields_json` for forward-compat replay.
 - `indexable_documents` — one row per issue (and one per comment); `embedding_status = 'pending'` until issue #12 lands.
 
@@ -247,7 +248,7 @@ End-to-end baseline that ingests Jira issues for the projects configured on a so
 
 | Command | Notes |
 |---------|-------|
-| `jira_issue_ingestion_run` | Runs ingestion for the configured projects of a source. Currently holds the SQLite mutex during a single project's pagination — see `TODO(#10)` in `src-tauri/src/commands.rs`. |
+| `jira_issue_ingestion_run` | Runs ingestion for the configured projects of a source. Accepts optional `JiraIngestionRunOptions { fetch_remote_links }` to opt into the remote-links sub-resource. The service releases the SQLite mutex between HTTP fetches via `DbAccess`, so `_status` / `_cancel` work mid-run. |
 | `jira_issue_ingestion_cancel` | Sets the in-flight cancellation flag for the source; safe to call when no run is active. |
 | `jira_issue_ingestion_status` | Returns the latest run row (status, started/finished, error summary). |
 | `jira_issue_ingestion_progress` | Returns `progress_json` for live UI updates. |
@@ -261,7 +262,7 @@ End-to-end baseline that ingests Jira issues for the projects configured on a so
 - No event capture or daily snapshots in this feature — issue #11 owns those. The schema is already event/snapshot-ready: stable `work_item` ids, hash columns, and current-state columns.
 - Embeddings are not produced here. `indexable_documents.embedding_status` is always `pending` after ingestion; issue #12 owns the embedding job.
 - PATs live only in the OS keychain. SQLite, generated bindings, logs, and run summaries never contain a PAT, an `Authorization` header, or a `Bearer ` token. Redaction is enforced by `IngestionError` Display and by `redaction_*` tests under `sources::jira_ingestion::tests`.
-- `jira_issue_ingestion_run` currently serializes ingestion behind the SQLite mutex. This is an accepted v1 trade-off; the refactor to a streaming/background scheduler is tracked by `TODO(#10)` in `commands.rs`.
+- `jira_issue_ingestion_run` releases the SQLite mutex between HTTP fetches via the `DbAccess` trait in `src-tauri/src/ingestion/db.rs`. Production code wires `MutexDbAccess(&state)`; tests typically use a `BorrowedConnDbAccess` over a single owned connection. The lock is held only during short write batches (page projection, tail-batch persistence, cursor / finish_run updates) — never across a Jira HTTP call. The regression test `status_read_proceeds_while_search_page_is_blocked` locks this invariant in place.
 
 ---
 

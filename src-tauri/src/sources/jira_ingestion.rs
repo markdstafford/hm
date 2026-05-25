@@ -731,7 +731,7 @@ pub fn project_jira_issue(
         &WorkItemInput {
             id: &work_item_id,
             source_system_id: ctx.source_system_id,
-            source_kind: JIRA_SOURCE_KIND,
+            source_kind: JIRA_WORK_ITEM_KIND,
             upstream_id: &issue.id,
             key: Some(&issue.key),
             url: issue.self_url.as_deref(),
@@ -1039,7 +1039,7 @@ pub fn project_jira_issue(
             &WorkItemRelationshipInput {
                 id: &rel_id,
                 source_system_id: ctx.source_system_id,
-                source_kind: JIRA_SOURCE_KIND,
+                source_kind: JIRA_WORK_ITEM_KIND,
                 from_work_item_id: Some(&work_item_id),
                 to_work_item_id: None,
                 from_upstream_key: Some(&issue.key),
@@ -1062,7 +1062,7 @@ pub fn project_jira_issue(
             &WorkItemRelationshipInput {
                 id: &rel_id,
                 source_system_id: ctx.source_system_id,
-                source_kind: JIRA_SOURCE_KIND,
+                source_kind: JIRA_WORK_ITEM_KIND,
                 from_work_item_id: Some(&work_item_id),
                 to_work_item_id: None,
                 from_upstream_key: Some(&issue.key),
@@ -1085,7 +1085,7 @@ pub fn project_jira_issue(
             &WorkItemRelationshipInput {
                 id: &rel_id,
                 source_system_id: ctx.source_system_id,
-                source_kind: JIRA_SOURCE_KIND,
+                source_kind: JIRA_WORK_ITEM_KIND,
                 from_work_item_id: Some(&work_item_id),
                 to_work_item_id: None,
                 from_upstream_key: Some(&issue.key),
@@ -1133,7 +1133,7 @@ pub fn project_jira_issue(
             &WorkItemRelationshipInput {
                 id: &rel_id,
                 source_system_id: ctx.source_system_id,
-                source_kind: JIRA_SOURCE_KIND,
+                source_kind: JIRA_WORK_ITEM_KIND,
                 from_work_item_id: if direction == "outward" {
                     Some(&work_item_id)
                 } else {
@@ -1347,8 +1347,13 @@ pub struct JiraIssueIngestionSummary {
 /// Service that paginates a Jira search and persists results via
 /// `project_jira_issue`.
 ///
-/// The service keeps no per-call state of its own; it accepts a borrowed
-/// `&Connection` so the caller controls the lock scope and transactions.
+/// The service holds the SQLite mutex only during short write batches: one
+/// per setup, one per page projection, one per tail-fetch batch, and one
+/// final block that advances cursors and finalizes the run. HTTP fetches
+/// (`search_issues_page`, `get_issue_comments_page`, `get_issue_worklogs_page`,
+/// `get_issue_remote_links`) always happen with NO lock held so other
+/// commands — notably `jira_issue_ingestion_status` and
+/// `jira_issue_ingestion_cancel` — can observe and interrupt a run mid-flight.
 pub struct JiraIssueIngestionService<'a, C> {
     pub client: &'a C,
     pub page_size: u32,
@@ -1376,9 +1381,9 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         }
     }
 
-    pub fn ingest_project(
+    pub fn ingest_project<D: crate::ingestion::db::DbAccess>(
         &self,
-        conn: &Connection,
+        db: &D,
         source_system_id: &str,
         project_key: &str,
         project_name: Option<&str>,
@@ -1389,42 +1394,44 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         let requested_projects_json =
             serde_json::json!([project_key]).to_string();
 
-        start_run(
-            conn,
-            &run_id,
-            source_system_id,
-            JIRA_ISSUE_CONNECTOR,
-            now_utc,
-            &requested_projects_json,
-        )?;
-
-        // Best-effort: seed AMP field mappings up front. If seeding fails we
-        // surface it as a storage error and finalize the run as failed.
-        if let Err(err) = seed_amp_field_mappings(conn, source_system_id, project_key, now_utc) {
-            let ie: IngestionError = err.into();
-            let _ = finish_run(
+        // ── Setup: start run + seed mappings + read cursor in ONE locked block.
+        let cursor_last_updated: Option<String> = db.with_conn(|conn| {
+            start_run(
                 conn,
                 &run_id,
+                source_system_id,
+                JIRA_ISSUE_CONNECTOR,
                 now_utc,
-                "failed",
-                "{}",
-                Some(&format!("{ie}")),
-            );
-            return Err(ie);
-        }
-
-        // Read existing cursor (if any) and build JQL.
+                &requested_projects_json,
+            )?;
+            if let Err(err) = seed_amp_field_mappings(conn, source_system_id, project_key, now_utc)
+            {
+                let ie: IngestionError = err.into();
+                let _ = finish_run(
+                    conn,
+                    &run_id,
+                    now_utc,
+                    "failed",
+                    "{}",
+                    Some(&format!("{ie}")),
+                );
+                return Err(ie);
+            }
+            let cursor_key = format!("project:{}:issues", project_key);
+            let cursor =
+                read_cursor(conn, source_system_id, JIRA_ISSUE_CONNECTOR, &cursor_key)?;
+            let last_updated: Option<String> = cursor.as_ref().and_then(|row| {
+                serde_json::from_str::<serde_json::Value>(&row.cursor_value)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("last_updated")
+                            .and_then(|x| x.as_str())
+                            .map(|s| s.to_string())
+                    })
+            });
+            Ok(last_updated)
+        })?;
         let cursor_key = format!("project:{}:issues", project_key);
-        let cursor = read_cursor(conn, source_system_id, JIRA_ISSUE_CONNECTOR, &cursor_key)?;
-        let cursor_last_updated: Option<String> = cursor.as_ref().and_then(|row| {
-            serde_json::from_str::<serde_json::Value>(&row.cursor_value)
-                .ok()
-                .and_then(|v| {
-                    v.get("last_updated")
-                        .and_then(|x| x.as_str())
-                        .map(|s| s.to_string())
-                })
-        });
         let overlap_adjusted: Option<String> = cursor_last_updated
             .as_deref()
             .and_then(|ts| subtract_seconds_rfc3339(ts, self.overlap_seconds));
@@ -1464,6 +1471,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 .with_fields(amp_search_fields())
                 .with_start_at(start_at);
 
+            // HTTP: fetch the page WITHOUT holding the SQLite mutex.
             let page = match self.client.search_issues_page(request) {
                 Ok(p) => p,
                 Err(err) => {
@@ -1474,14 +1482,20 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                         "pages": pages,
                     })
                     .to_string();
-                    let _ = finish_run(
-                        conn,
-                        &run_id,
-                        now_utc,
-                        "partial",
-                        &counts_json,
-                        Some(&format!("{ie}")),
-                    );
+                    let now_utc_owned = now_utc.to_string();
+                    let run_id_owned = run_id.clone();
+                    let ie_str = format!("{ie}");
+                    let _ = db.with_conn(|conn| {
+                        let _ = finish_run(
+                            conn,
+                            &run_id_owned,
+                            &now_utc_owned,
+                            "partial",
+                            &counts_json,
+                            Some(&ie_str),
+                        );
+                        Ok(())
+                    });
                     return Err(ie);
                 }
             };
@@ -1489,45 +1503,59 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             let returned = page.issues.len() as u32;
             total_issues = page.total.or(total_issues);
 
-            // Project each issue in the page.
-            for issue in &page.issues {
-                let raw_value = serde_json::to_value(issue).map_err(|_| {
-                    IngestionError::new(IngestionErrorCategory::Decode, "")
-                })?;
-                let ctx = JiraIssueProjectionContext {
-                    source_system_id,
-                    project_key,
-                    project_name,
-                    ingested_at: now_utc,
-                };
-                project_jira_issue(conn, &ctx, &raw_value, issue)?;
+            // ── Persist the whole page in ONE locked block (transactional
+            // in spirit). The lock is released after this block before any
+            // tail HTTP fetch.
+            let (page_max_updated, page_saved) = db.with_conn(|conn| {
+                let mut page_max_updated: Option<String> = None;
+                let mut page_saved: u32 = 0;
+                for issue in &page.issues {
+                    let raw_value = serde_json::to_value(issue).map_err(|_| {
+                        IngestionError::new(IngestionErrorCategory::Decode, "")
+                    })?;
+                    let ctx = JiraIssueProjectionContext {
+                        source_system_id,
+                        project_key,
+                        project_name,
+                        ingested_at: now_utc,
+                    };
+                    project_jira_issue(conn, &ctx, &raw_value, issue)?;
 
-                if let Some(updated) = issue.fields.updated.as_deref() {
-                    match max_updated_seen.as_deref() {
-                        None => max_updated_seen = Some(updated.to_string()),
-                        Some(prev) if updated > prev => {
-                            max_updated_seen = Some(updated.to_string())
+                    if let Some(updated) = issue.fields.updated.as_deref() {
+                        match page_max_updated.as_deref() {
+                            None => page_max_updated = Some(updated.to_string()),
+                            Some(prev) if updated > prev => {
+                                page_max_updated = Some(updated.to_string())
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
+                    page_saved += 1;
                 }
-                saved_issues += 1;
+                Ok((page_max_updated, page_saved))
+            })?;
+            if let Some(updated) = page_max_updated {
+                match max_updated_seen.as_deref() {
+                    None => max_updated_seen = Some(updated),
+                    Some(prev) if updated.as_str() > prev => {
+                        max_updated_seen = Some(updated)
+                    }
+                    _ => {}
+                }
             }
+            saved_issues += page_saved;
 
             // ── Tail / sub-resource fetches ─────────────────────────────────
             // These happen OUTSIDE the per-issue projection — by the time we
             // reach here the issues are already persisted, so a tail failure
             // marks the run "partial" but doesn't roll back saved issues.
+            //
+            // For each tail fetch, HTTP happens FIRST (no lock held); the
+            // returned items are persisted inside a short `with_conn` block.
             for issue in &page.issues {
                 if cancellation.is_cancelled() {
                     break;
                 }
-                let ctx = JiraIssueProjectionContext {
-                    source_system_id,
-                    project_key,
-                    project_name,
-                    ingested_at: now_utc,
-                };
                 let work_item_id_for_tail = stable_id(
                     "wi",
                     &[source_system_id, JIRA_WORK_ITEM_KIND, &issue.id],
@@ -1543,41 +1571,50 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                             if cancellation.is_cancelled() {
                                 break;
                             }
-                            match self.client.get_issue_comments_page(
+                            // HTTP (no lock held).
+                            let page_tail = match self.client.get_issue_comments_page(
                                 &issue.key,
                                 start_at_tail,
                                 self.page_size,
                             ) {
-                                Ok(page_tail) => {
-                                    let returned = page_tail.comments.len() as u32;
-                                    for c in &page_tail.comments {
-                                        if let Err(err) = persist_jira_comment(
-                                            conn,
-                                            &ctx,
-                                            &work_item_id_for_tail,
-                                            &issue.key,
-                                            c,
-                                        ) {
-                                            let ie: IngestionError = err.into();
-                                            return Err(ie);
-                                        }
-                                    }
-                                    let next = start_at_tail.saturating_add(returned);
-                                    let reached_total = page_tail
-                                        .total
-                                        .map(|t| next as usize >= t as usize)
-                                        .unwrap_or(false);
-                                    if returned == 0 || reached_total || next <= start_at_tail {
-                                        break;
-                                    }
-                                    start_at_tail = next;
-                                }
+                                Ok(p) => p,
                                 Err(err) => {
                                     let ie: IngestionError = err.into();
-                                    tail_errors.push(format!("comments {}: {}", issue.key, ie));
+                                    tail_errors
+                                        .push(format!("comments {}: {}", issue.key, ie));
                                     break;
                                 }
+                            };
+                            let returned = page_tail.comments.len() as u32;
+                            // Persist all returned comments inside ONE locked block.
+                            db.with_conn(|conn| {
+                                let ctx = JiraIssueProjectionContext {
+                                    source_system_id,
+                                    project_key,
+                                    project_name,
+                                    ingested_at: now_utc,
+                                };
+                                for c in &page_tail.comments {
+                                    persist_jira_comment(
+                                        conn,
+                                        &ctx,
+                                        &work_item_id_for_tail,
+                                        &issue.key,
+                                        c,
+                                    )
+                                    .map_err(IngestionError::from)?;
+                                }
+                                Ok(())
+                            })?;
+                            let next = start_at_tail.saturating_add(returned);
+                            let reached_total = page_tail
+                                .total
+                                .map(|t| next as usize >= t as usize)
+                                .unwrap_or(false);
+                            if returned == 0 || reached_total || next <= start_at_tail {
+                                break;
                             }
+                            start_at_tail = next;
                         }
                     }
                 }
@@ -1596,40 +1633,47 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                             if cancellation.is_cancelled() {
                                 break;
                             }
-                            match self.client.get_issue_worklogs_page(
+                            let page_tail = match self.client.get_issue_worklogs_page(
                                 &issue.key,
                                 start_at_tail,
                                 self.page_size,
                             ) {
-                                Ok(page_tail) => {
-                                    let returned = page_tail.worklogs.len() as u32;
-                                    for w in &page_tail.worklogs {
-                                        if let Err(err) = persist_jira_worklog(
-                                            conn,
-                                            &ctx,
-                                            &work_item_id_for_tail,
-                                            w,
-                                        ) {
-                                            let ie: IngestionError = err.into();
-                                            return Err(ie);
-                                        }
-                                    }
-                                    let next = start_at_tail.saturating_add(returned);
-                                    let reached_total = page_tail
-                                        .total
-                                        .map(|t| next as usize >= t as usize)
-                                        .unwrap_or(false);
-                                    if returned == 0 || reached_total || next <= start_at_tail {
-                                        break;
-                                    }
-                                    start_at_tail = next;
-                                }
+                                Ok(p) => p,
                                 Err(err) => {
                                     let ie: IngestionError = err.into();
-                                    tail_errors.push(format!("worklogs {}: {}", issue.key, ie));
+                                    tail_errors
+                                        .push(format!("worklogs {}: {}", issue.key, ie));
                                     break;
                                 }
+                            };
+                            let returned = page_tail.worklogs.len() as u32;
+                            db.with_conn(|conn| {
+                                let ctx = JiraIssueProjectionContext {
+                                    source_system_id,
+                                    project_key,
+                                    project_name,
+                                    ingested_at: now_utc,
+                                };
+                                for w in &page_tail.worklogs {
+                                    persist_jira_worklog(
+                                        conn,
+                                        &ctx,
+                                        &work_item_id_for_tail,
+                                        w,
+                                    )
+                                    .map_err(IngestionError::from)?;
+                                }
+                                Ok(())
+                            })?;
+                            let next = start_at_tail.saturating_add(returned);
+                            let reached_total = page_tail
+                                .total
+                                .map(|t| next as usize >= t as usize)
+                                .unwrap_or(false);
+                            if returned == 0 || reached_total || next <= start_at_tail {
+                                break;
                             }
+                            start_at_tail = next;
                         }
                     }
                 }
@@ -1642,21 +1686,33 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 if self.options.fetch_remote_links {
                     match self.client.get_issue_remote_links(&issue.key) {
                         Ok(links) => {
-                            for link in &links {
-                                match persist_jira_remote_link(
-                                    conn,
-                                    &ctx,
-                                    &work_item_id_for_tail,
-                                    &issue.key,
-                                    link,
-                                ) {
-                                    Ok(true) => any_remote_link_fetched = true,
-                                    Ok(false) => {}
-                                    Err(err) => {
-                                        let ie: IngestionError = err.into();
-                                        return Err(ie);
+                            let fetched_any = db.with_conn(|conn| {
+                                let ctx = JiraIssueProjectionContext {
+                                    source_system_id,
+                                    project_key,
+                                    project_name,
+                                    ingested_at: now_utc,
+                                };
+                                let mut any = false;
+                                for link in &links {
+                                    match persist_jira_remote_link(
+                                        conn,
+                                        &ctx,
+                                        &work_item_id_for_tail,
+                                        &issue.key,
+                                        link,
+                                    ) {
+                                        Ok(true) => any = true,
+                                        Ok(false) => {}
+                                        Err(err) => {
+                                            return Err(err.into());
+                                        }
                                     }
                                 }
+                                Ok(any)
+                            })?;
+                            if fetched_any {
+                                any_remote_link_fetched = true;
                             }
                         }
                         Err(err) => {
@@ -1685,7 +1741,10 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 "pages": pages,
             })
             .to_string();
-            update_progress(conn, &run_id, &progress_json, &counts_json)?;
+            db.with_conn(|conn| {
+                update_progress(conn, &run_id, &progress_json, &counts_json)?;
+                Ok(())
+            })?;
 
             if should_stop_paginate(start_at, self.page_size, returned, page.total) {
                 break;
@@ -1695,45 +1754,6 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 break;
             }
             start_at = next_start;
-        }
-
-        // Cursor advances only when at least one page was successfully
-        // persisted and we observed an `updated` value. On cancellation we
-        // still persist progress up to the last completed page.
-        if any_page_persisted {
-            let new_cursor_value = max_updated_seen
-                .or(cursor_last_updated.clone())
-                .map(|ts| serde_json::json!({ "last_updated": ts }).to_string());
-            if let Some(value) = new_cursor_value {
-                upsert_cursor(
-                    conn,
-                    source_system_id,
-                    JIRA_ISSUE_CONNECTOR,
-                    &cursor_key,
-                    &value,
-                    Some(now_utc),
-                    now_utc,
-                )?;
-            }
-        }
-
-        // Separate cursor for remote-link sync: only advances when remote-link
-        // sync was enabled, fetched at least one link, and saw no errors.
-        if self.options.fetch_remote_links
-            && any_remote_link_fetched
-            && !remote_links_had_error
-        {
-            let remote_links_cursor_key = format!("project:{}:remotelinks", project_key);
-            let value = serde_json::json!({ "last_synced": now_utc }).to_string();
-            upsert_cursor(
-                conn,
-                source_system_id,
-                JIRA_ISSUE_CONNECTOR,
-                &remote_links_cursor_key,
-                &value,
-                Some(now_utc),
-                now_utc,
-            )?;
         }
 
         let (status, error_summary): (&str, Option<String>) = if cancelled_mid_loop {
@@ -1752,14 +1772,59 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             "pages": pages,
         })
         .to_string();
-        finish_run(
-            conn,
-            &run_id,
-            now_utc,
-            status,
-            &final_counts,
-            error_summary.as_deref(),
-        )?;
+
+        // ── Final writes: advance cursors + finish_run in one locked block.
+        let fetch_remote_links = self.options.fetch_remote_links;
+        let project_key_owned = project_key.to_string();
+        db.with_conn(|conn| {
+            // Cursor advances only when at least one page was successfully
+            // persisted and we observed an `updated` value. On cancellation we
+            // still persist progress up to the last completed page.
+            if any_page_persisted {
+                let new_cursor_value = max_updated_seen
+                    .clone()
+                    .or_else(|| cursor_last_updated.clone())
+                    .map(|ts| serde_json::json!({ "last_updated": ts }).to_string());
+                if let Some(value) = new_cursor_value {
+                    upsert_cursor(
+                        conn,
+                        source_system_id,
+                        JIRA_ISSUE_CONNECTOR,
+                        &cursor_key,
+                        &value,
+                        Some(now_utc),
+                        now_utc,
+                    )?;
+                }
+            }
+
+            // Separate cursor for remote-link sync: only advances when remote-link
+            // sync was enabled, fetched at least one link, and saw no errors.
+            if fetch_remote_links && any_remote_link_fetched && !remote_links_had_error {
+                let remote_links_cursor_key =
+                    format!("project:{}:remotelinks", project_key_owned);
+                let value = serde_json::json!({ "last_synced": now_utc }).to_string();
+                upsert_cursor(
+                    conn,
+                    source_system_id,
+                    JIRA_ISSUE_CONNECTOR,
+                    &remote_links_cursor_key,
+                    &value,
+                    Some(now_utc),
+                    now_utc,
+                )?;
+            }
+
+            finish_run(
+                conn,
+                &run_id,
+                now_utc,
+                status,
+                &final_counts,
+                error_summary.as_deref(),
+            )?;
+            Ok(())
+        })?;
 
         Ok(JiraIssueIngestionSummary {
             run_id,
@@ -2255,6 +2320,24 @@ mod tests {
     use std::sync::Arc;
     use std::sync::Mutex;
 
+    use crate::ingestion::db::{DbAccess, MutexDbAccess};
+
+    /// Test-only `DbAccess` that wraps a borrowed `&Connection` without any
+    /// locking. Used by existing single-threaded tests where the connection
+    /// is owned by the test; the concurrency-sensitive
+    /// `status_read_proceeds_while_search_page_is_blocked` test uses a real
+    /// `MutexDbAccess` to assert the lock-release contract.
+    struct BorrowedConnDbAccess<'a>(&'a Connection);
+
+    impl<'a> DbAccess for BorrowedConnDbAccess<'a> {
+        fn with_conn<F, R>(&self, f: F) -> Result<R, IngestionError>
+        where
+            F: FnOnce(&Connection) -> Result<R, IngestionError>,
+        {
+            f(self.0)
+        }
+    }
+
     /// In-memory stub for `JiraIssueClient`.
     struct FakeJiraClient {
         pages: Mutex<Vec<JiraSearchPage>>,
@@ -2494,7 +2577,7 @@ mod tests {
         let flag = CancellationFlag::new();
 
         let summary = service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
 
         assert_eq!(summary.status, "succeeded");
@@ -2568,7 +2651,7 @@ mod tests {
             let service = JiraIssueIngestionService::new(&client);
             let flag = CancellationFlag::new();
             let summary = service
-                .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), now_utc, &flag)
+                .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), now_utc, &flag)
                 .expect("ingest");
             assert_eq!(summary.status, "succeeded");
         }
@@ -2617,7 +2700,7 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
 
         let calls = client.calls();
@@ -2671,7 +2754,7 @@ mod tests {
 
         let flag = CancellationFlag::new();
         let err = service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect_err("expected partial failure");
         assert_eq!(err.category(), IngestionErrorCategory::Unknown);
 
@@ -2749,7 +2832,7 @@ mod tests {
             options: JiraIngestionOptions::default(),
         };
         let summary = service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
         assert_eq!(summary.status, "cancelled");
         // Exactly one upstream call should have been made.
@@ -2797,7 +2880,7 @@ mod tests {
             let service = JiraIssueIngestionService::new(&client);
             let flag = CancellationFlag::new();
             let summary = service
-                .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), now_utc, &flag)
+                .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), now_utc, &flag)
                 .expect("ingest");
             assert_eq!(summary.status, "succeeded");
         }
@@ -2862,7 +2945,7 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         let summary = service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
         assert_eq!(summary.status, "succeeded");
 
@@ -2921,7 +3004,7 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         let summary = service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
         assert_eq!(summary.status, "succeeded");
 
@@ -2958,7 +3041,7 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         let summary = service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
 
         assert_eq!(summary.status, "partial");
@@ -3017,7 +3100,7 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
 
         assert!(
@@ -3064,7 +3147,7 @@ mod tests {
         );
         let flag = CancellationFlag::new();
         service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
 
         let calls = client.remote_link_calls();
@@ -3153,7 +3236,7 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         service
-            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect("ingest");
 
         // Scan every TEXT column in every ingestion_runs row.
@@ -3313,5 +3396,191 @@ mod tests {
             json_files_checked >= 1,
             "expected at least one fixture *.json"
         );
+    }
+
+    // ── INIT-1 regression: writes use jira_issue work-item kind ───────────
+    //
+    // `jira_issues_list` filters `work_items.source_kind = 'jira_issue'`.
+    // If the projection writes the *system* kind (`"jira"`) instead of the
+    // *work-item* kind (`"jira_issue"`), ingested issues silently disappear
+    // from the list. This test exercises the end-to-end happy path.
+    #[test]
+    fn ingested_issues_are_visible_through_list_jira_issues_from_conn() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_test_1");
+
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let client = FakeJiraClient::with_pages(vec![page1]);
+        let service = JiraIssueIngestionService::new(&client);
+        let flag = CancellationFlag::new();
+        service
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_test_1",
+                "AMP",
+                Some("AMP"),
+                NOW,
+                &flag,
+            )
+            .expect("ingest");
+
+        // `source_system_id_for("test_1")` returns "srcsys_test_1" — the
+        // value we seeded above.
+        let items = crate::commands::list_jira_issues_from_conn(
+            &conn,
+            &crate::commands::JiraIssueListFilter {
+                source_id: Some("test_1".into()),
+                project_key: Some("AMP".into()),
+                limit: Some(10),
+            },
+        )
+        .expect("list");
+        assert!(
+            !items.is_empty(),
+            "expected the ingested issue to be visible via jira_issues_list"
+        );
+        assert!(
+            items.iter().any(|i| i.key == "AMP-1"),
+            "expected AMP-1 in list, got: {items:?}"
+        );
+    }
+
+    // ── INIT-2 regression: SQLite mutex is released during HTTP ───────────
+    //
+    // Spawn a worker thread that runs `ingest_project` against a
+    // `MutexDbAccess`. The fake Jira client blocks inside
+    // `search_issues_page` until a release channel fires. While the worker
+    // is blocked on that "HTTP" call, the main thread takes the DB lock and
+    // reads progress — if the service held the mutex across the network
+    // call, this would deadlock.
+    #[test]
+    fn status_read_proceeds_while_search_page_is_blocked() {
+        use std::sync::mpsc;
+
+        /// Fake client whose `search_issues_page` blocks until a signal is
+        /// received on the given channel.
+        struct BlockingJiraClient {
+            release_rx: Arc<Mutex<mpsc::Receiver<()>>>,
+            started_tx: Arc<Mutex<Option<mpsc::Sender<()>>>>,
+        }
+        impl JiraIssueClient for BlockingJiraClient {
+            fn search_issues_page(
+                &self,
+                _request: JiraSearchRequest,
+            ) -> Result<JiraSearchPage, JiraApiError> {
+                if let Some(tx) = self.started_tx.lock().unwrap().take() {
+                    let _ = tx.send(());
+                }
+                // Block — without holding any DB lock — until the main thread
+                // releases us.
+                let rx = self.release_rx.lock().unwrap();
+                let _ = rx.recv();
+                Ok(JiraSearchPage {
+                    start_at: 0,
+                    max_results: 50,
+                    total: Some(0),
+                    issues: vec![],
+                })
+            }
+
+            fn get_issue_comments_page(
+                &self,
+                _issue_id_or_key: &str,
+                start_at: u32,
+                max_results: u32,
+            ) -> Result<JiraPagedComments, JiraApiError> {
+                Ok(JiraPagedComments {
+                    start_at,
+                    max_results,
+                    total: Some(0),
+                    comments: vec![],
+                })
+            }
+
+            fn get_issue_worklogs_page(
+                &self,
+                _issue_id_or_key: &str,
+                start_at: u32,
+                max_results: u32,
+            ) -> Result<JiraPagedWorklogs, JiraApiError> {
+                Ok(JiraPagedWorklogs {
+                    start_at,
+                    max_results,
+                    total: Some(0),
+                    worklogs: vec![],
+                })
+            }
+
+            fn get_issue_remote_links(
+                &self,
+                _issue_id_or_key: &str,
+            ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
+                Ok(vec![])
+            }
+        }
+
+        // Set up an in-memory DB inside a Mutex; seed source_system.
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_test_1");
+        let mutex = Arc::new(Mutex::new(conn));
+
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let (started_tx, started_rx) = mpsc::channel::<()>();
+        let client = Arc::new(BlockingJiraClient {
+            release_rx: Arc::new(Mutex::new(release_rx)),
+            started_tx: Arc::new(Mutex::new(Some(started_tx))),
+        });
+
+        let mutex_worker = Arc::clone(&mutex);
+        let client_worker = Arc::clone(&client);
+        let handle = std::thread::spawn(move || {
+            let service = JiraIssueIngestionService::new(client_worker.as_ref());
+            let db = MutexDbAccess(&mutex_worker);
+            let flag = CancellationFlag::new();
+            service
+                .ingest_project(
+                    &db,
+                    "srcsys_test_1",
+                    "AMP",
+                    Some("AMP"),
+                    NOW,
+                    &flag,
+                )
+                .expect("ingest");
+        });
+
+        // Wait until the worker is inside the blocking search call (no DB
+        // lock held by definition — the call is BEFORE any with_conn block
+        // in the loop).
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("worker should have entered search_issues_page");
+
+        // The main thread takes the DB lock and reads progress. If the
+        // service still held the mutex across the HTTP call, this would
+        // deadlock; we'd hit the timeout below.
+        let (got_tx, got_rx) = mpsc::channel::<Option<crate::commands::JiraIssueIngestionProgress>>();
+        let mutex_reader = Arc::clone(&mutex);
+        let reader = std::thread::spawn(move || {
+            let conn = mutex_reader.lock().expect("lock");
+            let progress = crate::commands::read_progress_from_conn(&conn, "test_1")
+                .expect("read_progress");
+            let _ = got_tx.send(progress);
+        });
+        let progress = got_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("progress read should not deadlock");
+        reader.join().expect("reader thread joined");
+
+        let progress = progress.expect("expected a progress row to exist");
+        assert_eq!(
+            progress.status, "running",
+            "expected status=running while page is blocked, got: {progress:?}"
+        );
+
+        // Release the worker and let it finish.
+        release_tx.send(()).expect("signal release");
+        handle.join().expect("worker thread joined");
     }
 }
