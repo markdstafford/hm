@@ -5,9 +5,9 @@ import { test, expect } from "@playwright/test";
 // isolated app data directory. These tests validate the UI flow only.
 // See context-agent/wiki/testing.md for details.
 
-test("hello hm heading is visible", async ({ page }) => {
+test("Inbox empty state renders on app load", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: /hello hm/i })).toBeVisible();
+  await expect(page.getByText(/inbox is clear/i)).toBeVisible();
 });
 
 test("settings opener button is present", async ({ page }) => {
@@ -15,25 +15,23 @@ test("settings opener button is present", async ({ page }) => {
   await expect(page.getByRole("button", { name: /open settings/i })).toBeVisible();
 });
 
-test("settings panel opens and shows General tab", async ({ page }) => {
+test("settings opener flips into the page mode showing the General category", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /open settings/i }).click();
-  await expect(page.getByRole("dialog", { name: /settings/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /general/i })).toBeVisible();
+  // Breadcrumb "Settings › General" replaces the previous title-bar content.
+  await expect(
+    page.getByLabel(/breadcrumb/i).getByText("Settings", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /close settings/i })).toBeVisible();
 });
 
-test("settings panel closes with Escape", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: /open settings/i }).click();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).not.toBeVisible();
-});
-
-test("settings panel closes with close button", async ({ page }) => {
+test("close button returns to Inbox", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /open settings/i }).click();
   await page.getByRole("button", { name: /close settings/i }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.getByText(/inbox is clear/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /close settings/i })).toHaveCount(0);
 });
 
 // Cross-session persistence (change → close → reopen → verify) requires a compiled Tauri
@@ -50,8 +48,10 @@ test("settings theme persists across app restart — requires tauri-driver with 
 test("changing theme mode in Appearance settings updates data-theme immediately", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /open settings/i }).click();
-  await page.getByRole("button", { name: /appearance/i }).click();
-  await page.getByRole("radio", { name: /^dark$/i }).click();
+  await page.getByRole("button", { name: "Appearance" }).click();
+  // Theme mode is a Select combobox; click to open and pick "Dark".
+  await page.getByRole("combobox", { name: /theme mode/i }).click();
+  await page.getByRole("option", { name: /^dark$/i }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "catppuccin-macchiato");
   await expect(page.locator("html")).toHaveAttribute("data-theme-mode", "dark");
 });
