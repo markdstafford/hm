@@ -549,9 +549,30 @@ UI sans (default Inter Variable) and code mono (default Fira Code). Stored in pe
 
 ### Settings UI patterns
 
-Settings UI conventions (panel layout, category sidebar, save behavior, validation, multi-step flows) are **deliberately not specified in this doc yet**. The settings feature is intentionally allowed to evolve its own patterns before any of them get canonicalized here. A future "Settings UI patterns" section will document the canonical shape once enough settings surface area exists to make patterns meaningful.
+Settings is a feature page (`src/features/settings/SettingsPage.tsx`) that mounts inside the standard `AppShell`. When the user opens settings, the app's `currentPage` flips to `"settings"`:
 
-When extracting genuinely reusable bits from `src/settings/` to `src/ui/`, document them in the appropriate primitives subsection above.
+- **Sidebar zone** swaps to `<SettingsSidebar>` — one `NavSection` with one `NavItem` per category (General, Appearance, Sources, AI providers). The selected category receives `active`.
+- **Main title bar (start)** renders `<SettingsBreadcrumb>` showing `Settings › Category`.
+- **Main title bar (end)** renders an `IconButton` with the `X` icon that returns the user to the previous page.
+- **Main content** dispatches on the active category and renders the corresponding `<*Category>` component.
+
+Settings is not a modal or overlay — it is a routed page mode. There is no escape-key dismiss; the user navigates back via the close button or by picking a non-settings page.
+
+**Category content shapes.** Two shapes are canonical so far:
+
+- **Row-style** (General, Appearance) — a stack of `SettingRow`s. Each row contains a label, optional description, and one control on the right. Suitable for short lists of independent toggles or selects that don't compose into a draft.
+- **List-with-focused-form** (Sources, AI providers) — the category page shows either a list of configured items with row actions, or a focused form for one item, but never both at once. The form replaces the list while editing and returns to the list on save or cancel. Cross-item references (routing, credential reuse) are surfaced inside the form via inline checkboxes or selects rather than as separate sections of the page.
+
+**The list-with-focused-form pattern uses these primitives:**
+
+- `Card` per row in the list.
+- `Form` + `Form.Section` + `Form.Actions` + `Form.Error` for the form.
+- `EmptyState` when the list is empty.
+- `AlertDialog` for destructive confirmation (Remove).
+
+**Advanced views** (AI providers YAML editor) — an opt-in alternate view of the same data, toggled by an in-header pair of buttons. The advanced view is allowed to bypass field-level validation but **must** preserve invariants on save — the YAML view runs the same cross-reference validation as the form-driven save path.
+
+**No settings UI surface uses `Dialog`.** Modals are reserved for transient destructive confirmation or short-lived inline pickers.
 
 ---
 
