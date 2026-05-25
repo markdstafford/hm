@@ -7,7 +7,7 @@ import {
   resolveThemeSlots,
   resolveTheme,
   resolveCatppuccinAccent,
-} from "./preferences";
+} from "./index";
 
 describe("normalizePreferences", () => {
   it("returns defaults for null input", () => {
