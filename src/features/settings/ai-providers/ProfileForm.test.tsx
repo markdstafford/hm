@@ -61,10 +61,14 @@ describe("ProfileForm", () => {
     const save = screen.getByRole("button", { name: /Add profile/ });
     await userEvent.click(save);
     expect(onSave).toHaveBeenCalledOnce();
-    const next = onSave.mock.calls[0][0] as AiProviderConfig;
+    const { next, pendingSecret } = onSave.mock.calls[0][0] as {
+      next: AiProviderConfig;
+      pendingSecret?: { credentialName: string; value: string };
+    };
     expect(next.profiles).toHaveLength(2);
     expect(next.profiles[1].name).toBe("p2");
     expect(next.profiles[1].endpoint_ref).toBe("e");
+    expect(pendingSecret).toBeUndefined();
   });
 
   it("cascades a rename through the routing map", async () => {
@@ -83,7 +87,70 @@ describe("ProfileForm", () => {
     await userEvent.type(nameInput, "p-renamed");
     expect(await screen.findByText(/Renaming will cascade/i)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
-    const next = onSave.mock.calls[0][0] as AiProviderConfig;
+    const { next } = onSave.mock.calls[0][0] as { next: AiProviderConfig };
     expect(next.routing["question.answer"]).toBe("p-renamed");
+  });
+
+  it("preserves unknown settings keys when editing a profile", async () => {
+    const onSave = vi.fn();
+    const configWithRichSettings: AiProviderConfig = {
+      ...CONFIG,
+      profiles: [
+        {
+          ...CONFIG.profiles[0],
+          settings: {
+            effort: "low",
+            thinking: "adaptive",
+            _yaml_runner: "claude_agent_sdk",
+            beta_header_filter: { strip: ["advisor-tool-2026-03-01"] },
+          },
+        },
+      ],
+    };
+    render(
+      <ProfileForm
+        mode="edit"
+        config={configWithRichSettings}
+        initialProfileName="p"
+        onCancel={() => {}}
+        onSave={onSave}
+      />,
+    );
+    // Save without changing anything: the unknown keys must survive.
+    await userEvent.click(screen.getByRole("button", { name: /Save changes/ }));
+    const { next } = onSave.mock.calls[0][0] as { next: AiProviderConfig };
+    const settings = next.profiles[0].settings as Record<string, unknown>;
+    expect(settings.thinking).toBe("adaptive");
+    expect(settings._yaml_runner).toBe("claude_agent_sdk");
+    expect(settings.beta_header_filter).toEqual({ strip: ["advisor-tool-2026-03-01"] });
+    expect(settings.effort).toBe("low");
+  });
+
+  it("produces a pendingSecret when creating a new Keychain credential", async () => {
+    const onSave = vi.fn();
+    const emptyConfig: AiProviderConfig = {
+      version: 1,
+      credentials: [],
+      endpoints: [],
+      profiles: [],
+      routing: {},
+    };
+    render(<ProfileForm mode="create" config={emptyConfig} onCancel={() => {}} onSave={onSave} />);
+    await userEvent.type(screen.getByLabelText(/Profile name/i), "fresh");
+    await userEvent.type(screen.getByLabelText(/Endpoint name/i), "ep");
+    await userEvent.type(screen.getByLabelText(/Credential name/i), "cred");
+    await userEvent.type(screen.getByLabelText(/Secret value/i), "sk-secret");
+    await userEvent.type(screen.getByLabelText(/^Model$/i), "claude-y");
+    await userEvent.click(screen.getByRole("button", { name: /Add profile/ }));
+    const { next, pendingSecret } = onSave.mock.calls[0][0] as {
+      next: AiProviderConfig;
+      pendingSecret?: { credentialName: string; value: string };
+    };
+    expect(pendingSecret).toEqual({ credentialName: "cred", value: "sk-secret" });
+    expect(next.credentials).toHaveLength(1);
+    expect(next.credentials[0].source).toEqual({
+      type: "Keychain",
+      key_ref: "ai.credentials.cred",
+    });
   });
 });

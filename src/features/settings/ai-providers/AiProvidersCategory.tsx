@@ -2,15 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import { Code, List } from "lucide-react";
 import { EMPTY_AI_PROVIDER_CONFIG } from "../../../aiProviders/defaults";
 import {
+  deleteAiCredentialSecret,
   loadAiProviderConfig,
   saveAiProviderConfig,
+  setAiCredentialSecret,
   smokeTestAiProfile,
 } from "../../../aiProviders/storage";
 import type { AiProviderConfig } from "../../../aiProviders/types";
 import { Button } from "../../../ui/buttons/Button";
 import { AlertDialog } from "../../../ui/overlays/AlertDialog";
 import { ProfileList, type SmokeState } from "./ProfileList";
-import { ProfileForm } from "./ProfileForm";
+import { ProfileForm, type ProfileFormSavePayload } from "./ProfileForm";
 import { YamlAdvancedView } from "./YamlAdvancedView";
 
 type View =
@@ -36,16 +38,42 @@ export function AiProvidersCategory() {
     return () => { cancelled = true; };
   }, []);
 
-  const persist = useCallback(async (next: AiProviderConfig) => {
-    const result = await saveAiProviderConfig(next);
-    if (result.ok) {
-      setConfig(next);
-      setSaveError(null);
-      setView({ kind: "list" });
-    } else {
+  // Persist a config change. When the form bundles a pending Keychain secret,
+  // write the secret first so the credential ref resolves; if the subsequent
+  // config save fails, best-effort delete the orphan secret so we don't leak
+  // it. Plain config-only writes (remove, YAML apply) skip the secret step.
+  const persist = useCallback(
+    async (payload: ProfileFormSavePayload | { next: AiProviderConfig }) => {
+      const next = payload.next;
+      const pendingSecret = "pendingSecret" in payload ? payload.pendingSecret : undefined;
+      if (pendingSecret) {
+        const secretResult = await setAiCredentialSecret(
+          pendingSecret.credentialName,
+          pendingSecret.value,
+        );
+        if (!secretResult.ok) {
+          setSaveError(`Could not store credential secret: ${secretResult.error}`);
+          return;
+        }
+      }
+      const result = await saveAiProviderConfig(next);
+      if (result.ok) {
+        setConfig(next);
+        setSaveError(null);
+        setView({ kind: "list" });
+        return;
+      }
+      // Config save failed. If we just wrote a secret for a credential that
+      // never landed in persisted config, clean it up. Best-effort: a delete
+      // failure is not surfaced because the original error is what the user
+      // needs to see.
+      if (pendingSecret) {
+        await deleteAiCredentialSecret(pendingSecret.credentialName);
+      }
       setSaveError(result.error);
-    }
-  }, []);
+    },
+    [],
+  );
 
   const handleTest = useCallback(async (profileName: string) => {
     setSmokeState((s) => ({ ...s, [profileName]: { status: "Running" } }));
@@ -76,7 +104,7 @@ export function AiProvidersCategory() {
         Object.entries(config.routing).filter(([, p]) => p !== pendingRemove),
       ),
     };
-    await persist(next);
+    await persist({ next });
     setPendingRemove(null);
   }, [config, pendingRemove, persist]);
 
@@ -150,7 +178,11 @@ export function AiProvidersCategory() {
         />
       )}
       {!loading && view.kind === "yaml" && (
-        <YamlAdvancedView config={config} onSave={persist} onCancel={() => setView({ kind: "list" })} />
+        <YamlAdvancedView
+          config={config}
+          onSave={(next) => persist({ next })}
+          onCancel={() => setView({ kind: "list" })}
+        />
       )}
 
       <AlertDialog.Root open={!!pendingRemove} onOpenChange={(o) => !o && setPendingRemove(null)}>

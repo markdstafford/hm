@@ -33,13 +33,23 @@ type Mode = "create" | "edit";
 type ConnectionMode = "existing" | "new";
 type CredentialMode = "existing" | "new";
 
+export interface ProfileFormSavePayload {
+  next: AiProviderConfig;
+  /**
+   * Present when the form created a new Keychain-sourced credential. The
+   * orchestrator must write this secret to the OS keychain before persisting
+   * the config so the credential reference resolves.
+   */
+  pendingSecret?: { credentialName: string; value: string };
+}
+
 interface ProfileFormProps {
   mode: Mode;
   config: AiProviderConfig;
   initialProfileName?: string;
   onTest?: () => Promise<{ status: "Success" | "Error"; message: string; elapsedMs: number }>;
   onCancel: () => void;
-  onSave: (next: AiProviderConfig) => Promise<void> | void;
+  onSave: (payload: ProfileFormSavePayload) => Promise<void> | void;
 }
 
 interface SmokeUiState {
@@ -223,7 +233,25 @@ function applyCascade(
     }
   }
 
-  const settings: Record<string, unknown> = {};
+  // Preserve unknown settings from the original profile (notably `_yaml_runner`,
+  // `thinking`, beta header filters, etc.) so YAML-edit → form-edit doesn't
+  // silently drop data. Only the form-managed knobs (effort/reasoning_effort)
+  // are overwritten.
+  const originalProfile =
+    mode === "edit" && originalName
+      ? base.profiles.find((p) => p.name === originalName)
+      : undefined;
+  const settings: Record<string, unknown> = {
+    ...((originalProfile?.settings as Record<string, unknown> | undefined) ?? {}),
+  };
+  delete settings.effort;
+  delete settings.reasoning_effort;
+  // If the form switched the runner family, the preserved `_yaml_runner` hint
+  // becomes stale (e.g. `anthropic_direct` paired with the OpenAI runner). Drop
+  // it so the serializer falls back to the family-default runner name.
+  if (originalProfile && originalProfile.runner !== runner) {
+    delete settings._yaml_runner;
+  }
   if (state.effort) {
     if (runner === "AnthropicMessages") settings.effort = state.effort;
     else settings.reasoning_effort = state.effort;
@@ -337,7 +365,15 @@ export function ProfileForm({
 
   function handleSubmit() {
     if (errors.length > 0) return;
-    void onSave(applyCascade(config, state, mode, originalName));
+    const next = applyCascade(config, state, mode, originalName);
+    const pendingSecret =
+      state.connectionMode === "new" &&
+      state.credentialMode === "new" &&
+      state.newCredentialSourceKind === "Keychain" &&
+      state.newCredentialSecret
+        ? { credentialName: state.newCredentialName, value: state.newCredentialSecret }
+        : undefined;
+    void onSave({ next, pendingSecret });
   }
 
   const protocolOpt = PROTOCOL_OPTIONS.find((p) => p.value === state.newProtocol)!;
