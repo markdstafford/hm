@@ -284,8 +284,11 @@ export function Showcase() {
             <Dialog.Trigger asChild><Button>Open dialog</Button></Dialog.Trigger>
             <Dialog.Content>
               <Dialog.Title>Title</Dialog.Title>
-              <Dialog.Description>Body content.</Dialog.Description>
-              <Dialog.Close asChild><Button>Close</Button></Dialog.Close>
+              <Dialog.Description>Body content describing the action the user is about to take.</Dialog.Description>
+              <div className="mt-4 flex justify-end gap-2">
+                <Dialog.Close asChild><Button>Cancel</Button></Dialog.Close>
+                <Dialog.Close asChild><Button variant="primary">Confirm</Button></Dialog.Close>
+              </div>
             </Dialog.Content>
           </Dialog.Root>
         </Card>

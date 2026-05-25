@@ -366,6 +366,28 @@ The page component owns feature-specific state (filters, selection, active previ
 
 Recurring rules that apply across components.
 
+### Dialog body and footer
+
+`Dialog` and `AlertDialog` content follow a canonical vertical structure:
+
+1. `Title` — the action / question.
+2. `Description` — the explanation. One short sentence is usually enough.
+3. Optional body content (form fields, lists, additional copy).
+4. Footer — action row, right-aligned, with `mt-4` separating it from the body and `gap-2` between buttons.
+
+```tsx
+<Dialog.Content>
+  <Dialog.Title>Title</Dialog.Title>
+  <Dialog.Description>Body content describing the action.</Dialog.Description>
+  <div className="mt-4 flex justify-end gap-2">
+    <Dialog.Close asChild><Button>Cancel</Button></Dialog.Close>
+    <Dialog.Close asChild><Button variant="primary">Confirm</Button></Dialog.Close>
+  </div>
+</Dialog.Content>
+```
+
+Cancel/secondary action goes left of the primary/destructive action. For `AlertDialog`, the destructive action uses `<Button variant="destructive">` and is wrapped in `AlertDialog.Action`; cancel is wrapped in `AlertDialog.Cancel`.
+
 ### Small-caps section labels
 
 Use `font-variant-caps: all-small-caps` (real OpenType small-caps via Inter Variable). Pass **mixed-case** text, not uppercased text:
