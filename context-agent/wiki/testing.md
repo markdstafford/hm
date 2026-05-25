@@ -98,15 +98,27 @@ npm test        # Vitest
 ```
 If `node_modules` is missing, run `npm install` first.
 
-## Settings UI tests (added 2026-05-22)
+## Settings UI tests (added 2026-05-22, refactored 2026-05-24 in PR #30)
 
 ### Component test locations
 
 | File | Coverage |
 |------|----------|
-| `src/preferences.test.ts` | Pure normalize/merge helpers — no mocks needed (13 tests) |
-| `src/App.test.tsx` | Settings opener render, panel open on click, axe (updated; old theme-toggle test removed) |
-| `src/settings/SettingsPanel.test.tsx` | Dialog render, open/close, General controls, onUpdatePreferences calls, axe (10 tests) |
+| `src/preferences/index.test.ts` | Pure normalize/merge/resolve helpers — no mocks needed |
+| `src/App.test.tsx` | Settings cog flips into page-mode (heading "General", close-X visible), showcase shortcut, axe |
+| `src/features/settings/SettingsSidebar.test.tsx` | Renders all 4 categories, aria-current=page on the active one, onPick callback |
+| `src/features/settings/SettingsPage.test.tsx` | Dispatches the right category component based on `category` prop |
+| `src/features/settings/general/GeneralCategory.test.tsx` | SettingRow + Select renders, onUpdatePreferences called with the right patch, axe |
+| `src/features/settings/appearance/AppearanceCategory.test.tsx` | Theme mode / light / dark rows render, change calls onUpdatePreferences, axe |
+| `src/features/settings/sources/SourcesCategory.test.tsx` | Empty state, Add source flow, transition into JiraSourceForm |
+| `src/features/settings/ai-providers/ProfileList.test.tsx` | Empty state, row rendering, routing badge, edit/test/remove callbacks, axe |
+| `src/features/settings/ai-providers/ProfileForm.test.tsx` | Required-field gating, cascade rename, pendingSecret bundling, duplicate-name rejection in edit mode, settings preservation |
+| `src/features/settings/ai-providers/YamlAdvancedView.test.tsx` | Initial textarea content, broken-ref rejection, save success path |
+| `src/features/settings/ai-providers/AiProvidersCategory.test.tsx` | Empty state, view toggle, transactional secret-then-config save, save-failure rollback, remove cascade |
+| `src/aiProviders/yaml/serialize.test.ts` | Sigil emission, protocol/runner shortening, anthropic/openai block grouping, routing, `_yaml_runner` preservation |
+| `src/aiProviders/yaml/parse.test.ts` | Round-trip, ref validation, plaintext-secret refusal, empty/non-string sigil refusal, ai: wrapper handling, empty-config refusal, secret-shaped-settings refusal |
+
+The legacy `src/settings/SettingsPanel.test.tsx`, `src/settings/SourcesSettings.test.tsx`, and `src/settings/AiProvidersSettings.test.tsx` were deleted in PR #30 along with the modal-based settings.
 
 ### Mock pattern for settings tests
 
@@ -140,9 +152,13 @@ beforeAll(() => {
 
 Use `globalThis` (not `global`) — TypeScript in this project doesn't have the Node.js `global` type.
 
+`ResizeObserver` is stubbed globally in `src/test/setup.ts` so Radix `RadioGroup` (and any other Radix component that reads element dimensions) doesn't throw under jsdom. No per-file setup is required.
+
 ### E2E settings coverage
 
-`e2e/hello.spec.ts` covers: heading, settings opener, panel open, Escape close, close-button close, and immediate `data-theme` update on theme change (6 tests).
+`e2e/hello.spec.ts` covers: Inbox empty state, settings opener visible, cog flips into page mode (breadcrumb + General heading + close button), close-X returns to Inbox, and the theme-mode Select updating `data-theme` / `data-theme-mode` immediately (5 tests + 1 skipped tauri-driver gate).
+
+`e2e/ai-providers.spec.ts` covers the profile-centric empty state and the YAML view toggle (textarea value via `toHaveValue`, not text content).
 
 ### E2E persistence limitation
 
@@ -160,7 +176,7 @@ Full cross-session preference persistence (change → close → reopen → verif
 ### Frontend sources tests
 
 - `src/sources/validation.test.ts` — pure unit tests for URL normalization, PAT gating, and secret-key detection.
-- `src/settings/SourcesSettings.test.tsx` — component tests mock `src/bindings.ts` and set `window.__TAURI_INTERNALS__ = {}` to exercise the Tauri code paths.
+- `src/features/settings/sources/SourcesCategory.test.tsx` — component tests mock `src/bindings.ts` and set `window.__TAURI_INTERNALS__ = {}` to exercise the Tauri code paths.
 - Use `vi.mocked(commands.sourceConfigGet).mockResolvedValue(...)` to control what sources are returned per-test.
 
 ### Mock pattern for sources tests
@@ -208,7 +224,7 @@ vi.mock("../bindings", () => ({
 ### Frontend tests
 
 - `src/sources/defaults.ts` exports `JIRA_UNAVAILABLE_MESSAGE` used by `storage.ts` as the browser-only fallback when `isTauri()` is false.
-- `src/settings/SourcesSettings.test.tsx` mocks `jiraSourceTestConnection` to return `Unavailable` with the browser fallback message. The `ConnectionTestStatus` component renders `result.message`, so the test exercises the browser-side rendering path.
+- `src/features/settings/sources/SourcesCategory.test.tsx` mocks `jiraSourceTestConnection` to return `Unavailable` with the browser fallback message. The `ConnectionTestStatus` component renders `result.message`, so the test exercises the browser-side rendering path.
 - Real Jira network and keychain behavior cannot be tested in the browser (Vitest jsdom). Full round-trip connection tests require the desktop app and a real Jira server — this is intentional.
 
 ---
