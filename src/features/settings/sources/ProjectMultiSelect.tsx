@@ -1,4 +1,4 @@
-import type { JiraConnectionProject, JiraProjectFilter } from "../../sources/types";
+import type { JiraConnectionProject, JiraProjectFilter } from "../../../sources/types";
 
 interface ProjectMultiSelectProps {
   availableProjects: JiraConnectionProject[];

@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import type { JiraSourceConfig, SourcesConfig, JiraConnectionTestResult, JiraConnectionProject } from "../../sources/types";
-import { validateJiraDraft, normalizeJiraServerUrl, dedupeAndSortProjects } from "../../sources/validation";
-import { setSourceCredentialSecret, deleteSourceCredential, saveSourcesConfig, testJiraSourceConnection } from "../../sources/storage";
-import { newJiraSourceDraft } from "../../sources/defaults";
+import type { JiraSourceConfig, SourcesConfig, JiraConnectionTestResult, JiraConnectionProject } from "../../../sources/types";
+import { validateJiraDraft, normalizeJiraServerUrl, dedupeAndSortProjects } from "../../../sources/validation";
+import { setSourceCredentialSecret, deleteSourceCredential, saveSourcesConfig, testJiraSourceConnection } from "../../../sources/storage";
+import { newJiraSourceDraft } from "../../../sources/defaults";
+import { Form } from "../../../ui/forms/Form";
+import { Button } from "../../../ui/buttons/Button";
 import { ConnectionTestStatus } from "./ConnectionTestStatus";
 import { ProjectMultiSelect } from "./ProjectMultiSelect";
 
@@ -134,13 +136,27 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
     }
   }
 
-  return (
-    <section aria-labelledby="jira-form-heading" className="space-y-4">
-      <h2 id="jira-form-heading" className="text-lg font-semibold text-text">
-        {mode === "new" ? "Add Jira source" : "Edit Jira source"}
-      </h2>
+  function handleSubmit() {
+    if (canSave && !saving) {
+      void handleSave();
+    }
+  }
 
-      <div className="space-y-3">
+  return (
+    <Form
+      onSubmit={handleSubmit}
+      aria-label={mode === "new" ? "Add Jira source" : "Edit Jira source"}
+    >
+      <header>
+        <h2 className="text-lg font-semibold text-text">
+          {mode === "new" ? "Add Jira source" : `Edit ${existingSource?.name ?? "Jira source"}`}
+        </h2>
+        <p className="text-sm text-subtext">
+          Secrets stay in your OS keychain — never in this form's saved state.
+        </p>
+      </header>
+
+      <Form.Section label="Connection">
         <div>
           <label htmlFor="source-name" className="block text-sm font-medium text-text mb-1">
             Source name <span className="text-subtext font-normal">(optional)</span>
@@ -199,45 +215,42 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
           </p>
         </div>
 
-        <div className="space-y-2">
-          <button
-            type="button"
-            onClick={handleTestConnection}
-            disabled={!canTest || isTesting}
-            className="px-3 py-1.5 rounded border border-border text-sm font-medium text-text hover:bg-surface disabled:opacity-50"
-          >
-            Test connection
-          </button>
-          <ConnectionTestStatus result={testResult} isTesting={isTesting} />
-        </div>
+        <ConnectionTestStatus result={testResult} isTesting={isTesting} />
+      </Form.Section>
 
-        <ProjectMultiSelect
-          availableProjects={availableProjects}
-          selectedProjects={draft.projects}
-          disabled={!projectsEnabled}
-          onChange={(selected) => setDraft((d) => ({ ...d, projects: selected }))}
-        />
-      </div>
+      {projectsEnabled && (
+        <Form.Section label="Projects">
+          <ProjectMultiSelect
+            availableProjects={availableProjects}
+            selectedProjects={draft.projects}
+            disabled={!projectsEnabled}
+            onChange={(selected) => setDraft((d) => ({ ...d, projects: selected }))}
+          />
+        </Form.Section>
+      )}
 
-      {saveError && <p className="text-sm text-red">{saveError}</p>}
+      {saveError && <Form.Error>{saveError}</Form.Error>}
 
-      <div className="flex gap-2">
-        <button
+      <Form.Actions>
+        <Button
           type="button"
-          onClick={handleSave}
-          disabled={!canSave || saving}
-          className="px-3 py-1.5 rounded bg-primary text-on-primary text-sm font-medium disabled:opacity-50"
+          variant="secondary"
+          onClick={handleTestConnection}
+          disabled={!canTest || isTesting}
         >
-          {saving ? "Saving..." : "Save"}
-        </button>
-        <button
+          {isTesting ? "Testing…" : "Test connection"}
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
           onClick={() => { setPendingPat(""); onCancel(); }}
-          className="px-3 py-1.5 rounded text-sm font-medium text-subtext hover:text-text"
         >
           Cancel
-        </button>
-      </div>
-    </section>
+        </Button>
+        <Button type="submit" variant="primary" disabled={!canSave || saving}>
+          {mode === "new" ? "Add source" : "Save changes"}
+        </Button>
+      </Form.Actions>
+    </Form>
   );
 }

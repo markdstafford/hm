@@ -5,7 +5,7 @@ import type { AppPreferences } from "../preferences";
 import { GeneralCategory } from "../features/settings/general/GeneralCategory";
 import { AppearanceCategory } from "../features/settings/appearance/AppearanceCategory";
 import { AiProvidersSettings } from "./AiProvidersSettings";
-import { SourcesSettings } from "./sources/SourcesSettings";
+import { SourcesCategory } from "../features/settings/sources/SourcesCategory";
 import type { SettingsCategory } from "./settingsTypes";
 
 interface SettingsPanelProps {
@@ -90,7 +90,7 @@ export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences, prefe
               ) : category === "appearance" ? (
                 <AppearanceCategory prefs={prefs} onUpdatePreferences={onUpdatePreferences} prefersDark={prefersDark} />
               ) : category === "sources" ? (
-                <SourcesSettings />
+                <SourcesCategory />
               ) : (
                 <AiProvidersSettings />
               )}

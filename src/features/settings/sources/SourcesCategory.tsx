@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { loadSourcesConfig, removeSource } from "../../sources/storage";
-import type { SourcesConfig, JiraSourceConfig } from "../../sources/types";
+import { loadSourcesConfig, removeSource } from "../../../sources/storage";
+import type { SourcesConfig, JiraSourceConfig } from "../../../sources/types";
 import { SourceList } from "./SourceList";
 import { AddSourceFlow } from "./AddSourceFlow";
 import { JiraSourceForm } from "./JiraSourceForm";
 
 type Mode = "list" | "choose-kind" | "new-jira" | "edit-jira";
 
-export function SourcesSettings() {
+export function SourcesCategory() {
   const [config, setConfig] = useState<SourcesConfig>({ version: 1, sources: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
