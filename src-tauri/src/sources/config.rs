@@ -137,14 +137,18 @@ impl SourcesConfig {
 
 fn validate_jira_source(jira: &JiraSourceConfig) -> Result<(), SourceError> {
     if jira.id.is_empty() {
-        return Err(SourceError::InvalidConfig("source id must not be empty".into()));
+        return Err(SourceError::InvalidConfig(
+            "source id must not be empty".into(),
+        ));
     }
     // Source IDs must be valid key components so credential refs like
     // "source.jira.<id>.pat" are always valid keychain keys.
     crate::settings::keys::validate_key(&jira.id)
         .map_err(|e| SourceError::InvalidConfig(format!("invalid source id: {e}")))?;
     if jira.name.is_empty() {
-        return Err(SourceError::InvalidConfig("source name must not be empty".into()));
+        return Err(SourceError::InvalidConfig(
+            "source name must not be empty".into(),
+        ));
     }
 
     // Validate server_url
@@ -240,18 +244,14 @@ pub fn normalize_jira_server_url(input: &str) -> Result<String, SourceError> {
     }
 
     // Non-empty host
-    if parsed.host_str().map_or(true, |h| h.is_empty()) {
+    if parsed.host_str().is_none_or(|h| h.is_empty()) {
         return Err(SourceError::InvalidConfig(format!(
             "Jira server URL must have a non-empty host: {trimmed:?}"
         )));
     }
 
     // Reconstruct without trailing slash
-    let mut result = format!(
-        "{}://{}",
-        parsed.scheme(),
-        parsed.host_str().unwrap_or("")
-    );
+    let mut result = format!("{}://{}", parsed.scheme(), parsed.host_str().unwrap_or(""));
     if let Some(port) = parsed.port() {
         result.push_str(&format!(":{port}"));
     }
@@ -268,21 +268,29 @@ pub fn normalize_jira_server_url(input: &str) -> Result<String, SourceError> {
 
 pub fn load_sources_config(conn: &rusqlite::Connection) -> Result<SourcesConfig, SourceError> {
     let Some(value) = crate::settings::shared::shared_settings_get(conn, SOURCES_CONFIG_KEY)
-        .map_err(|e| SourceError::Storage(e.to_string()))? else { return Ok(SourcesConfig::default()); };
+        .map_err(|e| SourceError::Storage(e.to_string()))?
+    else {
+        return Ok(SourcesConfig::default());
+    };
     reject_secret_shaped_metadata(&value)?;
-    let mut config: SourcesConfig = serde_json::from_value(value)
-        .map_err(|e| SourceError::InvalidConfig(format!("could not parse stored source config: {e}")))?;
+    let mut config: SourcesConfig = serde_json::from_value(value).map_err(|e| {
+        SourceError::InvalidConfig(format!("could not parse stored source config: {e}"))
+    })?;
     config.normalize()?;
     config.validate()?;
     Ok(config)
 }
 
-pub fn save_sources_config(conn: &rusqlite::Connection, config: &SourcesConfig) -> Result<(), SourceError> {
+pub fn save_sources_config(
+    conn: &rusqlite::Connection,
+    config: &SourcesConfig,
+) -> Result<(), SourceError> {
     let mut normalized = config.clone();
     normalized.normalize()?;
     normalized.validate()?;
-    let value = serde_json::to_value(&normalized)
-        .map_err(|e| SourceError::InvalidConfig(format!("could not serialize source config: {e}")))?;
+    let value = serde_json::to_value(&normalized).map_err(|e| {
+        SourceError::InvalidConfig(format!("could not serialize source config: {e}"))
+    })?;
     reject_secret_shaped_metadata(&value)?;
     crate::settings::shared::shared_settings_set(conn, SOURCES_CONFIG_KEY, &value)
         .map_err(|e| SourceError::Storage(e.to_string()))
@@ -395,7 +403,10 @@ mod tests {
     fn rejects_duplicate_source_ids_and_project_keys() {
         let mut cfg = SourcesConfig {
             version: 1,
-            sources: vec![sample_jira_source("src_test"), sample_jira_source("src_test")],
+            sources: vec![
+                sample_jira_source("src_test"),
+                sample_jira_source("src_test"),
+            ],
         };
         assert!(cfg
             .validate()
@@ -412,7 +423,8 @@ mod tests {
 
     #[test]
     fn stored_metadata_must_not_contain_secret_shaped_fields() {
-        let raw = serde_json::json!({"version":1,"sources":[{"kind":"Jira","id":"src_a","pat":"abc"}]});
+        let raw =
+            serde_json::json!({"version":1,"sources":[{"kind":"Jira","id":"src_a","pat":"abc"}]});
         let err = reject_secret_shaped_metadata(&raw).unwrap_err();
         // Error describes a credential-shaped key; should mention "credential"
         assert!(err.to_string().contains("credential"), "got: {err}");
@@ -458,7 +470,10 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_version() {
-        let cfg = SourcesConfig { version: 99, sources: vec![] };
+        let cfg = SourcesConfig {
+            version: 99,
+            sources: vec![],
+        };
         let err = cfg.validate().unwrap_err();
         assert!(err.to_string().contains("unsupported config version"));
     }
@@ -466,15 +481,23 @@ mod tests {
     #[test]
     fn load_missing_sources_config_returns_default() {
         let conn = crate::db::open_in_memory().unwrap();
-        assert_eq!(load_sources_config(&conn).unwrap(), SourcesConfig::default());
+        assert_eq!(
+            load_sources_config(&conn).unwrap(),
+            SourcesConfig::default()
+        );
     }
 
     #[test]
     fn jira_source_round_trips_through_shared_settings_without_secret_value() {
         let conn = crate::db::open_in_memory().unwrap();
-        let cfg = SourcesConfig { version: 1, sources: vec![sample_jira_source("src_roundtrip")] };
+        let cfg = SourcesConfig {
+            version: 1,
+            sources: vec![sample_jira_source("src_roundtrip")],
+        };
         save_sources_config(&conn, &cfg).unwrap();
-        let raw = crate::settings::shared::shared_settings_get(&conn, SOURCES_CONFIG_KEY).unwrap().unwrap();
+        let raw = crate::settings::shared::shared_settings_get(&conn, SOURCES_CONFIG_KEY)
+            .unwrap()
+            .unwrap();
         let raw_text = raw.to_string();
         assert!(raw_text.contains("source.jira.src_roundtrip.pat"));
         assert!(!raw_text.contains("jira-pat-value"));

@@ -2,7 +2,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::sources::jira_errors::JiraApiError;
-use crate::sources::jira_types::{JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraProject, JiraSearchPage};
+use crate::sources::jira_types::{
+    JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraProject, JiraSearchPage,
+};
 
 // ── Secret string ─────────────────────────────────────────────────────────────
 
@@ -198,10 +200,14 @@ impl JiraApiClient {
     ) -> Result<Self, JiraApiError> {
         let base_url = normalize_base_url(&config.base_url)?;
         if config.pat.is_empty() {
-            return Err(JiraApiError::InvalidRequest { message: "PAT is required".into() });
+            return Err(JiraApiError::InvalidRequest {
+                message: "PAT is required".into(),
+            });
         }
         if config.user_agent.trim().is_empty() {
-            return Err(JiraApiError::InvalidRequest { message: "user agent is required".into() });
+            return Err(JiraApiError::InvalidRequest {
+                message: "user agent is required".into(),
+            });
         }
         Ok(Self {
             base_url,
@@ -248,14 +254,15 @@ impl JiraApiClient {
                 let near_limit =
                     rate_limit.near_limit == Some(true) || rate_limit.remaining == Some(0);
                 if near_limit {
-                    self.sleeper.sleep_ms(self.rate_limit_policy.fallback_delay_ms);
+                    self.sleeper
+                        .sleep_ms(self.rate_limit_policy.fallback_delay_ms);
                 }
                 Ok(data)
             }
             Err(ureq::Error::Status(status, resp)) => {
                 // Try Retry-After first; fall back to X-RateLimit-Reset for 429 responses.
-                let retry_after = parse_retry_after_header(resp.header("Retry-After"))
-                    .or_else(|| {
+                let retry_after =
+                    parse_retry_after_header(resp.header("Retry-After")).or_else(|| {
                         if status == 429 {
                             resp.header("X-RateLimit-Reset")
                                 .and_then(|v| v.trim().parse::<u64>().ok())
@@ -293,7 +300,10 @@ impl JiraApiClient {
     fn delay_for_attempt(&self, attempt_index: usize, err: &JiraApiError) -> u64 {
         // If Retry-After is present, honor it (capped at max_retry_after_seconds)
         if let Some(retry_after) = err.retry_after_duration() {
-            let max_ms = self.rate_limit_policy.max_retry_after_seconds.saturating_mul(1_000);
+            let max_ms = self
+                .rate_limit_policy
+                .max_retry_after_seconds
+                .saturating_mul(1_000);
             return (retry_after.as_millis() as u64).min(max_ms);
         }
         // For rate-limited responses without Retry-After, use conservative fallback delay
@@ -330,7 +340,10 @@ impl JiraApiClient {
         let mut serializer = url::form_urlencoded::Serializer::new(String::new());
         serializer.append_pair("jql", &request.jql);
         serializer.append_pair("startAt", &request.start_at.to_string());
-        serializer.append_pair("maxResults", &clamp_page_size(request.max_results).to_string());
+        serializer.append_pair(
+            "maxResults",
+            &clamp_page_size(request.max_results).to_string(),
+        );
         self.get_json(&format!("/rest/api/2/search?{}", serializer.finish()))
     }
 
@@ -353,7 +366,8 @@ impl JiraApiClient {
                 jql: request.jql.clone(),
             })?;
             let returned = page.issues.len();
-            let stop = should_stop_pagination(page.start_at, page.max_results, returned, page.total);
+            let stop =
+                should_stop_pagination(page.start_at, page.max_results, returned, page.total);
             issues.extend(page.issues);
             pages_fetched += 1;
             if stop {
@@ -449,7 +463,9 @@ struct JiraRateLimitHeaders {
 
 fn parse_rate_limit_headers(resp: &ureq::Response) -> JiraRateLimitHeaders {
     JiraRateLimitHeaders {
-        limit: resp.header("X-RateLimit-Limit").and_then(|v| v.parse().ok()),
+        limit: resp
+            .header("X-RateLimit-Limit")
+            .and_then(|v| v.parse().ok()),
         remaining: resp
             .header("X-RateLimit-Remaining")
             .and_then(|v| v.parse().ok()),
@@ -484,7 +500,7 @@ fn normalize_base_url(input: &str) -> Result<String, JiraApiError> {
         || parsed.password().is_some()
         || parsed.query().is_some()
         || parsed.fragment().is_some()
-        || parsed.host_str().map_or(true, str::is_empty)
+        || parsed.host_str().is_none_or(str::is_empty)
     {
         return Err(JiraApiError::InvalidBaseUrl);
     }
@@ -522,10 +538,7 @@ mod tests {
         base_url
     }
 
-    fn json_response(
-        status: u16,
-        body: &'static str,
-    ) -> Response<std::io::Cursor<Vec<u8>>> {
+    fn json_response(status: u16, body: &'static str) -> Response<std::io::Cursor<Vec<u8>>> {
         Response::from_string(body)
             .with_status_code(StatusCode(status))
             .with_header(
@@ -545,9 +558,11 @@ mod tests {
 
     #[test]
     fn constructs_from_normalized_base_url_and_redacts_pat_debug() {
-        let client =
-            JiraApiClient::new(config(" https://jira.example.invalid/jira/ ", "secret-jira-pat-123"))
-                .unwrap();
+        let client = JiraApiClient::new(config(
+            " https://jira.example.invalid/jira/ ",
+            "secret-jira-pat-123",
+        ))
+        .unwrap();
         assert_eq!(
             client.base_url_for_tests(),
             "https://jira.example.invalid/jira"
@@ -849,7 +864,12 @@ mod tests {
     impl RecordingSleeper {
         fn new() -> (Self, Arc<Mutex<Vec<u64>>>) {
             let sleeps = Arc::new(Mutex::new(Vec::new()));
-            (Self { sleeps: Arc::clone(&sleeps) }, sleeps)
+            (
+                Self {
+                    sleeps: Arc::clone(&sleeps),
+                },
+                sleeps,
+            )
         }
     }
 
@@ -864,11 +884,18 @@ mod tests {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", server.server_addr());
         thread::spawn(move || {
-            server.recv().unwrap().respond(json_response(503, "{}")).unwrap();
             server
                 .recv()
                 .unwrap()
-                .respond(json_response(200, include_str!("fixtures/jira_projects.json")))
+                .respond(json_response(503, "{}"))
+                .unwrap();
+            server
+                .recv()
+                .unwrap()
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_projects.json"),
+                ))
                 .unwrap();
         });
         let (sleeper, recorded_sleeps) = RecordingSleeper::new();
@@ -884,7 +911,11 @@ mod tests {
             .unwrap();
         assert_eq!(projects.len(), 2);
         let sleeps = recorded_sleeps.lock().unwrap().clone();
-        assert_eq!(sleeps, vec![25], "expected exactly one delay of 25ms after first 503");
+        assert_eq!(
+            sleeps,
+            vec![25],
+            "expected exactly one delay of 25ms after first 503"
+        );
     }
 
     #[test]
@@ -895,10 +926,13 @@ mod tests {
                 .unwrap();
         });
         let (sleeper, recorded_sleeps) = RecordingSleeper::new();
-        let err = JiraApiClient::new_with_sleeper(config(&base_url, "secret-jira-pat-123"), Arc::new(sleeper))
-            .unwrap()
-            .list_projects()
-            .unwrap_err();
+        let err = JiraApiClient::new_with_sleeper(
+            config(&base_url, "secret-jira-pat-123"),
+            Arc::new(sleeper),
+        )
+        .unwrap()
+        .list_projects()
+        .unwrap_err();
         assert_eq!(err, JiraApiError::Forbidden);
         assert!(
             recorded_sleeps.lock().unwrap().is_empty(),
@@ -951,14 +985,17 @@ mod tests {
             server
                 .recv()
                 .unwrap()
-                .respond(json_response(200, include_str!("fixtures/jira_projects.json")))
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_projects.json"),
+                ))
                 .unwrap();
         });
         let (sleeper, recorded_sleeps) = RecordingSleeper::new();
         let mut cfg = config(&base_url, "secret-jira-pat-123");
         cfg.retry_policy = RetryPolicy {
             max_attempts: 2,
-            base_delay_ms: 5,    // Small to confirm fallback overrides base
+            base_delay_ms: 5, // Small to confirm fallback overrides base
             max_delay_ms: 10,
         };
         cfg.rate_limit_policy = RateLimitPolicy {
@@ -992,7 +1029,10 @@ mod tests {
             server
                 .recv()
                 .unwrap()
-                .respond(json_response(200, include_str!("fixtures/jira_projects.json")))
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_projects.json"),
+                ))
                 .unwrap();
         });
         let (sleeper, recorded_sleeps) = RecordingSleeper::new();
@@ -1009,7 +1049,11 @@ mod tests {
         assert_eq!(projects.len(), 2);
         let sleeps = recorded_sleeps.lock().unwrap().clone();
         // Should sleep for 1000ms (Retry-After: 1 second)
-        assert_eq!(sleeps, vec![1_000], "expected one sleep of 1000ms for Retry-After: 1");
+        assert_eq!(
+            sleeps,
+            vec![1_000],
+            "expected one sleep of 1000ms for Retry-After: 1"
+        );
     }
 
     #[test]
@@ -1022,14 +1066,15 @@ mod tests {
             let response_429 = Response::from_string(r#"{"errorMessages":["rate limited"]}"#)
                 .with_status_code(StatusCode(429))
                 // No Retry-After — only X-RateLimit-Reset
-                .with_header(
-                    Header::from_bytes(&b"X-RateLimit-Reset"[..], &b"3"[..]).unwrap(),
-                );
+                .with_header(Header::from_bytes(&b"X-RateLimit-Reset"[..], &b"3"[..]).unwrap());
             server.recv().unwrap().respond(response_429).unwrap();
             server
                 .recv()
                 .unwrap()
-                .respond(json_response(200, include_str!("fixtures/jira_projects.json")))
+                .respond(json_response(
+                    200,
+                    include_str!("fixtures/jira_projects.json"),
+                ))
                 .unwrap();
         });
         let (sleeper, recorded_sleeps) = RecordingSleeper::new();
@@ -1085,7 +1130,11 @@ mod tests {
             .unwrap()
             .list_projects()
             .unwrap();
-        assert_eq!(projects.len(), 2, "should still return data after near-limit delay");
+        assert_eq!(
+            projects.len(),
+            2,
+            "should still return data after near-limit delay"
+        );
         let sleeps = recorded_sleeps.lock().unwrap().clone();
         assert_eq!(
             sleeps,
@@ -1106,9 +1155,7 @@ mod tests {
                 .with_header(
                     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
                 )
-                .with_header(
-                    Header::from_bytes(&b"X-RateLimit-Remaining"[..], &b"0"[..]).unwrap(),
-                );
+                .with_header(Header::from_bytes(&b"X-RateLimit-Remaining"[..], &b"0"[..]).unwrap());
             server.recv().unwrap().respond(response).unwrap();
         });
         let (sleeper, recorded_sleeps) = RecordingSleeper::new();
@@ -1121,7 +1168,11 @@ mod tests {
             .unwrap()
             .list_projects()
             .unwrap();
-        assert_eq!(projects.len(), 2, "should still return data after near-limit delay");
+        assert_eq!(
+            projects.len(),
+            2,
+            "should still return data after near-limit delay"
+        );
         let sleeps = recorded_sleeps.lock().unwrap().clone();
         assert_eq!(
             sleeps,
@@ -1130,4 +1181,3 @@ mod tests {
         );
     }
 }
-
