@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { AppPreferences } from "../preferences";
 import { GeneralCategory } from "../features/settings/general/GeneralCategory";
 import { AppearanceCategory } from "../features/settings/appearance/AppearanceCategory";
-import { AiProvidersSettings } from "./AiProvidersSettings";
+import { AiProvidersCategory } from "../features/settings/ai-providers/AiProvidersCategory";
 import { SourcesCategory } from "../features/settings/sources/SourcesCategory";
 import type { SettingsCategory } from "./settingsTypes";
 
@@ -92,7 +92,7 @@ export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences, prefe
               ) : category === "sources" ? (
                 <SourcesCategory />
               ) : (
-                <AiProvidersSettings />
+                <AiProvidersCategory />
               )}
             </div>
 
