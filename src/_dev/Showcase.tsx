@@ -246,10 +246,20 @@ export function Showcase() {
       </Section>
 
       <Section title="Forms">
-        <Card caption="TextField"><TextField aria-label="Demo" placeholder="Type…" /></Card>
+        <Card caption="TextField">
+          <div className="flex flex-col gap-2 w-full">
+            <TextField aria-label="Demo" placeholder="Type…" />
+            <TextField aria-label="Invalid demo" placeholder="Invalid" invalid defaultValue="bad input" />
+          </div>
+        </Card>
         <Card caption="Field">
           <Field label="Email" help="We never share.">
             {({ id, describedBy }) => <TextField id={id} aria-describedby={describedBy} aria-label="Email" />}
+          </Field>
+        </Card>
+        <Card caption="Field with error">
+          <Field label="Email" error="Looks like that's not an email">
+            {({ id, describedBy }) => <TextField id={id} aria-describedby={describedBy} invalid defaultValue="not-an-email" />}
           </Field>
         </Card>
         <Card caption="Checkbox"><Checkbox label="Notify me" /></Card>
