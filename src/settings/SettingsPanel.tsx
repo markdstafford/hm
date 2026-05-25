@@ -2,8 +2,8 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { useState } from "react";
 import type { AppPreferences } from "../preferences";
-import { GeneralSettings } from "./GeneralSettings";
-import { AppearanceSettings } from "./AppearanceSettings";
+import { GeneralCategory } from "../features/settings/general/GeneralCategory";
+import { AppearanceCategory } from "../features/settings/appearance/AppearanceCategory";
 import { AiProvidersSettings } from "./AiProvidersSettings";
 import { SourcesSettings } from "./sources/SourcesSettings";
 import type { SettingsCategory } from "./settingsTypes";
@@ -86,9 +86,9 @@ export function SettingsPanel({ open, onClose, prefs, onUpdatePreferences, prefe
             {/* Content area */}
             <div className="flex-1 overflow-y-auto p-6">
               {category === "general" ? (
-                <GeneralSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} />
+                <GeneralCategory prefs={prefs} onUpdatePreferences={onUpdatePreferences} />
               ) : category === "appearance" ? (
-                <AppearanceSettings prefs={prefs} onUpdatePreferences={onUpdatePreferences} prefersDark={prefersDark} />
+                <AppearanceCategory prefs={prefs} onUpdatePreferences={onUpdatePreferences} prefersDark={prefersDark} />
               ) : category === "sources" ? (
                 <SourcesSettings />
               ) : (
