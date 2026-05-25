@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>hm</title>
+    <style>
+      /* Tailwind v4 / Lightning CSS strips non-standard CSS properties, so we
+         inject the Tauri drag-region rules here where they survive. */
+      [data-tauri-drag-region] {
+        -webkit-app-region: drag;
+      }
+      .titlebar-no-drag,
+      .titlebar-no-drag * {
+        -webkit-app-region: no-drag;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

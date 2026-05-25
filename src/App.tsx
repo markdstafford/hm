@@ -1,24 +1,36 @@
-import { Settings } from "lucide-react";
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Inbox, Settings as SettingsIcon, PanelLeft, Sparkles, MessageSquare } from "lucide-react";
 import { commands, type AppStatus } from "./bindings";
-import { type AppPreferences, DEFAULT_PREFERENCES, resolveTheme, resolveCatppuccinAccent } from "./preferences";
+import {
+  type AppPreferences,
+  DEFAULT_PREFERENCES,
+  resolveTheme,
+  resolveCatppuccinAccent,
+} from "./preferences";
 import { applyColorScheme, applyFonts, getSystemPrefersDark } from "./theme";
 import { loadPreferences, savePreferences } from "./settings/settingsStorage";
 import { restoreWindowState, registerWindowListeners } from "./windowState";
 import { SettingsPanel } from "./settings/SettingsPanel";
+import { AppShell } from "./shell/AppShell";
+import { useShortcut } from "./shell/useShortcut";
+import { IconButton } from "./ui/buttons/IconButton";
+import { NavSection } from "./ui/sidebar/NavSection";
+import { NavItem } from "./ui/sidebar/NavItem";
+import { ScopeHeader } from "./ui/sidebar/ScopeHeader";
+import { Showcase } from "./_dev/Showcase";
+import { InboxPage } from "./features/inbox/InboxPage";
 
 function App() {
   const [prefs, setPrefs] = useState<AppPreferences>(DEFAULT_PREFERENCES);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showShowcase, setShowShowcase] = useState(false);
   const [prefersDark, setPrefersDark] = useState(getSystemPrefersDark);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
 
   const prefsRef = useRef<AppPreferences>(DEFAULT_PREFERENCES);
-  useEffect(() => {
-    prefsRef.current = prefs;
-  }, [prefs]);
+  useEffect(() => { prefsRef.current = prefs; }, [prefs]);
 
   useEffect(() => {
     loadPreferences().then((loaded) => {
@@ -27,7 +39,6 @@ function App() {
     });
   }, []);
 
-  // Keep prefersDark in sync with OS for downstream consumers (e.g. settings preview)
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => setPrefersDark(mq.matches);
@@ -35,16 +46,14 @@ function App() {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  // Apply color scheme whenever appearance preferences change
   useEffect(() => {
-    const prefersDark = getSystemPrefersDark();
-    const resolved = resolveTheme(prefs, prefersDark);
+    const prefersDarkNow = getSystemPrefersDark();
+    const resolved = resolveTheme(prefs, prefersDarkNow);
     const accent = resolveCatppuccinAccent(prefs);
     applyColorScheme({ ...resolved, accent });
 
     const mode = prefs.appearance?.themeMode ?? "system";
     if (mode !== "system") return;
-
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
       const r = resolveTheme(prefs, mq.matches);
@@ -63,7 +72,7 @@ function App() {
   useEffect(() => {
     applyFonts(
       prefs.appearance?.uiFont ?? DEFAULT_PREFERENCES.appearance!.uiFont!,
-      prefs.appearance?.monoFont ?? DEFAULT_PREFERENCES.appearance!.monoFont!
+      prefs.appearance?.monoFont ?? DEFAULT_PREFERENCES.appearance!.monoFont!,
     );
   }, [prefs.appearance?.uiFont, prefs.appearance?.monoFont]);
 
@@ -75,21 +84,12 @@ function App() {
 
   useEffect(() => {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
-
     let cleanup: (() => void) | null = null;
-
     registerWindowListeners(async (winPatch) => {
       const result = await savePreferences(prefsRef.current, winPatch);
-      if (result.ok) {
-        setPrefs(result.next);
-      }
-    }).then((fn) => {
-      cleanup = fn;
-    });
-
-    return () => {
-      cleanup?.();
-    };
+      if (result.ok) setPrefs(result.next);
+    }).then((fn) => { cleanup = fn; });
+    return () => { cleanup?.(); };
   }, []);
 
   const updatePreferences = useCallback(async (patch: Partial<AppPreferences>) => {
@@ -101,48 +101,57 @@ function App() {
     }
   }, [prefs]);
 
+  useShortcut("⌘+shift+d", () => setShowShowcase((v) => !v), { allowInForm: true });
+
   const handleSettingsOpen = () => setSettingsOpen(true);
   const handleSettingsClose = () => {
     setSettingsOpen(false);
     setTimeout(() => settingsOpenerRef.current?.focus(), 0);
   };
 
+  const page = showShowcase
+    ? { titleBar: <span className="text-sm text-text">Showcase</span>, header: null as React.ReactNode, content: <Showcase /> }
+    : InboxPage;
+
   return (
-    <main className="min-h-screen bg-background text-text flex flex-col items-center justify-center gap-6 font-sans">
-      <h1 className="text-lg font-semibold tracking-tight">hello hm</h1>
-
-      <p className="text-sm text-subtext">
-        Catppuccin &middot; sapphire accent
-      </p>
-
-      <div className="flex items-center gap-3">
-        <div className="h-control-base px-4 rounded bg-primary text-on-primary text-sm flex items-center">
-          Primary button
-        </div>
-        <div className="h-control-base px-4 rounded border border-border text-sm flex items-center">
-          Secondary button
-        </div>
-      </div>
-
-      <button
-        ref={settingsOpenerRef}
-        onClick={handleSettingsOpen}
-        aria-label="Open settings"
-        className="flex items-center gap-2 text-sm text-subtext hover:text-text transition-colors"
-      >
-        <Settings size={14} aria-hidden={true} />
-        Settings
-      </button>
+    <>
+      <AppShell
+        sidebarHeader={<ScopeHeader name="Personal" />}
+        sidebarContent={
+          <NavSection label="Personal">
+            <NavItem label="Inbox" count={0} icon={<Inbox size={12} />} active />
+          </NavSection>
+        }
+        mainTitleBarStart={page.titleBar}
+        mainTitleBarEnd={
+          <button
+            ref={settingsOpenerRef}
+            onClick={handleSettingsOpen}
+            aria-label="Open settings"
+            className="p-1 rounded text-subtext hover:text-text"
+          >
+            <SettingsIcon size={12} aria-hidden={true} />
+          </button>
+        }
+        mainHeader={page.header ?? undefined}
+        mainContent={page.content}
+        footerLeft={({ sidebarVisible, toggleSidebar }) => (
+          <IconButton label="Toggle sidebar" active={sidebarVisible} onClick={toggleSidebar}>
+            <PanelLeft size={12} />
+          </IconButton>
+        )}
+        footerCenter={status ? <span className="font-mono">v{status.version} · ready: {String(status.ready)}</span> : null}
+        footerRight={
+          <>
+            <IconButton label="AI assistant (coming soon)" disabled><Sparkles size={12} /></IconButton>
+            <IconButton label="Chat (coming soon)" disabled><MessageSquare size={12} /></IconButton>
+          </>
+        }
+      />
 
       {saveError && (
-        <p role="alert" className="text-xs text-red">
+        <p role="alert" className="fixed bottom-12 left-4 text-xs text-red bg-mantle px-2 py-1 rounded border border-red">
           {saveError}
-        </p>
-      )}
-
-      {status && (
-        <p className="text-xs text-subtext font-mono">
-          v{status.version} · ready: {String(status.ready)}
         </p>
       )}
 
@@ -153,7 +162,7 @@ function App() {
         onUpdatePreferences={updatePreferences}
         prefersDark={prefersDark}
       />
-    </main>
+    </>
   );
 }
 

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import App from "./App";
@@ -25,9 +25,9 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 describe("App", () => {
-  it("renders hello hm heading", () => {
+  it("renders the Inbox empty state", () => {
     render(<App />);
-    expect(screen.getByRole("heading", { name: /hello hm/i })).toBeInTheDocument();
+    expect(screen.getByText(/inbox is clear/i)).toBeInTheDocument();
   });
 
   it("renders the settings opener button", () => {
@@ -46,5 +46,13 @@ describe("App", () => {
     const { container } = render(<App />);
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+});
+
+describe("App / showcase shortcut", () => {
+  it("mounts the showcase when ⌘+Shift+D is pressed", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "d", metaKey: true, shiftKey: true });
+    expect(screen.getByRole("heading", { name: "Design system showcase" })).toBeInTheDocument();
   });
 });
