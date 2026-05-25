@@ -1,1 +1,4 @@
+pub mod ids;
+pub mod people;
+pub mod repository;
 pub mod schema;
