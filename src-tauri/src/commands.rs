@@ -258,15 +258,14 @@ use crate::sources::jira_ingestion::{
 };
 
 /// Active ingestion runs, keyed by Jira `source_id`. A cancellation flag is
-/// inserted while `jira_issue_ingestion_run` is in progress and removed when
-/// the call returns (via an RAII guard). `jira_issue_ingestion_cancel` reads
-/// from this map.
+/// inserted while `jira_issue_ingestion_run` has spawned a worker, and
+/// removed when the worker thread exits. `jira_issue_ingestion_cancel` reads
+/// from this map to trip the flag the worker polls between HTTP fetches.
 ///
-/// In v1 the run command blocks the calling thread for the duration of the
-/// ingestion, so cancellation only fires when another command runs
-/// concurrently. Tauri commands run on a thread pool so this is fine in
-/// practice, though the cooperative cancel is only effective between page
-/// fetches inside `ingest_project`.
+/// The run command spawns a `std::thread::spawn` worker and returns
+/// immediately, so the JS-side IPC `await` resolves in milliseconds even for
+/// multi-thousand-issue projects. Cooperative cancel is effective between
+/// page fetches inside `ingest_project`.
 #[derive(Default)]
 pub struct ActiveIngestionRuns(
     pub Mutex<std::collections::HashMap<String, Arc<CancellationFlag>>>,
@@ -334,11 +333,17 @@ fn source_system_id_for(source_id: &str) -> String {
 pub fn jira_issue_ingestion_run(
     source_id: String,
     options: Option<JiraIngestionRunOptions>,
-    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
-    store: tauri::State<'_, ManagedSecretStore>,
-    active: tauri::State<'_, ActiveIngestionRuns>,
+    app: tauri::AppHandle,
 ) -> Result<JiraIssueIngestionRunResult, String> {
-    // 1. Load source config under DB lock and release it before HTTP work.
+    use tauri::Manager;
+
+    // 1. Synchronous setup: resolve config, PAT, build client, register the
+    //    cancellation flag, and upsert the source_systems row. All DB locks
+    //    taken here are short.
+    let db = app.state::<Mutex<rusqlite::Connection>>();
+    let store = app.state::<ManagedSecretStore>();
+    let active = app.state::<ActiveIngestionRuns>();
+
     let (source, project_keys) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let cfg = load_sources_config(&conn).map_err(|e| e.to_string())?;
@@ -357,7 +362,6 @@ pub fn jira_issue_ingestion_run(
         (source, keys)
     };
 
-    // 2. Load PAT from keychain (no DB lock held).
     let credential_ref = match &source.auth {
         JiraAuthConfig::Pat { credential_ref } => credential_ref.clone(),
     };
@@ -369,7 +373,6 @@ pub fn jira_issue_ingestion_run(
             "Authentication failed: Replace the Jira token and try again.".to_string()
         })?;
 
-    // 3. Build the Jira client.
     let client = JiraApiClient::new(JiraApiClientConfig {
         base_url: source.server_url.clone(),
         pat,
@@ -379,7 +382,6 @@ pub fn jira_issue_ingestion_run(
     })
     .map_err(|e| e.to_string())?;
 
-    // 4. Insert cancellation flag (refusing concurrent runs per source).
     let cancellation = Arc::new(CancellationFlag::new());
     {
         let mut active_map = active.0.lock().map_err(|e| e.to_string())?;
@@ -389,24 +391,6 @@ pub fn jira_issue_ingestion_run(
         active_map.insert(source_id.clone(), cancellation.clone());
     }
 
-    // RAII guard so the flag is removed even on panic / early return.
-    struct ActiveGuard<'a> {
-        active: &'a ActiveIngestionRuns,
-        source_id: String,
-    }
-    impl<'a> Drop for ActiveGuard<'a> {
-        fn drop(&mut self) {
-            if let Ok(mut map) = self.active.0.lock() {
-                map.remove(&self.source_id);
-            }
-        }
-    }
-    let _guard = ActiveGuard {
-        active: &active,
-        source_id: source_id.clone(),
-    };
-
-    // 5. Ensure source_systems row exists.
     let source_system_id = source_system_id_for(&source_id);
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -425,54 +409,81 @@ pub fn jira_issue_ingestion_run(
         .map_err(|e| e.to_string())?;
     }
 
-    // 6. Run each project. The service releases the SQLite mutex between
-    // HTTP fetches (it takes the lock only for short write batches), so
-    // status/cancel commands can read state and trip the cancellation flag
-    // while the worker is blocked on a network call.
-    let service = match options.as_ref() {
-        Some(opts) if opts.fetch_remote_links => {
-            JiraIssueIngestionService::with_options(
+    // 2. Spawn the long-running per-project ingestion loop on a worker
+    //    thread so the calling Tauri IPC thread returns immediately. The
+    //    worker re-acquires Tauri state via the AppHandle clone. The DB
+    //    mutex is taken only for short write batches inside the service,
+    //    so status/cancel commands can run concurrently and the UI stays
+    //    responsive.
+    let app_for_worker = app.clone();
+    let source_id_for_worker = source_id.clone();
+    let source_system_id_for_worker = source_system_id.clone();
+    let projects = source.projects.clone();
+    let project_keys_for_worker = project_keys;
+    let cancellation_for_worker = cancellation.clone();
+    let opts = options.clone();
+
+    std::thread::spawn(move || {
+        let db = app_for_worker.state::<Mutex<rusqlite::Connection>>();
+        let db_access = crate::ingestion::db::MutexDbAccess(&db);
+        let service = match opts.as_ref() {
+            Some(o) if o.fetch_remote_links => JiraIssueIngestionService::with_options(
                 &client,
                 crate::sources::jira_ingestion::JiraIngestionOptions {
                     fetch_remote_links: true,
                     ..Default::default()
                 },
-            )
-        }
-        _ => JiraIssueIngestionService::new(&client),
-    };
-    let db_access = crate::ingestion::db::MutexDbAccess(&db);
-    let mut last_summary = None;
-    for project_key in &project_keys {
-        if cancellation.is_cancelled() {
-            break;
-        }
-        let project_name = source
-            .projects
-            .iter()
-            .find(|p| &p.key == project_key)
-            .and_then(|p| p.name.as_deref());
+            ),
+            _ => JiraIssueIngestionService::new(&client),
+        };
 
-        let now = now_utc_rfc3339();
-        let summary = service
-            .ingest_project(
+        for project_key in &project_keys_for_worker {
+            if cancellation_for_worker.is_cancelled() {
+                break;
+            }
+            let project_name = projects
+                .iter()
+                .find(|p| &p.key == project_key)
+                .and_then(|p| p.name.as_deref());
+            let now = now_utc_rfc3339();
+            // `ingest_project` manages its own start_run / finish_run, so on
+            // a per-project error the run row is already marked partial /
+            // failed in the database. We log via eprintln for dev visibility
+            // and continue with the next project.
+            if let Err(err) = service.ingest_project(
                 &db_access,
-                &source_system_id,
+                &source_system_id_for_worker,
                 project_key,
                 project_name,
                 &now,
-                &cancellation,
-            )
-            .map_err(|e| e.to_string())?;
-        last_summary = Some(summary);
-    }
+                &cancellation_for_worker,
+            ) {
+                eprintln!(
+                    "ingestion worker: project {project_key} failed: {err}"
+                );
+            }
+        }
 
-    let summary = last_summary.ok_or_else(|| "No projects ingested".to_string())?;
+        // Cleanup: drop the cancellation flag from the active map so a
+        // subsequent run for this source can start.
+        {
+            let active = app_for_worker.state::<ActiveIngestionRuns>();
+            let lock_result = active.0.lock();
+            if let Ok(mut map) = lock_result {
+                map.remove(&source_id_for_worker);
+            }
+        }
+    });
+
+    // 3. Return immediately. The JS side polls
+    //    `jira_issue_ingestion_progress` to observe the worker's progress
+    //    and obtain the real run_id once the first ingestion_runs row is
+    //    inserted by the service.
     Ok(JiraIssueIngestionRunResult {
-        run_id: summary.run_id,
-        status: summary.status,
-        saved_issues: summary.saved_issues,
-        total_issues: summary.total_issues,
+        run_id: String::new(),
+        status: "started".to_string(),
+        saved_issues: 0,
+        total_issues: None,
     })
 }
 
@@ -970,6 +981,20 @@ mod tests {
         .into_iter()
         .collect();
         assert_eq!(keys, expected);
+    }
+
+    #[test]
+    fn run_options_with_fetch_remote_links_propagate_to_service() {
+        // Smoke test that JiraIngestionRunOptions is plumbed through specta
+        // correctly. Full end-to-end runs require Tauri state (AppHandle),
+        // so this only covers the serde wire shape.
+        let opts = JiraIngestionRunOptions {
+            fetch_remote_links: true,
+        };
+        let json = serde_json::to_string(&opts).unwrap();
+        assert!(json.contains("\"fetch_remote_links\":true"));
+        let parsed: JiraIngestionRunOptions = serde_json::from_str(&json).unwrap();
+        assert!(parsed.fetch_remote_links);
     }
 
     #[test]

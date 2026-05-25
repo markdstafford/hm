@@ -1,4 +1,5 @@
 import type { JiraIssueIngestionProgress } from "../../../bindings";
+import { formatLocalDateTime } from "../../../lib/formatDateTime";
 import type { SourceConfig } from "../../../sources/types";
 import { Button } from "../../../ui/buttons/Button";
 import { Card } from "../../../ui/layout/Card";
@@ -115,7 +116,7 @@ export function SourceList({
                       )}
                       {progress?.last_successful_issue_sync_at && (
                         <div className="text-xs text-subtext">
-                          Last successful issue sync: {progress.last_successful_issue_sync_at}
+                          Last successful issue sync: {formatLocalDateTime(progress.last_successful_issue_sync_at)}
                         </div>
                       )}
                       {progress?.error_summary && (
