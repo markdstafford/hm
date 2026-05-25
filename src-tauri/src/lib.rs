@@ -1,6 +1,8 @@
 pub mod ai;
 pub mod commands;
 pub mod db;
+pub mod ingestion;
+pub mod issues;
 pub mod settings;
 pub mod sources;
 
