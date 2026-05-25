@@ -1060,6 +1060,408 @@ pub fn project_jira_issue(
     })
 }
 
+// ── Ingestion service ──────────────────────────────────────────────────────────
+
+use crate::ingestion::errors::{IngestionError, IngestionErrorCategory};
+use crate::ingestion::runs::{
+    finish_run, read_cursor, start_run, update_progress, upsert_cursor,
+};
+use crate::sources::jira_client::{JiraApiClient, JiraSearchRequest};
+use crate::sources::jira_errors::JiraApiError;
+use crate::sources::jira_types::JiraSearchPage;
+
+/// Trait seam that abstracts over `JiraApiClient::search_issues_page` so
+/// `JiraIssueIngestionService` can be exercised against an in-memory stub.
+pub trait JiraIssueClient {
+    fn search_issues_page(
+        &self,
+        request: JiraSearchRequest,
+    ) -> Result<JiraSearchPage, JiraApiError>;
+}
+
+impl JiraIssueClient for JiraApiClient {
+    fn search_issues_page(
+        &self,
+        request: JiraSearchRequest,
+    ) -> Result<JiraSearchPage, JiraApiError> {
+        JiraApiClient::search_issues_page(self, request)
+    }
+}
+
+/// Cooperative cancellation flag shared between the service and any caller
+/// that wishes to interrupt a long-running ingestion.
+pub struct CancellationFlag {
+    cancelled: std::sync::atomic::AtomicBool,
+}
+
+impl CancellationFlag {
+    pub fn new() -> Self {
+        Self {
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    pub fn request_cancel(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Default for CancellationFlag {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Summary returned by `ingest_project`.
+#[derive(Debug, Clone)]
+pub struct JiraIssueIngestionSummary {
+    pub run_id: String,
+    /// `"succeeded" | "partial" | "cancelled" | "failed"`.
+    pub status: String,
+    pub pages: u32,
+    pub saved_issues: u32,
+    pub total_issues: Option<u32>,
+}
+
+/// Service that paginates a Jira search and persists results via
+/// `project_jira_issue`.
+///
+/// The service keeps no per-call state of its own; it accepts a borrowed
+/// `&Connection` so the caller controls the lock scope and transactions.
+pub struct JiraIssueIngestionService<'a, C> {
+    pub client: &'a C,
+    pub page_size: u32,
+    pub overlap_seconds: i64,
+}
+
+impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
+    pub fn new(client: &'a C) -> Self {
+        Self {
+            client,
+            page_size: 50,
+            overlap_seconds: 60,
+        }
+    }
+
+    pub fn ingest_project(
+        &self,
+        conn: &Connection,
+        source_system_id: &str,
+        project_key: &str,
+        project_name: Option<&str>,
+        now_utc: &str,
+        cancellation: &CancellationFlag,
+    ) -> Result<JiraIssueIngestionSummary, IngestionError> {
+        let run_id = stable_id("run", &[source_system_id, project_key, now_utc]);
+        let requested_projects_json =
+            serde_json::json!([project_key]).to_string();
+
+        start_run(
+            conn,
+            &run_id,
+            source_system_id,
+            JIRA_ISSUE_CONNECTOR,
+            now_utc,
+            &requested_projects_json,
+        )?;
+
+        // Best-effort: seed AMP field mappings up front. If seeding fails we
+        // surface it as a storage error and finalize the run as failed.
+        if let Err(err) = seed_amp_field_mappings(conn, source_system_id, project_key, now_utc) {
+            let ie: IngestionError = err.into();
+            let _ = finish_run(
+                conn,
+                &run_id,
+                now_utc,
+                "failed",
+                "{}",
+                Some(&format!("{ie}")),
+            );
+            return Err(ie);
+        }
+
+        // Read existing cursor (if any) and build JQL.
+        let cursor_key = format!("project:{}:issues", project_key);
+        let cursor = read_cursor(conn, source_system_id, JIRA_ISSUE_CONNECTOR, &cursor_key)?;
+        let cursor_last_updated: Option<String> = cursor.as_ref().and_then(|row| {
+            serde_json::from_str::<serde_json::Value>(&row.cursor_value)
+                .ok()
+                .and_then(|v| {
+                    v.get("last_updated")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                })
+        });
+        let overlap_adjusted: Option<String> = cursor_last_updated
+            .as_deref()
+            .and_then(|ts| subtract_seconds_rfc3339(ts, self.overlap_seconds));
+
+        let jql = match overlap_adjusted.as_deref() {
+            Some(filter_ts) => format!(
+                "project = \"{}\" AND updated >= \"{}\" ORDER BY updated ASC, key ASC",
+                project_key, filter_ts
+            ),
+            None => format!(
+                "project = \"{}\" ORDER BY updated ASC, key ASC",
+                project_key
+            ),
+        };
+
+        let mut start_at: u32 = 0;
+        let mut pages: u32 = 0;
+        let mut saved_issues: u32 = 0;
+        let mut total_issues: Option<u32> = None;
+        let mut max_updated_seen: Option<String> = None;
+        let mut any_page_persisted = false;
+        let mut cancelled_mid_loop = false;
+
+        loop {
+            if cancellation.is_cancelled() {
+                cancelled_mid_loop = true;
+                break;
+            }
+
+            let request = JiraSearchRequest::new(jql.clone())
+                .with_max_results(self.page_size)
+                .with_fields(amp_search_fields())
+                .with_start_at(start_at);
+
+            let page = match self.client.search_issues_page(request) {
+                Ok(p) => p,
+                Err(err) => {
+                    let ie: IngestionError = err.into();
+                    let counts_json = serde_json::json!({
+                        "saved_issues": saved_issues,
+                        "total_issues": total_issues,
+                        "pages": pages,
+                    })
+                    .to_string();
+                    let _ = finish_run(
+                        conn,
+                        &run_id,
+                        now_utc,
+                        "partial",
+                        &counts_json,
+                        Some(&format!("{ie}")),
+                    );
+                    return Err(ie);
+                }
+            };
+
+            let returned = page.issues.len() as u32;
+            total_issues = page.total.or(total_issues);
+
+            // Project each issue in the page.
+            for issue in &page.issues {
+                let raw_value = serde_json::to_value(issue).map_err(|_| {
+                    IngestionError::new(IngestionErrorCategory::Decode, "")
+                })?;
+                let ctx = JiraIssueProjectionContext {
+                    source_system_id,
+                    project_key,
+                    project_name,
+                    ingested_at: now_utc,
+                };
+                project_jira_issue(conn, &ctx, &raw_value, issue)?;
+
+                if let Some(updated) = issue.fields.updated.as_deref() {
+                    match max_updated_seen.as_deref() {
+                        None => max_updated_seen = Some(updated.to_string()),
+                        Some(prev) if updated > prev => {
+                            max_updated_seen = Some(updated.to_string())
+                        }
+                        _ => {}
+                    }
+                }
+                saved_issues += 1;
+            }
+
+            pages += 1;
+            any_page_persisted = any_page_persisted || returned > 0;
+
+            let progress_json = serde_json::json!({
+                "phase": "searching",
+                "current_page": pages,
+                "total_pages": total_issues.map(|t| div_ceil_u32(t, self.page_size.max(1))),
+                "saved_issues": saved_issues,
+                "total_issues": total_issues,
+            })
+            .to_string();
+            let counts_json = serde_json::json!({
+                "saved_issues": saved_issues,
+                "total_issues": total_issues,
+                "pages": pages,
+            })
+            .to_string();
+            update_progress(conn, &run_id, &progress_json, &counts_json)?;
+
+            if should_stop_paginate(start_at, self.page_size, returned, page.total) {
+                break;
+            }
+            let next_start = start_at.saturating_add(returned);
+            if next_start <= start_at {
+                break;
+            }
+            start_at = next_start;
+        }
+
+        // Cursor advances only when at least one page was successfully
+        // persisted and we observed an `updated` value. On cancellation we
+        // still persist progress up to the last completed page.
+        if any_page_persisted {
+            let new_cursor_value = max_updated_seen
+                .or(cursor_last_updated.clone())
+                .map(|ts| serde_json::json!({ "last_updated": ts }).to_string());
+            if let Some(value) = new_cursor_value {
+                upsert_cursor(
+                    conn,
+                    source_system_id,
+                    JIRA_ISSUE_CONNECTOR,
+                    &cursor_key,
+                    &value,
+                    Some(now_utc),
+                    now_utc,
+                )?;
+            }
+        }
+
+        let status = if cancelled_mid_loop {
+            "cancelled"
+        } else {
+            "succeeded"
+        };
+        let final_counts = serde_json::json!({
+            "saved_issues": saved_issues,
+            "total_issues": total_issues,
+            "pages": pages,
+        })
+        .to_string();
+        finish_run(conn, &run_id, now_utc, status, &final_counts, None)?;
+
+        Ok(JiraIssueIngestionSummary {
+            run_id,
+            status: status.to_string(),
+            pages,
+            saved_issues,
+            total_issues,
+        })
+    }
+}
+
+fn div_ceil_u32(numerator: u32, denominator: u32) -> u32 {
+    if denominator == 0 {
+        return 0;
+    }
+    numerator.div_ceil(denominator)
+}
+
+fn should_stop_paginate(
+    start_at: u32,
+    requested: u32,
+    returned: u32,
+    total: Option<u32>,
+) -> bool {
+    if returned == 0 {
+        return true;
+    }
+    if let Some(total) = total {
+        return start_at.saturating_add(returned) >= total;
+    }
+    returned < requested
+}
+
+/// Best-effort RFC 3339 timestamp shift: subtract `seconds` from `ts` and
+/// return the result formatted with a `Z` suffix. Returns `None` on parse
+/// failure — the caller treats that as "no overlap filter".
+///
+/// Accepts inputs like:
+/// - `2026-05-25T00:00:00Z`
+/// - `2026-05-22T10:00:00.000+0000`
+/// - `2026-05-22T10:00:00.000Z`
+fn subtract_seconds_rfc3339(ts: &str, seconds: i64) -> Option<String> {
+    // Locate the date and time-of-day portions before any fractional seconds
+    // or timezone suffix.
+    let (date_part, rest) = ts.split_once('T')?;
+    if date_part.len() != 10 {
+        return None;
+    }
+    let date_bytes = date_part.as_bytes();
+    if date_bytes[4] != b'-' || date_bytes[7] != b'-' {
+        return None;
+    }
+    let year: i64 = date_part[0..4].parse().ok()?;
+    let month: u32 = date_part[5..7].parse().ok()?;
+    let day: u32 = date_part[8..10].parse().ok()?;
+
+    // Slice off fractional seconds and timezone marker. We accept anything that
+    // starts with `HH:MM:SS`.
+    if rest.len() < 8 {
+        return None;
+    }
+    let hms = &rest[0..8];
+    let hms_bytes = hms.as_bytes();
+    if hms_bytes[2] != b':' || hms_bytes[5] != b':' {
+        return None;
+    }
+    let hour: u32 = hms[0..2].parse().ok()?;
+    let minute: u32 = hms[3..5].parse().ok()?;
+    let second: u32 = hms[6..8].parse().ok()?;
+    if hour > 23 || minute > 59 || second > 60 {
+        return None;
+    }
+
+    // Convert to days-since-epoch plus seconds-in-day.
+    let days = civil_to_days(year, month, day)?;
+    let mut total_secs: i64 =
+        days * 86_400 + (hour as i64) * 3600 + (minute as i64) * 60 + second as i64;
+    total_secs -= seconds;
+
+    // Convert back to civil date/time.
+    let new_days = total_secs.div_euclid(86_400);
+    let new_secs_of_day = total_secs.rem_euclid(86_400);
+    let (ny, nm, nd) = days_to_civil(new_days);
+    let nh = (new_secs_of_day / 3600) as u32;
+    let nmin = ((new_secs_of_day % 3600) / 60) as u32;
+    let nsec = (new_secs_of_day % 60) as u32;
+    Some(format!(
+        "{ny:04}-{nm:02}-{nd:02}T{nh:02}:{nmin:02}:{nsec:02}Z"
+    ))
+}
+
+/// Howard Hinnant's `civil_from_days` inverse. Returns days since 1970-01-01.
+fn civil_to_days(year: i64, month: u32, day: u32) -> Option<i64> {
+    if !(1..=12).contains(&month) || day == 0 || day > 31 {
+        return None;
+    }
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let m = month as i64;
+    let d = day as i64;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468)
+}
+
+fn days_to_civil(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y_final = if m <= 2 { y + 1 } else { y };
+    (y_final, m, d)
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1401,5 +1803,405 @@ mod tests {
             !tables.contains("snapshots"),
             "snapshots table must not be claimed by this task; found tables: {tables:?}"
         );
+    }
+
+    // ── Service tests ──────────────────────────────────────────────────────
+
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    /// In-memory stub for `JiraIssueClient`.
+    struct FakeJiraClient {
+        pages: Mutex<Vec<JiraSearchPage>>,
+        calls: Mutex<Vec<JiraSearchRequest>>,
+        next_error: Mutex<Option<JiraApiError>>,
+        cancel_after_call: Mutex<Option<(usize, Arc<CancellationFlag>)>>,
+    }
+
+    impl FakeJiraClient {
+        fn with_pages(pages: Vec<JiraSearchPage>) -> Self {
+            Self {
+                pages: Mutex::new(pages),
+                calls: Mutex::new(Vec::new()),
+                next_error: Mutex::new(None),
+                cancel_after_call: Mutex::new(None),
+            }
+        }
+
+        fn calls(&self) -> Vec<JiraSearchRequest> {
+            self.calls.lock().unwrap().clone()
+        }
+
+        fn set_next_error(&self, err: JiraApiError) {
+            *self.next_error.lock().unwrap() = Some(err);
+        }
+
+        /// Trip the cancellation flag *after* the Nth call returns successfully
+        /// (1-indexed). Used by the cancellation test.
+        fn trip_cancel_after(&self, n: usize, flag: Arc<CancellationFlag>) {
+            *self.cancel_after_call.lock().unwrap() = Some((n, flag));
+        }
+    }
+
+    impl JiraIssueClient for FakeJiraClient {
+        fn search_issues_page(
+            &self,
+            request: JiraSearchRequest,
+        ) -> Result<JiraSearchPage, JiraApiError> {
+            self.calls.lock().unwrap().push(request);
+            // Pages drain first so a callers can queue successful pages and a
+            // terminal error: when pages is empty AND next_error is set, the
+            // next call returns the error.
+            let popped = {
+                let mut pages = self.pages.lock().unwrap();
+                if pages.is_empty() {
+                    None
+                } else {
+                    Some(pages.remove(0))
+                }
+            };
+            let result = match popped {
+                Some(page) => Ok(page),
+                None => {
+                    if let Some(err) = self.next_error.lock().unwrap().take() {
+                        Err(err)
+                    } else {
+                        Ok(JiraSearchPage {
+                            start_at: 0,
+                            max_results: 50,
+                            total: Some(0),
+                            issues: vec![],
+                        })
+                    }
+                }
+            };
+            // After a successful call, optionally trip cancellation.
+            if result.is_ok() {
+                let calls_so_far = self.calls.lock().unwrap().len();
+                let maybe = self.cancel_after_call.lock().unwrap().clone();
+                if let Some((n, flag)) = maybe {
+                    if calls_so_far == n {
+                        flag.request_cancel();
+                    }
+                }
+            }
+            result
+        }
+    }
+
+    fn load_amp_search_page() -> JiraSearchPage {
+        serde_json::from_str(include_str!("fixtures/jira_amp_search_page.json"))
+            .expect("parse AMP page")
+    }
+
+    #[test]
+    fn subtract_seconds_rfc3339_shifts_by_overlap() {
+        let result = subtract_seconds_rfc3339("2026-05-25T00:00:00Z", 60).expect("parse");
+        assert_eq!(result, "2026-05-24T23:59:00Z");
+        let result2 =
+            subtract_seconds_rfc3339("2026-01-01T00:00:30Z", 60).expect("parse cross-year");
+        assert_eq!(result2, "2025-12-31T23:59:30Z");
+    }
+
+    #[test]
+    fn ingests_multi_page_search_and_records_progress_total() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Page 1: real AMP fixture but override total to 2 so the page terminates
+        // pagination cleanly.
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        // Page 2: empty (returned=0 → stop). Not strictly needed since page1
+        // total triggers stop, but provided for safety.
+        let page2 = JiraSearchPage {
+            start_at: 2,
+            max_results: 50,
+            total: Some(2),
+            issues: vec![],
+        };
+        let client = FakeJiraClient::with_pages(vec![page1, page2]);
+        let service = JiraIssueIngestionService::new(&client);
+        let flag = CancellationFlag::new();
+
+        let summary = service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+
+        assert_eq!(summary.status, "succeeded");
+        assert_eq!(summary.saved_issues, 2);
+        assert_eq!(summary.total_issues, Some(2));
+
+        let work_items: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_items WHERE project_key = 'AMP'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(work_items, 2);
+
+        let (status, progress_json, counts_json): (String, String, String) = conn
+            .query_row(
+                "SELECT status, progress_json, counts_json FROM ingestion_runs
+                  WHERE source_system_id = 'srcsys_1' AND connector = ?1
+                  ORDER BY started_at DESC LIMIT 1",
+                [JIRA_ISSUE_CONNECTOR],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .expect("query run");
+        assert_eq!(status, "succeeded");
+        assert!(
+            progress_json.contains("\"saved_issues\":2"),
+            "progress_json={progress_json}"
+        );
+        assert!(
+            progress_json.contains("\"total_issues\":2"),
+            "progress_json={progress_json}"
+        );
+        assert!(counts_json.contains("\"saved_issues\":2"));
+
+        // Cursor should have advanced to the max-updated value seen in the fixture
+        // (AMP-1.updated = 2026-05-22T10:00:00.000+0000).
+        let cursor_value: String = conn
+            .query_row(
+                "SELECT cursor_value FROM ingestion_cursors
+                  WHERE source_system_id = 'srcsys_1' AND connector = ?1
+                    AND cursor_key = 'project:AMP:issues'",
+                [JIRA_ISSUE_CONNECTOR],
+                |r| r.get(0),
+            )
+            .expect("cursor row");
+        assert!(
+            cursor_value.contains("last_updated"),
+            "cursor={cursor_value}"
+        );
+    }
+
+    #[test]
+    fn second_run_is_idempotent_for_same_fixtures() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Two distinct `now_utc` values so the stable run_id differs between
+        // invocations; idempotency we're asserting here is at the work-data
+        // level (no duplicate work_items / jira_issues).
+        for now_utc in ["2026-05-25T17:00:00Z", "2026-05-25T18:00:00Z"] {
+            let mut page1 = load_amp_search_page();
+            page1.total = Some(2);
+            let page2 = JiraSearchPage {
+                start_at: 2,
+                max_results: 50,
+                total: Some(2),
+                issues: vec![],
+            };
+            let client = FakeJiraClient::with_pages(vec![page1, page2]);
+            let service = JiraIssueIngestionService::new(&client);
+            let flag = CancellationFlag::new();
+            let summary = service
+                .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), now_utc, &flag)
+                .expect("ingest");
+            assert_eq!(summary.status, "succeeded");
+        }
+
+        let work_items: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_items WHERE project_key = 'AMP'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(work_items, 2, "second run must not create duplicates");
+
+        let runs: i64 = conn
+            .query_row("SELECT count(*) FROM ingestion_runs", [], |r| r.get(0))
+            .expect("runs count");
+        assert_eq!(runs, 2, "expected two distinct ingestion_runs rows");
+    }
+
+    #[test]
+    fn incremental_run_uses_updated_overlap_and_jql_filter() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Seed a cursor for the AMP project pointing at 2026-05-25T00:00:00Z.
+        upsert_cursor(
+            &conn,
+            "srcsys_1",
+            JIRA_ISSUE_CONNECTOR,
+            "project:AMP:issues",
+            r#"{"last_updated":"2026-05-25T00:00:00Z"}"#,
+            Some("2026-05-25T16:00:00Z"),
+            "2026-05-25T16:00:00Z",
+        )
+        .expect("seed cursor");
+
+        let mut page1 = load_amp_search_page();
+        page1.total = Some(2);
+        let page2 = JiraSearchPage {
+            start_at: 2,
+            max_results: 50,
+            total: Some(2),
+            issues: vec![],
+        };
+        let client = FakeJiraClient::with_pages(vec![page1, page2]);
+        let service = JiraIssueIngestionService::new(&client);
+        let flag = CancellationFlag::new();
+        service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+
+        let calls = client.calls();
+        assert!(!calls.is_empty(), "expected at least one search call");
+        let first_jql = &calls[0].jql;
+        assert!(
+            first_jql.contains("project = \"AMP\""),
+            "jql missing project filter: {first_jql}"
+        );
+        assert!(
+            first_jql.contains("updated >= \"2026-05-24T23:59:00Z\""),
+            "jql missing overlap-adjusted updated filter: {first_jql}"
+        );
+
+        let work_items: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_items WHERE project_key = 'AMP'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(work_items, 2);
+    }
+
+    #[test]
+    fn failed_page_marks_partial_without_deleting_saved() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Page 1: real AMP page but force pagination to continue (no total, full page=2).
+        let mut page1 = load_amp_search_page();
+        page1.total = None;
+        let client = FakeJiraClient::with_pages(vec![page1]);
+        let service = JiraIssueIngestionService {
+            client: &client,
+            page_size: 2,
+            overlap_seconds: 60,
+        };
+        // Page 2 will be a server error.
+        client.set_next_error(JiraApiError::Server { status: 503 });
+        // We need to arrange order: pages drained first, then next_error checked.
+        // Our fake checks next_error BEFORE pages, so set after first call ourselves.
+        // Workaround: use a wrapper that flips next_error after the first page.
+        // To keep this simple, we redefine the fake's behavior by clearing pages
+        // ahead of next_error: drop pages-of-1 (only page1), then on second call,
+        // pages is empty AND next_error is set → returns the error first.
+        // But our fake also returns an empty page when pages is empty and no error.
+        // Confirm: next_error is checked BEFORE pages drain, so on 2nd call it
+        // returns the error.
+
+        let flag = CancellationFlag::new();
+        let err = service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect_err("expected partial failure");
+        assert_eq!(err.category(), IngestionErrorCategory::Unknown);
+
+        let runs: Vec<(String, Option<String>)> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT status, error_summary FROM ingestion_runs
+                      WHERE source_system_id = 'srcsys_1' AND connector = ?1",
+                )
+                .expect("prep");
+            let rows = stmt
+                .query_map([JIRA_ISSUE_CONNECTOR], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                })
+                .expect("query");
+            rows.map(|r| r.expect("row")).collect()
+        };
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, "partial");
+        assert!(
+            runs[0]
+                .1
+                .as_deref()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false),
+            "expected non-empty error_summary, got {:?}",
+            runs[0].1
+        );
+
+        // The first page's work_items should still be present.
+        let wi_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_items WHERE project_key = 'AMP'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(wi_count, 2);
+
+        // Cursor should NOT have been advanced (we returned Err before the
+        // post-loop cursor write).
+        let cursor: Option<String> = conn
+            .query_row(
+                "SELECT cursor_value FROM ingestion_cursors
+                  WHERE source_system_id = 'srcsys_1' AND connector = ?1
+                    AND cursor_key = 'project:AMP:issues'",
+                [JIRA_ISSUE_CONNECTOR],
+                |r| r.get(0),
+            )
+            .ok();
+        assert!(
+            cursor.is_none(),
+            "cursor must not advance on partial failure"
+        );
+    }
+
+    #[test]
+    fn cancellation_between_pages_stops_and_marks_cancelled() {
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        // Stub one page that does NOT terminate pagination on its own
+        // (total=None, returned=page_size), then arrange for cancellation to
+        // be requested after the first call returns.
+        let mut page1 = load_amp_search_page();
+        page1.total = None;
+        let client = FakeJiraClient::with_pages(vec![page1]);
+        let flag = Arc::new(CancellationFlag::new());
+        client.trip_cancel_after(1, Arc::clone(&flag));
+
+        let service = JiraIssueIngestionService {
+            client: &client,
+            page_size: 2,
+            overlap_seconds: 60,
+        };
+        let summary = service
+            .ingest_project(&conn, "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .expect("ingest");
+        assert_eq!(summary.status, "cancelled");
+        // Exactly one upstream call should have been made.
+        assert_eq!(client.calls().len(), 1);
+
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM ingestion_runs
+                  WHERE source_system_id = 'srcsys_1' AND connector = ?1",
+                [JIRA_ISSUE_CONNECTOR],
+                |r| r.get(0),
+            )
+            .expect("status");
+        assert_eq!(status, "cancelled");
+
+        // First-page issues should still be persisted.
+        let wi_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_items WHERE project_key = 'AMP'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(wi_count, 2);
     }
 }
