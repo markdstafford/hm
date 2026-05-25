@@ -371,11 +371,28 @@ export function Showcase() {
         <Card caption="Avatar"><Avatar initial="P" /><Avatar initial="A" size={28} /></Card>
         <Card caption="Badge"><Badge>New</Badge> <Badge tone="green">OK</Badge> <Badge tone="red">Fail</Badge></Card>
         <Card caption="Tag"><Tag>tagA</Tag><Tag onRemove={() => {}}>tagB</Tag></Card>
-        <Card caption="ConfidenceChip"><ConfidenceChip value={92} /> <ConfidenceChip value={50} /></Card>
+        <Card caption="ConfidenceChip">
+          <ConfidenceChip value={100} />
+          <ConfidenceChip value={90} />
+          <ConfidenceChip value={85} />
+          <ConfidenceChip value={84} />
+          <ConfidenceChip value={50} />
+          <ConfidenceChip value={25} />
+          <ConfidenceChip value={0} />
+        </Card>
       </Section>
 
       <Section title="Text">
-        <Card caption="Heading"><Heading level={3}>Heading three</Heading></Card>
+        <Card caption="Heading">
+          <div className="flex flex-col gap-2 w-full">
+            <Heading level={1}>Heading one</Heading>
+            <Heading level={2}>Heading two</Heading>
+            <Heading level={3}>Heading three</Heading>
+            <Heading level={4}>Heading four</Heading>
+            <Heading level={5}>Heading five</Heading>
+            <Heading level={6}>Heading six</Heading>
+          </div>
+        </Card>
         <Card caption="Link"><Link href="https://example.com">External</Link> <Link href="/inbox">Internal</Link></Card>
         <Card caption="InlineCode"><InlineCode>const x = 1</InlineCode></Card>
         <Card caption="CodeBlock"><CodeBlock language="ts" code={"const x: number = 1;"} /></Card>
