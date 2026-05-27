@@ -13,6 +13,21 @@ function normalize(s: unknown): string {
   return String(s ?? "").trim().toLowerCase();
 }
 
+/**
+ * Strict finite-number parser. Returns null for null/undefined, blank strings,
+ * non-numeric strings, strings with trailing junk (e.g. "1abc"), and non-finite
+ * results. Only accepts strings that fully represent a finite number.
+ */
+function parseFiniteNumber(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const s = String(value).trim();
+  if (s === "") return null;
+  if (!/^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 // -------------------------------------------------------------------------
 // Predicate evaluation by kind
 // -------------------------------------------------------------------------
@@ -52,10 +67,13 @@ function evaluateNumber(operatorId: string, itemValue: unknown, filterValue: unk
     return !(itemValue == null || String(itemValue).trim() === "");
   }
 
-  const itemNum = typeof itemValue === "number" ? itemValue : Number(String(itemValue ?? ""));
-  const filterNum = parseFloat(String(filterValue));
+  const itemNum = parseFiniteNumber(itemValue);
+  const filterNum = parseFiniteNumber(filterValue);
 
-  if (isNaN(itemNum) || isNaN(filterNum)) return true;
+  // Invalid filter value → treat as incomplete, pass through
+  if (filterNum === null) return true;
+  // Item has no numeric value → does not match any comparison
+  if (itemNum === null) return false;
 
   switch (operatorId) {
     case "eq":

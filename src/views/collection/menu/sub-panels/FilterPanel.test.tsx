@@ -170,6 +170,31 @@ describe("FilterPanel", () => {
     expect(call.filters).toHaveLength(0);
   });
 
+  it("derives select options from items when filterOptionContext is omitted", async () => {
+    const user = userEvent.setup();
+    const config = patchViewConfig(defaultViewConfig(jiraIssueEntity), {
+      filters: [{ id: "f1", property: "status", operator: "is", value: null, active: true }],
+    });
+    // Render with items but no explicit optionContext — panel must fall back to { items }
+    render(
+      <FilterPanel
+        entity={jiraIssueEntity}
+        items={FIXTURE_ITEMS as any}
+        config={config}
+        onPatchConfig={vi.fn()}
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Open the value popover for the status filter
+    await user.click(screen.getByRole("button", { name: /Filter value/i }));
+
+    // Options derived from FIXTURE_ITEMS status_name values should be visible
+    expect(screen.getByRole("menuitemradio", { name: "Open" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "Done" })).toBeInTheDocument();
+  });
+
   it("axe has no violations in empty state", async () => {
     const { container } = renderPanel();
     expect(await axe(container)).toHaveNoViolations();

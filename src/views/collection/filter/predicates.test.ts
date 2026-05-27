@@ -215,6 +215,17 @@ describe("number predicates", () => {
     expect(filterMatchesItem({ row: makeFilter("score", "not-empty", null), item: ITEM_A, entity })).toBe(true);
     expect(filterMatchesItem({ row: makeFilter("score", "not-empty", null), item: ITEM_C, entity })).toBe(false);
   });
+
+  it("null item value does not match eq 0", () => {
+    // ITEM_C has score: null; a strict parser must not coerce null → 0
+    expect(filterMatchesItem({ row: makeFilter("score", "eq", "0"), item: ITEM_C, entity })).toBe(false);
+  });
+
+  it("malformed filter value is treated as invalid and passes through", () => {
+    // "1abc" and "1e" are not valid finite numbers; filter should be skipped (return true)
+    expect(filterMatchesItem({ row: makeFilter("score", "eq", "1abc"), item: ITEM_A, entity })).toBe(true);
+    expect(filterMatchesItem({ row: makeFilter("score", "eq", "1e"), item: ITEM_A, entity })).toBe(true);
+  });
 });
 
 // -------------------------------------------------------------------------

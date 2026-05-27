@@ -27,12 +27,14 @@ type Props<TItem = unknown, TProperty extends string = string> = {
 
 export function FilterPanel<TItem = unknown, TProperty extends string = string>({
   entity,
+  items,
   optionContext,
   config,
   onPatchConfig,
   onBack,
   onClose,
 }: Props<TItem, TProperty>) {
+  const resolvedOptionContext = optionContext ?? { items };
   const normalizedRows = config.filters;
   const filterableCount = availableFilterProperties(entity).length;
 
@@ -57,7 +59,7 @@ export function FilterPanel<TItem = unknown, TProperty extends string = string>(
                 key={row.id}
                 row={row}
                 entity={entity}
-                optionContext={optionContext}
+                optionContext={resolvedOptionContext}
                 onUpdateProperty={(pid) =>
                   patchFilters(updateFilterProperty(normalizedRows, row.id, pid, entity))
                 }
