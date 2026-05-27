@@ -1,4 +1,19 @@
-import { compareStrings, compareDates, compareNumbers, compareNullLast, defaultJiraSort } from "./compare";
+import {
+  compareStrings,
+  compareDates,
+  compareNumbers,
+  compareNullLast,
+  defaultJiraSort,
+  compareNullableStringsNullLast,
+  compareJiraIssueByKey,
+  compareJiraIssueByTitle,
+  compareJiraIssueByStatus,
+  compareJiraIssueByAssignee,
+  compareJiraIssueByUpdated,
+  compareJiraIssueByPriority,
+  compareJiraIssueByProjectKey,
+} from "./compare";
+import { jiraIssueEntity } from ".";
 import type { JiraIssueListItem } from "../../bindings";
 
 const makeItem = (overrides: Partial<JiraIssueListItem>): JiraIssueListItem => ({
@@ -81,5 +96,67 @@ describe("defaultJiraSort", () => {
     const a = makeItem({ work_item_id: "a", updated_at_source: "2024-01-01T00:00:00Z" });
     const b = makeItem({ work_item_id: "b", updated_at_source: "2024-01-01T00:00:00Z" });
     expect(defaultJiraSort(a, b)).toBe(0);
+  });
+});
+
+describe("Jira sortable properties", () => {
+  it("declares the initial sortable property set and excludes labels", () => {
+    expect(jiraIssueEntity.sortableProperties?.map((row) => row.property)).toEqual([
+      "key",
+      "title",
+      "status",
+      "assignee",
+      "updated_at_source",
+      "priority",
+      "project_key",
+    ]);
+  });
+
+  it("sorts strings and places null/empty Jira display values last", () => {
+    expect(compareNullableStringsNullLast("Alice", "Bob")).toBeLessThan(0);
+    expect(compareNullableStringsNullLast("Bob", "Alice")).toBeGreaterThan(0);
+    expect(compareNullableStringsNullLast(null, "Alice")).toBeGreaterThan(0);
+    expect(compareNullableStringsNullLast("Alice", null)).toBeLessThan(0);
+    expect(compareNullableStringsNullLast(null, null)).toBe(0);
+
+    const alice = makeItem({ assignee_display_name: "Alice" });
+    const bob = makeItem({ assignee_display_name: "Bob" });
+    const noAssignee = makeItem({ assignee_display_name: null });
+
+    expect(compareJiraIssueByAssignee(alice, bob)).toBeLessThan(0);
+    expect(compareJiraIssueByAssignee(bob, alice)).toBeGreaterThan(0);
+    expect(compareJiraIssueByAssignee(alice, noAssignee)).toBeLessThan(0);
+    expect(compareJiraIssueByAssignee(noAssignee, alice)).toBeGreaterThan(0);
+  });
+
+  it("compares every declared Jira sortable property safely", () => {
+    const alpha = makeItem({
+      work_item_id: "alpha",
+      key: "AMP-1",
+      title: "Alpha title",
+      status_name: "In Progress",
+      assignee_display_name: "Alice",
+      updated_at_source: "2024-01-01T00:00:00Z",
+      priority_name: "High",
+      project_key: "AMP",
+    });
+    const beta = makeItem({
+      work_item_id: "beta",
+      key: "AMP-2",
+      title: "Beta title",
+      status_name: "To Do",
+      assignee_display_name: "Bob",
+      updated_at_source: "2024-06-01T00:00:00Z",
+      priority_name: "Low",
+      project_key: "BMP",
+    });
+
+    expect(compareJiraIssueByKey(alpha, beta)).toBeLessThan(0);
+    expect(compareJiraIssueByTitle(alpha, beta)).toBeLessThan(0);
+    expect(compareJiraIssueByStatus(alpha, beta)).toBeLessThan(0);
+    expect(compareJiraIssueByAssignee(alpha, beta)).toBeLessThan(0);
+    expect(compareJiraIssueByUpdated(alpha, beta)).toBeLessThan(0);
+    expect(compareJiraIssueByPriority(alpha, beta)).toBeLessThan(0);
+    expect(compareJiraIssueByProjectKey(alpha, beta)).toBeLessThan(0);
   });
 });

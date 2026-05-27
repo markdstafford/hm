@@ -2,7 +2,16 @@ import type { EntityContract, PropertyDefinition } from "../../views/collection/
 import type { JiraIssueListItem } from "../../bindings";
 import type { JiraIssueProperty } from "./properties";
 import { DEFAULT_PROPERTIES, JIRA_ISSUE_DEFAULT_VIEWS } from "./defaults";
-import { defaultJiraSort } from "./compare";
+import {
+  defaultJiraSort,
+  compareJiraIssueByKey,
+  compareJiraIssueByTitle,
+  compareJiraIssueByStatus,
+  compareJiraIssueByAssignee,
+  compareJiraIssueByUpdated,
+  compareJiraIssueByPriority,
+  compareJiraIssueByProjectKey,
+} from "./compare";
 import { KeyCell, TitleCell, StatusCell, AssigneeCell, UpdatedCell, PriorityCell, LabelsCell } from "./cells";
 import { JiraIssueDetail } from "./detail";
 
@@ -71,6 +80,15 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
   properties: PROPERTY_DEFINITIONS,
   defaultProperties: DEFAULT_PROPERTIES,
   defaultSort: defaultJiraSort,
+  sortableProperties: [
+    { property: "key", compare: compareJiraIssueByKey },
+    { property: "title", compare: compareJiraIssueByTitle },
+    { property: "status", compare: compareJiraIssueByStatus },
+    { property: "assignee", compare: compareJiraIssueByAssignee },
+    { property: "updated_at_source", compare: compareJiraIssueByUpdated, defaultDirection: "desc" as const },
+    { property: "priority", compare: compareJiraIssueByPriority },
+    { property: "project_key", compare: compareJiraIssueByProjectKey },
+  ],
   Detail: JiraIssueDetail,
   defaultViews: JIRA_ISSUE_DEFAULT_VIEWS,
 };
