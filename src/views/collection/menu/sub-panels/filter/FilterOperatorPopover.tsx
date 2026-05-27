@@ -39,13 +39,13 @@ export function FilterOperatorPopover({ kind, value, onChange }: Props) {
         </button>
       }
     >
-      <div role="listbox" aria-label="Filter operator" className="flex flex-col gap-0.5">
+      <div role="menu" aria-label="Filter operator" className="flex flex-col gap-0.5">
         {operators.map((op) => (
           <button
             key={op.id}
             type="button"
-            role="option"
-            aria-selected={value === op.id}
+            role="menuitemradio"
+            aria-checked={value === op.id}
             onClick={() => select(op.id)}
             className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-text hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >

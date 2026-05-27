@@ -43,7 +43,7 @@ export function FilterPropertyPopover<TItem = unknown, TProperty extends string 
         </button>
       }
     >
-      <div role="listbox" aria-label="Filter property" className="flex flex-col gap-0.5">
+      <div role="menu" aria-label="Filter property" className="flex flex-col gap-0.5">
         {filterableProperties.map((fp) => {
           const id = String(fp.property);
           const label = entity.properties.find((p) => String(p.id) === id)?.label ?? id;
@@ -51,8 +51,8 @@ export function FilterPropertyPopover<TItem = unknown, TProperty extends string 
             <button
               key={id}
               type="button"
-              role="option"
-              aria-selected={value === id}
+              role="menuitemradio"
+              aria-checked={value === id}
               onClick={() => select(id)}
               className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-text hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >

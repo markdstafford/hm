@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { IconButton } from "../../../../../ui/buttons/IconButton";
-import type { EntityContract, FilterableProperty } from "../../../types";
+import type { EntityContract } from "../../../types";
 import type { FilterOptionContext } from "../../../filter/types";
 import type { FilterConfig } from "../../../ViewConfig";
 import { filterablePropertyFor } from "../../../filter/config";
@@ -28,7 +28,7 @@ export function FilterRow<TItem = unknown, TProperty extends string = string>({
   onUpdateValue,
   onRemove,
 }: Props<TItem, TProperty>) {
-  const filterableProp = filterablePropertyFor(entity, row.property) as FilterableProperty<TItem, TProperty> | null;
+  const filterableProp = filterablePropertyFor(entity, row.property);
 
   if (!filterableProp) {
     return null;

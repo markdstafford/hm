@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { PanelHeader } from "../PanelHeader";
 import type { EntityContract } from "../../types";
 import type { FilterOptionContext } from "../../filter/types";
@@ -36,9 +37,9 @@ export function FilterPanel<TItem = unknown, TProperty extends string = string>(
   const normalizedRows = normalizeFilterRows(config.filters, entity);
   const filterableCount = availableFilterProperties(entity).length;
 
-  function patchFilters(nextFilters: ReturnType<typeof normalizeFilterRows>) {
+  const patchFilters = useCallback((nextFilters: ReturnType<typeof normalizeFilterRows>) => {
     void onPatchConfig(patchViewConfig(config, { filters: nextFilters }));
-  }
+  }, [config, onPatchConfig]);
 
   return (
     <>
@@ -51,7 +52,7 @@ export function FilterPanel<TItem = unknown, TProperty extends string = string>(
               : "No filters yet. Add a filter to narrow this view."}
           </p>
         ) : (
-          <ul className="flex flex-col gap-0.5">
+          <ul aria-label="Active filters" className="flex flex-col gap-0.5">
             {normalizedRows.map((row) => (
               <FilterRow
                 key={row.id}

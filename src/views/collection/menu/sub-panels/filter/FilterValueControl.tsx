@@ -43,8 +43,11 @@ export function FilterValueControl<TItem = unknown, TProperty extends string = s
     return (
       <TextField
         type="number"
-        value={typeof row.value === "string" ? row.value : ""}
-        onChange={(e) => onChange(e.target.value)}
+        value={row.value === "" || row.value == null ? "" : String(row.value)}
+        onChange={(e) => {
+          const raw = e.target.value;
+          onChange(raw === "" ? "" : Number(raw));
+        }}
         aria-label="Filter value"
       />
     );

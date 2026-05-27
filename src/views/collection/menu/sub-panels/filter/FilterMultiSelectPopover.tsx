@@ -44,15 +44,15 @@ export function FilterMultiSelectPopover({ options, value, onChange, label }: Pr
         </button>
       }
     >
-      <div role="listbox" aria-label={label} aria-multiselectable="true" className="flex flex-col gap-0.5">
+      <div role="menu" aria-label={label} className="flex flex-col gap-0.5">
         {options.map((opt) => {
           const isSelected = value.includes(opt.id);
           return (
             <button
               key={opt.id}
               type="button"
-              role="option"
-              aria-selected={isSelected}
+              role="menuitemcheckbox"
+              aria-checked={isSelected}
               onClick={() => toggle(opt.id)}
               className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-text hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
