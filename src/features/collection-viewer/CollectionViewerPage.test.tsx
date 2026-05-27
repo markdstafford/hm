@@ -127,34 +127,23 @@ describe("CollectionViewerPage", () => {
     expect(screen.getByText("Second issue")).toBeInTheDocument();
   });
 
-  it("clicking a row selects it (aria-pressed=true) but does NOT open detail panel", async () => {
+  it("clicking a row selects it (aria-pressed=true) and opens the configured preview", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
     expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByRole("button", { name: /close issue detail/i })).not.toBeInTheDocument();
-  });
-
-  it("pressing Enter when a row is selected opens the detail panel", async () => {
-    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
-    render(<CollectionViewerPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    expect(screen.queryByRole("button", { name: /close issue detail/i })).not.toBeInTheDocument();
-    fireEvent.keyDown(window, { key: "Enter" });
     expect(await screen.findByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
   });
 
-  it("pressing Escape closes the detail panel but keeps the row selected", async () => {
+  it("Escape does NOT close the side detail panel (only X button closes side preview)", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
     await screen.findByRole("button", { name: /close issue detail/i });
     fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /close issue detail/i })).not.toBeInTheDocument();
-    });
-    // Row stays highlighted
+    // Escape does nothing in side-peek — detail stays open
+    expect(screen.getByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
+    // Row remains selected
     expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -162,7 +151,6 @@ describe("CollectionViewerPage", () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
     expect(await screen.findByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /close issue detail/i }));
     expect(screen.queryByRole("button", { name: /close issue detail/i })).not.toBeInTheDocument();
@@ -170,16 +158,14 @@ describe("CollectionViewerPage", () => {
     expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("swaps detail content when a second row is selected and Enter pressed", async () => {
+  it("swaps detail content when a second row is clicked", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
     await screen.findByRole("button", { name: /close issue detail/i });
     const details = screen.getAllByText("First issue");
     expect(details.length).toBeGreaterThanOrEqual(1);
     fireEvent.click(screen.getByRole("button", { name: /open amp-2: second issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => {
       expect(screen.getAllByText("Second issue").length).toBeGreaterThanOrEqual(1);
     });
@@ -356,11 +342,10 @@ describe("CollectionViewerPage", () => {
     });
   });
 
-  it("renders side detail rail (w-[440px]) after selecting a row and pressing Enter", async () => {
+  it("renders side detail rail (w-[440px]) after clicking a row", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
     await screen.findByRole("button", { name: /close issue detail/i });
     const aside = document.querySelector("aside[aria-label='Issue detail']");
     expect(aside).toHaveClass("w-[440px]");
@@ -383,9 +368,8 @@ describe("CollectionViewerPage", () => {
       expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "bottom-peek" }) }) })
     ));
 
-    // Select a row and press Enter to open preview
+    // Click a row to open preview
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => {
       const aside = document.querySelector("aside[aria-label='Issue detail']");
       expect(aside).toHaveClass("h-[280px]");
@@ -409,9 +393,8 @@ describe("CollectionViewerPage", () => {
       expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "full-page" }) }) })
     ));
 
-    // Select a row and press Enter to open preview
+    // Click a row to open preview
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument();
@@ -434,9 +417,8 @@ describe("CollectionViewerPage", () => {
       expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "full-page" }) }) })
     ));
 
-    // Select first row and press Enter to enter full-page
+    // Click first row to open full-page preview
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument());
 
     // Press Escape via keyboard event on window
@@ -454,9 +436,8 @@ describe("CollectionViewerPage", () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
 
-    // Select first row and open preview (side preview by default)
+    // Click first row — opens side preview
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    fireEvent.keyDown(window, { key: "Enter" });
     expect(await screen.findByRole("button", { name: "Close issue detail" })).toBeInTheDocument();
 
     // Switch to bottom preview
@@ -475,16 +456,15 @@ describe("CollectionViewerPage", () => {
     expect(screen.getAllByText("First issue").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("switching to full-page while an item is selected does not auto-open preview; Enter opens it", async () => {
+  it("switching to full-page while preview is open moves to full-page surface immediately", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
 
-    // Select a row while in default side preview (no Enter yet — preview stays closed)
+    // Click a row — opens side preview
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
-    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByRole("button", { name: "Close issue detail" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Close issue detail" })).toBeInTheDocument();
 
-    // Switch to full-page preview without pressing Enter
+    // Switch to full-page preview while preview is already open
     fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
     fireEvent.click(screen.getByText("Layout").closest("button")!);
     fireEvent.click(screen.getByRole("button", { name: /preview side/i }));
@@ -494,13 +474,7 @@ describe("CollectionViewerPage", () => {
       expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "full-page" }) }) })
     ));
 
-    // Full-page surface should NOT open automatically
-    expect(screen.queryByRole("button", { name: "Back to list (Esc)" })).not.toBeInTheDocument();
-    // Row is still selected in the list
-    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
-
-    // Press Enter to open full-page preview
-    fireEvent.keyDown(window, { key: "Enter" });
+    // Full-page surface opens immediately because previewOpen was already true
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument();
     });

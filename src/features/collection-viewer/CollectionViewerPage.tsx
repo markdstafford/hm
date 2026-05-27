@@ -80,13 +80,12 @@ export function CollectionViewerPage() {
 
   useKeyboardNavigation({
     enabled: !!selectedItem,
-    previewOpen,
+    mode: activeConfig.layout.preview,
     selectedIndex,
     total: displayItems.length,
     onMovePrevious: movePrevious,
     onMoveNext: moveNext,
-    onOpenPreview: () => setPreviewOpen(true),
-    onClosePreview: () => setPreviewOpen(false),
+    onExitFullPage: () => setPreviewOpen(false),
   });
 
   useEffect(() => {
@@ -232,7 +231,7 @@ export function CollectionViewerPage() {
 
   function handleSelect(item: JiraIssueListItem) {
     setSelectedId(item.work_item_id);
-    // Does NOT open preview — user presses Enter to open
+    setPreviewOpen(true);
   }
 
   function handleClosePreview() {
