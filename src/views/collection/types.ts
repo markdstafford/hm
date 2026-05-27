@@ -33,6 +33,27 @@ export type SortableProperty<TItem, TProperty extends string> = {
   defaultDirection?: "asc" | "desc";
 };
 
+export type BucketKey = string;
+
+export type BucketContext = {
+  now?: Date;
+  locale?: string;
+  timeZone?: string;
+};
+
+export type BucketDefinition = {
+  key: BucketKey;
+  label: string;
+  emptyLabel?: string;
+};
+
+export type GroupableProperty<TItem, TProperty extends string> = {
+  property: TProperty;
+  bucketKeyFor: (item: TItem, context?: BucketContext) => BucketKey;
+  bucketLabelFor?: (key: BucketKey) => string;
+  bucketOrder: (items?: TItem[], context?: BucketContext) => BucketDefinition[];
+};
+
 export type EntityContract<TItem, TProperty extends string> = {
   id: string;
   label: string;
@@ -42,6 +63,7 @@ export type EntityContract<TItem, TProperty extends string> = {
   defaultProperties: PropertyConfig<TProperty>[];
   defaultSort: (a: TItem, b: TItem) => number;
   sortableProperties?: SortableProperty<TItem, TProperty>[];
+  groupableProperties?: GroupableProperty<TItem, TProperty>[];
   Detail: ComponentType<{ item: TItem }>;
   defaultViews: CollectionView[];
 };

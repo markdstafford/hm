@@ -16,6 +16,9 @@ import {
   moveProperty,
   applyPropertyDrop,
   summarizeViewConfig,
+  setGroupProperty,
+  removeGrouping,
+  setHideEmptyGroups,
 } from "./ViewConfig";
 
 describe("defaultViewConfig", () => {
@@ -535,5 +538,52 @@ describe("sort config helpers", () => {
     );
     expect(options.map((option) => option.id)).toContain("status");
     expect(options.map((option) => option.id)).not.toContain("updated_at_source");
+  });
+});
+
+describe("group config normalization", () => {
+  it("clears stale group properties that are not current groupable ids while preserving hideEmptyGroups", () => {
+    const result = normalizeViewConfig(
+      { group: { property: "labels", hideEmptyGroups: false } },
+      jiraIssueEntity,
+    );
+    expect(result.group).toEqual({ property: null, hideEmptyGroups: false });
+  });
+
+  it("defaults malformed hideEmptyGroups to true while preserving a valid group property", () => {
+    const result = normalizeViewConfig(
+      { group: { property: "status", hideEmptyGroups: "yes" } },
+      jiraIssueEntity,
+    );
+    expect(result.group).toEqual({ property: "status", hideEmptyGroups: true });
+  });
+
+  it("summarizes a stale group property as None after normalization", () => {
+    const config = normalizeViewConfig(
+      { group: { property: "labels", hideEmptyGroups: true } },
+      jiraIssueEntity,
+    );
+    expect(summarizeViewConfig(config, jiraIssueEntity).group).toBe("None");
+  });
+
+  it("sets and removes grouping without mutating unrelated config", () => {
+    const config = defaultViewConfig(jiraIssueEntity);
+    const grouped = patchViewConfig(config, {
+      group: setGroupProperty(config.group, "status"),
+    });
+    const removed = patchViewConfig(grouped, {
+      group: removeGrouping(grouped.group),
+    });
+    expect(grouped.group).toEqual({ property: "status", hideEmptyGroups: true });
+    expect(removed.group).toEqual({ property: null, hideEmptyGroups: true });
+    expect(removed.propertyVisibility).toEqual(config.propertyVisibility);
+    expect(removed.sort).toEqual(config.sort);
+  });
+
+  it("toggles hide empty groups without clearing the selected group property", () => {
+    const config = defaultViewConfig(jiraIssueEntity);
+    const next = setHideEmptyGroups({ property: "status", hideEmptyGroups: true }, false);
+    expect(next).toEqual({ property: "status", hideEmptyGroups: false });
+    expect(config.group).toEqual({ property: null, hideEmptyGroups: true });
   });
 });
