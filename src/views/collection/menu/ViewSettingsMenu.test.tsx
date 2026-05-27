@@ -197,6 +197,21 @@ describe("ViewSettingsMenu", () => {
     expect(onRenameView).toHaveBeenCalledWith("jira-issue-mine", "My new name");
   });
 
+  it("rename: failed onRenameView restores draft to last saved name and shows error", async () => {
+    const user = userEvent.setup();
+    const onRenameView = vi.fn().mockRejectedValue(new Error("save failed"));
+    renderMenu({ onRenameView });
+    await user.click(screen.getByRole("button", { name: "Open view settings" }));
+    const input = screen.getByRole("textbox", { name: "View name" });
+    await user.clear(input);
+    await user.type(input, "New name that fails");
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "View name" })).toHaveValue("Mine");
+    });
+    expect(screen.getByText("Could not save view name")).toBeInTheDocument();
+  });
+
   it("rename: blank name shows error", async () => {
     const user = userEvent.setup();
     renderMenu();

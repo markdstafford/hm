@@ -62,7 +62,7 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
     [normalizedConfig, entity],
   );
 
-  function commitRename() {
+  async function commitRename() {
     const trimmed = draftName.trim();
     if (!trimmed) {
       setRenameError("View name cannot be blank");
@@ -71,7 +71,12 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
     setRenameError(null);
     if (!activeView) return;
     if (trimmed === activeView.displayName) return;
-    onRenameView(activeView.id, trimmed);
+    try {
+      await onRenameView(activeView.id, trimmed);
+    } catch {
+      setDraftName(activeView.displayName);
+      setRenameError("Could not save view name");
+    }
   }
 
   return (
