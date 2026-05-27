@@ -7,7 +7,7 @@ import { DatePicker } from "./DatePicker";
 const fixedToday = new Date(2026, 4, 27, 9, 30, 0);
 
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(fixedToday);
 });
 
