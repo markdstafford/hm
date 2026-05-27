@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Popover } from "../overlays/Popover";
 
 export type DatePickerProps = {
@@ -127,6 +127,7 @@ function dayAccessibleName(date: CalendarDate, selectedDate: CalendarDate | null
 export function DatePicker({ value, onChange, placeholder = "Select date", disabled = false, minDate, maxDate, ...rest }: DatePickerProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const firstFocusableDayRef = useRef<HTMLButtonElement | null>(null);
+  const pendingFocusDayRef = useRef(false);
   const selectedDate = parseIsoDate(value);
   const parsedMinDate = parseIsoDate(minDate);
   const parsedMaxDate = parseIsoDate(maxDate);
@@ -137,6 +138,13 @@ export function DatePicker({ value, onChange, placeholder = "Select date", disab
   const displayValue = useMemo(() => (value ? formatDisplayDate(value) : null), [value]);
   const calendarCells = useMemo(() => buildCalendarCells(displayMonth), [displayMonth]);
   const label = rest["aria-label"];
+
+  useEffect(() => {
+    if (pendingFocusDayRef.current) {
+      pendingFocusDayRef.current = false;
+      firstFocusableDayRef.current?.focus();
+    }
+  });
 
   function focusTriggerSoon() {
     setTimeout(() => triggerRef.current?.focus(), 0);
@@ -177,11 +185,12 @@ export function DatePicker({ value, onChange, placeholder = "Select date", disab
 
   function moveFocusedDay(delta: number) {
     const nextDay = clampToBounds(addDays(focusedDay, delta), parsedMinDate, parsedMaxDate);
+    pendingFocusDayRef.current = true;
     setFocusedDay(nextDay);
     setDisplayMonth(startOfMonth(nextDay));
   }
 
-  function handleGridKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  function handleGridKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key === "ArrowLeft") {
       event.preventDefault();
       moveFocusedDay(-1);
@@ -263,6 +272,7 @@ export function DatePicker({ value, onChange, placeholder = "Select date", disab
                 tabIndex={shouldReceiveTab ? 0 : -1}
                 onFocus={() => setFocusedDay(cell.date!)}
                 onClick={() => selectDate(cell.date!)}
+                onKeyDown={handleGridKeyDown}
                 className={`inline-flex h-control-base items-center justify-center rounded text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${isSelected ? "bg-primary text-background" : dayDisabled ? "cursor-default text-subtext-1 opacity-40" : "text-text hover:bg-surface"} ${isToday && !isSelected ? "ring-1 ring-primary" : ""}`}
               >
                 {cell.date.day}

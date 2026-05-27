@@ -164,4 +164,56 @@ describe("DatePicker", () => {
     await user.click(screen.getByRole("button", { name: "May 9, 2026, unavailable" }));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("opens from keyboard, moves focused day with arrows, and selects with Enter", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onChange = vi.fn();
+    render(<DatePicker aria-label="Updated date" value="2026-05-27" onChange={onChange} />);
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Updated date" })).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "May 27, 2026, selected, today" })).toHaveFocus();
+
+    await user.keyboard("{ArrowRight}{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenCalledWith("2026-06-04");
+    expect(screen.queryByRole("grid", { name: "June 2026" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Updated date" })).toHaveFocus();
+  });
+
+  it("closes with Escape without emitting a value and returns focus", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onChange = vi.fn();
+    render(<DatePicker aria-label="Updated date" value="2026-05-27" onChange={onChange} />);
+
+    const trigger = screen.getByRole("button", { name: "Updated date" });
+    await user.click(trigger);
+    expect(screen.getByRole("grid", { name: "May 2026" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("grid", { name: "May 2026" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("has labelled calendar controls and no axe violations while open", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { container } = render(
+      <DatePicker
+        aria-label="Updated date"
+        value="2026-05-27"
+        onChange={() => {}}
+        minDate="2026-05-10"
+        maxDate="2026-06-10"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Updated date" }));
+
+    expect(screen.getByRole("button", { name: "Previous month" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next month" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear date" })).toBeInTheDocument();
+    expect(await axe(container)).toHaveNoViolations();
+  });
 });
