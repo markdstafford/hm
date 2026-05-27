@@ -38,7 +38,7 @@ export function Row<TItem, TProperty extends string>({
         type="button"
         aria-label="Select issue (coming soon)"
         aria-disabled="true"
-        className="flex-none p-0.5 text-subtext/50 cursor-default"
+        className="flex flex-none items-center justify-center p-0.5 text-subtext/50 cursor-default"
         onClick={(e) => e.stopPropagation()}
       >
         <Square size={11} aria-hidden />
