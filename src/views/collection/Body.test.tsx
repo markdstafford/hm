@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { Body } from "./Body";
+import { Body, sortCollectionItems } from "./Body";
 import type { EntityContract } from "./types";
 
 type Item = { id: string; name: string; rank: number };
@@ -93,5 +93,23 @@ describe("Body", () => {
     );
     expect(screen.getByText("Xray")).toBeInTheDocument();
     expect(screen.getByText("5")).toBeInTheDocument();
+  });
+
+  it("sortCollectionItems returns items sorted by entity.defaultSort (rank ascending)", () => {
+    const items: Item[] = [
+      { id: "a", name: "Alpha", rank: 2 },
+      { id: "b", name: "Beta", rank: 1 },
+    ];
+    expect(sortCollectionItems(items, entity).map((i) => i.id)).toEqual(["b", "a"]);
+  });
+
+  it("passes compact density to row elements (py-1 present, py-2 absent)", () => {
+    const items: Item[] = [{ id: "x", name: "Xray", rank: 5 }];
+    const { container } = render(
+      <Body items={items} entity={entity} selectedId={null} density="compact" onSelect={vi.fn()} />,
+    );
+    expect(container.querySelector(".py-1")).toBeInTheDocument();
+    expect(container.querySelector(".py-2")).not.toBeInTheDocument();
+    expect(container.querySelector(".px-3")).toBeInTheDocument();
   });
 });

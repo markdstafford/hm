@@ -201,4 +201,24 @@ describe("Row", () => {
       )
     ).not.toThrow();
   });
+
+  it("uses regular vertical padding (py-2) by default while keeping horizontal padding (px-3)", () => {
+    const { container } = render(
+      <Row item={item} entity={entity} properties={entity.defaultProperties} selectedId={null} onSelect={vi.fn()} />,
+    );
+    expect(container.firstChild).toHaveClass("px-3");
+    expect(container.firstChild).toHaveClass("py-2");
+    expect(container.firstChild).not.toHaveClass("py-1");
+    expect(container.firstChild).not.toHaveClass("py-1.5");
+  });
+
+  it("uses compact vertical padding (py-1) without changing horizontal padding (px-3)", () => {
+    const { container } = render(
+      <Row item={item} entity={entity} properties={entity.defaultProperties} selectedId={null} density="compact" onSelect={vi.fn()} />,
+    );
+    expect(container.firstChild).toHaveClass("px-3");
+    expect(container.firstChild).toHaveClass("py-1");
+    expect(container.firstChild).not.toHaveClass("py-2");
+    expect(container.firstChild).not.toHaveClass("py-1.5");
+  });
 });

@@ -1,4 +1,5 @@
 import { Square } from "lucide-react";
+import type { ViewDensity } from "./ViewConfig";
 import type { EntityContract, PropertyConfig } from "./types";
 
 type Props<TItem, TProperty extends string> = {
@@ -6,6 +7,7 @@ type Props<TItem, TProperty extends string> = {
   entity: EntityContract<TItem, TProperty>;
   properties: PropertyConfig<TProperty>[];
   selectedId: string | null;
+  density?: ViewDensity;
   onSelect: (item: TItem) => void;
 };
 
@@ -14,6 +16,7 @@ export function Row<TItem, TProperty extends string>({
   entity,
   properties,
   selectedId,
+  density = "regular",
   onSelect,
 }: Props<TItem, TProperty>) {
   const itemId = entity.getId(item);
@@ -27,7 +30,7 @@ export function Row<TItem, TProperty extends string>({
 
   return (
     <div
-      className={`flex items-center px-3 py-1.5 gap-2 transition-colors ${
+      className={`flex items-center px-3 ${density === "compact" ? "py-1" : "py-2"} gap-2 transition-colors ${
         isSelected ? "bg-surface-1" : "hover:bg-surface"
       }`}
     >
