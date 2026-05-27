@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Inbox, Settings as SettingsIcon, PanelLeft, Sparkles, MessageSquare, X } from "lucide-react";
+import { Inbox, ListTodo, Settings as SettingsIcon, PanelLeft, Sparkles, MessageSquare, X } from "lucide-react";
 import { commands, type AppStatus } from "./bindings";
 import {
   type AppPreferences,
@@ -18,6 +18,8 @@ import { NavItem } from "./ui/sidebar/NavItem";
 import { ScopeHeader } from "./ui/sidebar/ScopeHeader";
 import { Showcase } from "./_dev/Showcase";
 import { InboxPage } from "./features/inbox/InboxPage";
+import { CollectionViewerPage } from "./features/collection-viewer/CollectionViewerPage";
+import { Breadcrumb } from "./ui/navigation/Breadcrumb";
 import {
   SettingsPage,
   SettingsBreadcrumb,
@@ -31,6 +33,8 @@ function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [settingsPage, setSettingsPage] = useState<SettingsCategory | null>(null);
   const [showShowcase, setShowShowcase] = useState(false);
+  type MainPage = "inbox" | "jira-issues";
+  const [mainPage, setMainPage] = useState<MainPage>("inbox");
   const [prefersDark, setPrefersDark] = useState(getSystemPrefersDark);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
 
@@ -130,6 +134,12 @@ function App() {
       }
     : showShowcase
     ? { titleBar: <span className="text-sm text-text">Showcase</span>, header: null as React.ReactNode, content: <Showcase /> }
+    : mainPage === "jira-issues"
+    ? {
+        titleBar: <Breadcrumb items={[{ label: "Jira issues", isCurrent: true }]} />,
+        header: null as React.ReactNode,
+        content: <CollectionViewerPage />,
+      }
     : InboxPage;
 
   return (
@@ -141,7 +151,19 @@ function App() {
             <SettingsSidebar current={settingsPage!} onPick={setSettingsPage} />
           ) : (
             <NavSection label="Personal">
-              <NavItem label="Inbox" count={0} icon={<Inbox size={12} />} active />
+              <NavItem
+                label="Inbox"
+                count={0}
+                icon={<Inbox size={12} />}
+                active={mainPage === "inbox"}
+                onClick={() => setMainPage("inbox")}
+              />
+              <NavItem
+                label="Jira issues"
+                icon={<ListTodo size={12} />}
+                active={mainPage === "jira-issues"}
+                onClick={() => setMainPage("jira-issues")}
+              />
             </NavSection>
           )
         }

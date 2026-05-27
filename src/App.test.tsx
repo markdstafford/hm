@@ -26,6 +26,7 @@ vi.mock("./bindings", () => ({
     appStatus: vi.fn().mockResolvedValue({ version: "0.1.0", ready: true }),
     preferencesRead: vi.fn().mockResolvedValue({ status: "ok", data: {} }),
     preferencesWrite: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    jiraIssuesList: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
   },
 }));
 
@@ -73,5 +74,33 @@ describe("App / showcase shortcut", () => {
     render(<App />);
     fireEvent.keyDown(window, { key: "d", metaKey: true, shiftKey: true });
     expect(screen.getByRole("heading", { name: "Design system showcase" })).toBeInTheDocument();
+  });
+});
+
+describe("App / Jira issues navigation", () => {
+  it("renders Jira issues nav item in the sidebar", () => {
+    render(<App />);
+    expect(screen.getByRole("button", { name: /jira issues/i })).toBeInTheDocument();
+  });
+
+  it("navigates to Jira issues page when nav item is clicked", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /jira issues/i }));
+    expect(screen.getByText(/no jira issues yet/i)).toBeInTheDocument();
+  });
+
+  it("Inbox nav item is active by default", () => {
+    render(<App />);
+    const inboxButtons = screen.getAllByRole("button", { name: /inbox/i });
+    const inboxNav = inboxButtons.find((b) => b.textContent?.toLowerCase().includes("inbox") && !b.textContent?.toLowerCase().includes("jira"));
+    expect(inboxNav).toHaveAttribute("aria-current", "page");
+  });
+
+  it("Jira issues nav item becomes active after navigation", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /jira issues/i }));
+    expect(screen.getByRole("button", { name: /jira issues/i })).toHaveAttribute("aria-current", "page");
   });
 });
