@@ -127,7 +127,13 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
           />
         )}
         {panel === "sort" && (
-          <SortPanel onBack={() => setPanel("top")} onClose={() => handleOpenChange(false)} />
+          <SortPanel
+            entity={entity}
+            config={normalizedConfig}
+            onPatchConfig={handlePatchConfig}
+            onBack={() => setPanel("top")}
+            onClose={() => handleOpenChange(false)}
+          />
         )}
         {panel === "group" && (
           <GroupPanel onBack={() => setPanel("top")} onClose={() => handleOpenChange(false)} />

@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { Body, sortCollectionItems } from "./Body";
+import { Body } from "./Body";
+import { sortCollectionItems } from "./sort";
 import type { EntityContract } from "./types";
 
 type Item = { id: string; name: string; rank: number };
@@ -29,6 +30,10 @@ const entity: EntityContract<Item, Prop> = {
     { property: "rank", side: "right", visible: true },
   ],
   defaultSort: (a, b) => a.rank - b.rank,
+  sortableProperties: [
+    { property: "name", compare: (a, b) => a.name.localeCompare(b.name) },
+    { property: "rank", compare: (a, b) => a.rank - b.rank },
+  ],
   Detail: ({ item }) => <div>Detail: {item.name}</div>,
   defaultViews: [],
 };
@@ -100,7 +105,29 @@ describe("Body", () => {
       { id: "a", name: "Alpha", rank: 2 },
       { id: "b", name: "Beta", rank: 1 },
     ];
-    expect(sortCollectionItems(items, entity).map((i) => i.id)).toEqual(["b", "a"]);
+    expect(sortCollectionItems(items, entity, []).map((i) => i.id)).toEqual(["b", "a"]);
+  });
+
+  it("renders rows using active sort levels before default fallback", () => {
+    const items: Item[] = [
+      { id: "a", name: "Alpha", rank: 2 },
+      { id: "b", name: "Beta", rank: 1 },
+    ];
+
+    render(
+      <Body
+        items={items}
+        entity={entity}
+        sort={[{ property: "name", direction: "desc" }]}
+        selectedId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const rows = screen.getAllByRole("button", { name: /open/i });
+    // desc name sort: Beta (b) first, Alpha (a) second
+    expect(rows[0]).toHaveAttribute("aria-label", "Open b");
+    expect(rows[1]).toHaveAttribute("aria-label", "Open a");
   });
 
   it("passes compact density to row elements (py-1 present, py-2 absent)", () => {

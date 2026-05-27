@@ -698,7 +698,7 @@ Sub-panel implementation status:
 
 **Keyboard navigation:** `useKeyboardNavigation` (`src/views/collection/useKeyboardNavigation.ts`) registers on `window`. `ArrowUp`/`ArrowDown` work in all preview modes; `j`/`k`/`Escape` work only in `full-page`. Ignores events from form fields (`isFormFieldTarget` from `src/shell/keys.ts`).
 
-**Display order:** `sortCollectionItems(items, entity)` exported from `Body.tsx` is the shared sort helper — `Body`, `CollectionViewerPage`, and keyboard navigation all use it to ensure `M of N` and movement match the rendered order.
+**Display order:** `sortCollectionItems(items, entity, activeConfig.sort)` from `src/views/collection/sort.ts` is the shared helper. `Body`, `useCollectionViewer`, preview navigation, `M of N`, and keyboard movement must all use the same active sort stack and fall back to `entity.defaultSort` when no valid configured levels exist.
 
 **Typed view config:** `ViewConfig` type and helpers live in `src/views/collection/ViewConfig.ts`. Legacy `{}` configs normalize to typed defaults via `normalizeViewConfig(input, entity)`.
 

@@ -5,7 +5,8 @@ import { loadPreferences, savePreferences } from "../../preferences/storage";
 import type { AppPreferences } from "../../preferences";
 import { Spinner } from "../../ui/feedback/Spinner";
 import { EmptyState } from "../../ui/feedback/EmptyState";
-import { Body, sortCollectionItems } from "../../views/collection/Body";
+import { Body } from "../../views/collection/Body";
+import { sortCollectionItems } from "../../views/collection/sort";
 import { CollectionHeader } from "../../views/collection/CollectionHeader";
 import { Detail } from "../../views/collection/Detail";
 import { FullPagePreview } from "../../views/collection/FullPagePreview";
@@ -74,8 +75,8 @@ export function useCollectionViewer({
   );
 
   const displayItems = useMemo(
-    () => sortCollectionItems(issues, jiraIssueEntity),
-    [issues],
+    () => sortCollectionItems(issues, jiraIssueEntity, activeConfig.sort),
+    [issues, activeConfig.sort],
   );
 
   const selectedIndex = useMemo(
@@ -391,6 +392,7 @@ export function useCollectionViewer({
               items={issues}
               entity={jiraIssueEntity}
               properties={activeConfig.propertyVisibility as PropertyConfig<JiraIssueProperty>[]}
+              sort={activeConfig.sort}
               selectedId={selectedId}
               density={activeConfig.layout.density}
               onSelect={handleSelect}
