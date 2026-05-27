@@ -386,6 +386,7 @@ export function useCollectionViewer({
             <Body
               items={issues}
               entity={jiraIssueEntity}
+              properties={activeConfig.propertyVisibility}
               selectedId={selectedId}
               density={activeConfig.layout.density}
               onSelect={handleSelect}

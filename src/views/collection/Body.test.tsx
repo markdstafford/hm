@@ -112,4 +112,23 @@ describe("Body", () => {
     expect(container.querySelector(".py-2")).not.toBeInTheDocument();
     expect(container.querySelector(".px-3")).toBeInTheDocument();
   });
+
+  it("uses the provided active property configuration instead of entity defaults", () => {
+    const items: Item[] = [{ id: "x", name: "Xray", rank: 5 }];
+    render(
+      <Body
+        items={items}
+        entity={entity}
+        selectedId={null}
+        properties={[
+          { property: "name", side: "left", visible: true },
+          { property: "rank", side: "right", visible: false },
+        ]}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Xray")).toBeInTheDocument();
+    expect(screen.queryByText("5")).not.toBeInTheDocument();
+  });
 });

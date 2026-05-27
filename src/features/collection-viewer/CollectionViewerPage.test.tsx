@@ -496,4 +496,38 @@ describe("CollectionViewerPage", () => {
       expect(screen.getByRole("button", { name: /open amp-2: second issue/i })).toHaveAttribute("aria-pressed", "true");
     });
   });
+
+  it("passes active view property visibility to rows so hidden properties disappear", async () => {
+    const records = [
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: {
+          propertyVisibility: [
+            { property: "key", side: "left", visible: true },
+            { property: "title", side: "left", visible: true },
+            { property: "assignee", side: "right", visible: false },
+            { property: "status", side: "right", visible: false },
+            { property: "updated_at_source", side: "right", visible: false },
+            { property: "priority", side: "left", visible: false },
+            { property: "labels", side: "left", visible: false },
+            { property: "project_key", side: "left", visible: false },
+          ],
+        },
+      },
+    ];
+    mockViewCommands(records);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+
+    render(<CollectionViewerPage />);
+
+    expect(await screen.findByText("AMP-1")).toBeInTheDocument();
+    expect(screen.getByText("First issue")).toBeInTheDocument();
+    // Status and Assignee are hidden
+    expect(screen.queryByText("Open")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+  });
 });
