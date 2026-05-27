@@ -44,7 +44,7 @@ export function CollectionViewerPage() {
   const [preferences, setPreferences] = useState<AppPreferences>({});
   const [viewsLoading, setViewsLoading] = useState(true);
   const [viewError, setViewError] = useState<string | null>(null);
-  const [fullPageOpen, setFullPageOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
 
@@ -78,22 +78,15 @@ export function CollectionViewerPage() {
     setSelectedId(displayItems[selectedIndex + 1].work_item_id);
   }, [displayItems, selectedIndex]);
 
-  // When preview changes to full-page while a row is already selected, open the full-page surface.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (activeConfig.layout.preview === "full-page" && selectedId !== null) {
-      setFullPageOpen(true);
-    }
-  }, [activeConfig.layout.preview]);
-
   useKeyboardNavigation({
     enabled: !!selectedItem,
-    mode: activeConfig.layout.preview,
+    previewOpen,
     selectedIndex,
     total: displayItems.length,
     onMovePrevious: movePrevious,
     onMoveNext: moveNext,
-    onExitFullPage: () => setFullPageOpen(false),
+    onOpenPreview: () => setPreviewOpen(true),
+    onClosePreview: () => setPreviewOpen(false),
   });
 
   useEffect(() => {
@@ -239,12 +232,12 @@ export function CollectionViewerPage() {
 
   function handleSelect(item: JiraIssueListItem) {
     setSelectedId(item.work_item_id);
-    if (activeConfig.layout.preview === "full-page") setFullPageOpen(true);
+    // Does NOT open preview — user presses Enter to open
   }
 
-  function handleClose() {
-    setSelectedId(null);
-    setFullPageOpen(false);
+  function handleClosePreview() {
+    setPreviewOpen(false);
+    // Keeps selectedId — row stays highlighted
   }
 
   let header;
@@ -310,7 +303,7 @@ export function CollectionViewerPage() {
     );
   } else {
     const preview = activeConfig.layout.preview;
-    const showFullPage = preview === "full-page" && !!selectedItem && fullPageOpen;
+    const showFullPage = preview === "full-page" && !!selectedItem && previewOpen;
 
     if (showFullPage) {
       body = (
@@ -321,7 +314,7 @@ export function CollectionViewerPage() {
           total={displayItems.length}
           canMovePrevious={canMovePrevious}
           canMoveNext={canMoveNext}
-          onBack={() => setFullPageOpen(false)}
+          onBack={() => setPreviewOpen(false)}
           onMovePrevious={movePrevious}
           onMoveNext={moveNext}
         />
@@ -339,7 +332,7 @@ export function CollectionViewerPage() {
               onSelect={handleSelect}
             />
           </div>
-          {selectedItem && preview !== "full-page" && (
+          {selectedItem && previewOpen && preview !== "full-page" && (
             <Detail
               item={selectedItem}
               entity={jiraIssueEntity}
@@ -348,7 +341,7 @@ export function CollectionViewerPage() {
               total={displayItems.length}
               canMovePrevious={canMovePrevious}
               canMoveNext={canMoveNext}
-              onClose={handleClose}
+              onClose={handleClosePreview}
               onMovePrevious={movePrevious}
               onMoveNext={moveNext}
             />
