@@ -18,7 +18,7 @@ import { NavItem } from "./ui/sidebar/NavItem";
 import { ScopeHeader } from "./ui/sidebar/ScopeHeader";
 import { Showcase } from "./_dev/Showcase";
 import { InboxPage } from "./features/inbox/InboxPage";
-import { CollectionViewerPage } from "./features/collection-viewer/CollectionViewerPage";
+import { useCollectionViewer } from "./features/collection-viewer/useCollectionViewer";
 import { Breadcrumb } from "./ui/navigation/Breadcrumb";
 import {
   SettingsPage,
@@ -118,6 +118,13 @@ function App() {
     setTimeout(() => settingsOpenerRef.current?.focus(), 0);
   };
 
+  // Always mount the collection-viewer hook so its view state survives page
+  // switches. The `active` flag gates keyboard navigation so arrow keys do not
+  // move selection when the user is on Inbox / Settings / Showcase.
+  const collectionViewer = useCollectionViewer({
+    active: !inSettings && !showShowcase && mainPage === "jira-issues",
+  });
+
   const page = inSettings
     ? {
         titleBar: <SettingsBreadcrumb category={settingsPage!} />,
@@ -137,8 +144,8 @@ function App() {
     : mainPage === "jira-issues"
     ? {
         titleBar: <Breadcrumb items={[{ label: "Jira issues", isCurrent: true }]} />,
-        header: null as React.ReactNode,
-        content: <CollectionViewerPage />,
+        header: collectionViewer.header,
+        content: collectionViewer.body,
       }
     : InboxPage;
 

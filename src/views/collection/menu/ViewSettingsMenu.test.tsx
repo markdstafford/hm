@@ -74,14 +74,30 @@ describe("ViewSettingsMenu", () => {
     expect(screen.getByText("Soon")).toBeInTheDocument();
   });
 
-  it("clicking Layout opens layout panel", async () => {
+  it("clicking Layout opens layout panel with real controls", async () => {
     const user = userEvent.setup();
     renderMenu();
     await user.click(screen.getByRole("button", { name: "Open view settings" }));
-    // The row button's accessible name includes summary text; find by text content span
     await user.click(screen.getByText("Layout").closest("button")!);
     expect(screen.getByRole("heading", { name: "Layout" })).toBeInTheDocument();
-    expect(screen.getByText("Coming in #40")).toBeInTheDocument();
+    expect(screen.getByText("Table")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /regular/i })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("layout density change calls onPatchConfig with active view id and compact density", async () => {
+    const user = userEvent.setup();
+    const onPatchConfig = vi.fn();
+    renderMenu({ onPatchConfig });
+    await user.click(screen.getByRole("button", { name: "Open view settings" }));
+    await user.click(screen.getByText("Layout").closest("button")!);
+    await user.click(screen.getByRole("button", { name: /compact/i }));
+
+    expect(onPatchConfig).toHaveBeenCalledWith(
+      "jira-issue-mine",
+      expect.objectContaining({
+        layout: expect.objectContaining({ density: "compact", preview: "side-peek", type: "table" }),
+      }),
+    );
   });
 
   it("clicking Property visibility opens that panel", async () => {

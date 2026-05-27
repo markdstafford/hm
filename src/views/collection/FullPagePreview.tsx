@@ -1,35 +1,35 @@
-import { ArrowUp, ArrowDown, X } from "lucide-react";
-import { IconButton } from "../../ui/buttons/IconButton";
+import { ArrowUp, ArrowDown } from "lucide-react";
 import type { EntityContract } from "./types";
-import type { PreviewSurface } from "./ViewConfig";
-
-type DetailSurface = Extract<PreviewSurface, "side-peek" | "bottom-peek">;
 
 type Props<TItem, TProperty extends string> = {
   item: TItem;
   entity: EntityContract<TItem, TProperty>;
-  surface: DetailSurface;
   index: number;
   total: number;
   canMovePrevious: boolean;
   canMoveNext: boolean;
-  onClose: () => void;
+  onBack: () => void;
   onMovePrevious: () => void;
   onMoveNext: () => void;
 };
 
-export function Detail<TItem, TProperty extends string>({
-  item, entity, surface, index, total, canMovePrevious, canMoveNext, onClose, onMovePrevious, onMoveNext,
+export function FullPagePreview<TItem, TProperty extends string>({
+  item, entity, index, total, canMovePrevious, canMoveNext, onBack, onMovePrevious, onMoveNext,
 }: Props<TItem, TProperty>) {
   const EntityDetail = entity.Detail;
-  const frameClass = surface === "side-peek"
-    ? "w-[440px] shrink-0 border-l border-border"
-    : "h-[280px] shrink-0 border-t border-border";
-
   return (
-    <aside aria-label="Issue detail" className={`${frameClass} flex flex-col overflow-hidden bg-background`}>
-      <div className="flex items-center gap-2 px-3 py-2 shrink-0 border-b border-border">
-        <span className="mr-auto text-xs tabular-nums text-subtext">{index + 1} of {total}</span>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+        <button
+          type="button"
+          aria-label="Back to list (Esc)"
+          onClick={onBack}
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-sm text-subtext hover:bg-surface hover:text-text"
+        >
+          Back to list (Esc)
+        </button>
+        <div className="flex-1" />
+        <span className="text-xs tabular-nums text-subtext">{index + 1} of {total}</span>
         <button
           type="button"
           aria-label="Previous issue"
@@ -48,13 +48,16 @@ export function Detail<TItem, TProperty extends string>({
         >
           <ArrowDown size={12} aria-hidden />
         </button>
-        <IconButton label="Close issue detail" onClick={onClose}>
-          <X size={12} aria-hidden />
-        </IconButton>
+        <span
+          aria-label="Keyboard navigation hint"
+          className="text-xs text-subtext"
+        >
+          j / k
+        </span>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <EntityDetail item={item} />
       </div>
-    </aside>
+    </div>
   );
 }

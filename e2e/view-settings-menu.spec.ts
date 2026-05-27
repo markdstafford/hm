@@ -25,9 +25,16 @@ test("Jira view settings menu opens, renames, navigates, and dismisses", async (
     await expect(menuHeading).toBeVisible();
   }
 
+  // Drill into Layout — now has real controls
+  await page.getByRole("button", { name: /layout/i }).click();
+  await expect(page.getByRole("heading", { name: "Layout" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /table/i })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /regular/i })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: /back to view settings/i }).click();
+  await expect(page.getByRole("heading", { name: "View settings" })).toBeVisible();
+
   // Drill into each sub-panel and verify title + placeholder body, then back
   const panels = [
-    { row: "Layout", body: "Coming in #40" },
     { row: "Property visibility", body: "Coming in #41" },
     { row: "Sort", body: "Coming in #42" },
     { row: "Group", body: "Coming in #43" },

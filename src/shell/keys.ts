@@ -50,7 +50,7 @@ export function eventMatchesBinding(e: KeyboardEvent, b: NormalizedBinding): boo
 
 export function isFormFieldTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return true;
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return true;
   if (target.isContentEditable) return true;
   const ce = target.contentEditable;
   if (ce === "true" || ce === "plaintext-only") return true;

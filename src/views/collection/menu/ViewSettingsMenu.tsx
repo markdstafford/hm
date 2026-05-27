@@ -27,6 +27,7 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
   activeView,
   entity,
   onRenameView,
+  onPatchConfig,
 }: ViewSettingsMenuProps<TItem, TProperty>) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<ViewSettingsPanel>("top");
@@ -61,6 +62,11 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
     () => summarizeViewConfig(normalizedConfig, entity),
     [normalizedConfig, entity],
   );
+
+  async function handlePatchConfig(config: ViewConfig) {
+    if (!activeView) return;
+    await onPatchConfig(activeView.id, config);
+  }
 
   async function commitRename() {
     const trimmed = draftName.trim();
@@ -106,7 +112,7 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
           />
         )}
         {panel === "layout" && (
-          <LayoutPanel onBack={() => setPanel("top")} onClose={() => handleOpenChange(false)} />
+          <LayoutPanel config={normalizedConfig} onPatchConfig={handlePatchConfig} onBack={() => setPanel("top")} onClose={() => handleOpenChange(false)} />
         )}
         {panel === "property-visibility" && (
           <PropertyVisibilityPanel
