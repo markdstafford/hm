@@ -675,20 +675,28 @@ If all views are deleted, a safe fallback view is created before re-rendering so
 ```
 `PanelHeader` props: `title`, optional `onBack`, `onClose`. Back button label: `"Back to view settings"`. Close button label: `"Close view settings"`.
 
-Issue #39 ships stub bodies only:
-| Panel | Body |
-|-------|------|
-| Layout | `Coming in #40` |
+Sub-panel implementation status:
+| Panel | Status |
+|-------|--------|
+| Layout | Real controls (issue #40) |
 | Property visibility | `Coming in #41` |
 | Sort | `Coming in #42` |
 | Group | `Coming in #43` |
 | Filter | `Coming in #44` |
 
+**Layout sub-panel** (`src/views/collection/menu/sub-panels/LayoutPanel.tsx`): Type tiles (3-col grid; `Table` enabled, others `aria-disabled`), density segmented toggle (`Compact` / `Regular`, maps to `py-1` / `py-2` on rows), and a `PreviewPopover` trigger row. `PreviewPopover` (`src/views/collection/menu/sub-panels/PreviewPopover.tsx`) shows three options (`side-peek` → Side, `bottom-peek` → Bottom, `full-page` → Full page) via `role="listbox"` + `role="option"` ARIA pattern with `aria-selected`.
+
 **Panel state values:** `"top" | "layout" | "property-visibility" | "sort" | "group" | "filter"` (exported as `ViewSettingsPanel` from `ViewSettingsMenu.tsx`).
 
 **Rename persistence:** `onRenameView(viewId, displayName)` is called on valid commit. The page wires this to `handleRename`, which uses `buildRenameView` from `src/features/collection-viewer/viewConfigPersistence.ts` — this normalizes the config via `normalizeViewConfig` before saving.
 
-**Config patch persistence:** `onPatchConfig(viewId, config: ViewConfig)` is available for future sub-panel controls (#40–#44). The page uses `handlePatchViewConfig` → `buildConfigPatchView` → `collectionViewSave`.
+**Config patch persistence:** `onPatchConfig(viewId, config: ViewConfig)` is the established path for sub-panel controls (#40–#44). The page uses `handlePatchViewConfig` → `buildConfigPatchView` → `collectionViewSave`. Use `patchViewConfig(config, { layout: { ...config.layout, density } })` to patch a single layout field while preserving others.
+
+**Preview surfaces:** `CollectionViewerPage` renders one of three surfaces based on `activeConfig.layout.preview`: `side-peek` → 440px right rail (`Detail` with `surface="side-peek"`), `bottom-peek` → 280px bottom pane (`Detail` with `surface="bottom-peek"`), `full-page` → `FullPagePreview` hides list and shows nav strip. `Detail` (`src/views/collection/Detail.tsx`) accepts `surface`, `index`, `total`, `canMovePrevious/Next`, and movement handlers — renders `<aside aria-label="Issue detail">`. `FullPagePreview` (`src/views/collection/FullPagePreview.tsx`) accepts same plus `onBack`; shows "Back to list (Esc)" button and `j / k` hint.
+
+**Keyboard navigation:** `useKeyboardNavigation` (`src/views/collection/useKeyboardNavigation.ts`) registers on `window`. `ArrowUp`/`ArrowDown` work in all preview modes; `j`/`k`/`Escape` work only in `full-page`. Ignores events from form fields (`isFormFieldTarget` from `src/shell/keys.ts`).
+
+**Display order:** `sortCollectionItems(items, entity)` exported from `Body.tsx` is the shared sort helper — `Body`, `CollectionViewerPage`, and keyboard navigation all use it to ensure `M of N` and movement match the rendered order.
 
 **Typed view config:** `ViewConfig` type and helpers live in `src/views/collection/ViewConfig.ts`. Legacy `{}` configs normalize to typed defaults via `normalizeViewConfig(input, entity)`.
 
