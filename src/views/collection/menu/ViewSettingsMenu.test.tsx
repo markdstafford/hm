@@ -241,6 +241,25 @@ describe("ViewSettingsMenu", () => {
     expect(screen.getByText("View name cannot be blank")).toBeInTheDocument();
   });
 
+  it("property visibility side change calls onPatchConfig with active view id and updated config", async () => {
+    const user = userEvent.setup();
+    const onPatchConfig = vi.fn();
+    renderMenu({ onPatchConfig });
+
+    await user.click(screen.getByRole("button", { name: "Open view settings" }));
+    await user.click(screen.getByText("Property visibility").closest("button")!);
+    await user.click(screen.getByRole("button", { name: "Move Priority left" }));
+
+    expect(onPatchConfig).toHaveBeenCalledWith(
+      "jira-issue-mine",
+      expect.objectContaining({
+        propertyVisibility: expect.arrayContaining([
+          expect.objectContaining({ property: "priority", side: "left" }),
+        ]),
+      }),
+    );
+  });
+
   it("active-view change closes the menu", async () => {
     const user = userEvent.setup();
     const { rerender } = renderMenu();

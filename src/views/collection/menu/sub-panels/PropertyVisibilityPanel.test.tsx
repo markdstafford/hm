@@ -57,4 +57,96 @@ describe("PropertyVisibilityPanel", () => {
     const { container } = renderPanel();
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it("hiding a non-title property patches only propertyVisibility", async () => {
+    const user = userEvent.setup();
+    const onPatchConfig = vi.fn();
+    const config = defaultViewConfig(jiraIssueEntity);
+    render(
+      <PropertyVisibilityPanel
+        entity={jiraIssueEntity}
+        config={config}
+        onPatchConfig={onPatchConfig}
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Hide Key" }));
+
+    expect(onPatchConfig).toHaveBeenCalledWith({
+      ...config,
+      propertyVisibility: config.propertyVisibility.map((row) =>
+        row.property === "key" ? { ...row, visible: false } : row,
+      ),
+    });
+  });
+
+  it("showing a hidden property patches it visible without moving its canonical index", async () => {
+    const user = userEvent.setup();
+    const onPatchConfig = vi.fn();
+    const config = defaultViewConfig(jiraIssueEntity);
+    render(
+      <PropertyVisibilityPanel
+        entity={jiraIssueEntity}
+        config={config}
+        onPatchConfig={onPatchConfig}
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show Priority" }));
+
+    const patched = onPatchConfig.mock.calls[0][0];
+    expect(patched.propertyVisibility.map((row: { property: string }) => row.property)).toEqual(
+      config.propertyVisibility.map((row) => row.property),
+    );
+    expect(patched.propertyVisibility.find((row: { property: string }) => row.property === "priority").visible).toBe(true);
+  });
+
+  it("does not patch when the title visibility button is clicked", async () => {
+    const user = userEvent.setup();
+    const onPatchConfig = vi.fn();
+    render(
+      <PropertyVisibilityPanel
+        entity={jiraIssueEntity}
+        config={defaultViewConfig(jiraIssueEntity)}
+        onPatchConfig={onPatchConfig}
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Title is always visible" }));
+
+    expect(onPatchConfig).not.toHaveBeenCalled();
+  });
+
+  it("changing side patches only the selected row side and preserves order and unrelated config", async () => {
+    const user = userEvent.setup();
+    const onPatchConfig = vi.fn();
+    const config = defaultViewConfig(jiraIssueEntity);
+    render(
+      <PropertyVisibilityPanel
+        entity={jiraIssueEntity}
+        config={config}
+        onPatchConfig={onPatchConfig}
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Move Priority left" }));
+
+    const patched = onPatchConfig.mock.calls[0][0];
+    expect(patched.propertyVisibility.map((row: { property: string }) => row.property)).toEqual(
+      config.propertyVisibility.map((row) => row.property),
+    );
+    expect(patched.propertyVisibility.find((row: { property: string }) => row.property === "priority").side).toBe("left");
+    expect(patched.layout).toEqual(config.layout);
+    expect(patched.sort).toEqual(config.sort);
+    expect(patched.group).toEqual(config.group);
+    expect(patched.filters).toEqual(config.filters);
+  });
 });
