@@ -44,13 +44,13 @@ export function RelativeDatePopover({ value, onChange }: Props) {
         </button>
       }
     >
-      <div role="listbox" aria-label="Relative date period" className="flex flex-col gap-0.5">
+      <div role="menu" aria-label="Relative date period" className="flex flex-col gap-0.5">
         {RELATIVE_DATE_OPTIONS.map((opt) => (
           <button
             key={opt.id}
             type="button"
-            role="option"
-            aria-selected={value === opt.id}
+            role="menuitemradio"
+            aria-checked={value === opt.id}
             onClick={() => select(opt.id)}
             className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-text hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >

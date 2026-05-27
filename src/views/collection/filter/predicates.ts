@@ -53,7 +53,7 @@ function evaluateNumber(operatorId: string, itemValue: unknown, filterValue: unk
   }
 
   const itemNum = typeof itemValue === "number" ? itemValue : Number(String(itemValue ?? ""));
-  const filterNum = Number(String(filterValue ?? ""));
+  const filterNum = parseFloat(String(filterValue));
 
   if (isNaN(itemNum) || isNaN(filterNum)) return true;
 

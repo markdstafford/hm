@@ -377,6 +377,7 @@ export function useCollectionViewer({
             onPatchConfig={handlePatchViewConfig}
             onOpenChange={setSettingsOpen}
             items={issues}
+            filterOptionContext={{ items: issues }}
           />
         }
       />

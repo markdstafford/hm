@@ -46,7 +46,7 @@ export function FilterValueControl<TItem = unknown, TProperty extends string = s
         value={row.value === "" || row.value == null ? "" : String(row.value)}
         onChange={(e) => {
           const raw = e.target.value;
-          onChange(raw === "" ? "" : Number(raw));
+          onChange(raw);
         }}
         aria-label="Filter value"
       />

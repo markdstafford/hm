@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { PanelHeader } from "../PanelHeader";
 import type { EntityContract } from "../../types";
 import type { FilterOptionContext } from "../../filter/types";
-import type { ViewConfig } from "../../ViewConfig";
+import type { ViewConfig, FilterConfig } from "../../ViewConfig";
 import {
   availableFilterProperties,
   addFilter,
@@ -11,7 +11,6 @@ import {
   updateFilterOperator,
   updateFilterValue,
   clearFilters,
-  normalizeFilterRows,
 } from "../../filter/config";
 import { patchViewConfig } from "../../ViewConfig";
 import { FilterRow } from "./filter/FilterRow";
@@ -34,10 +33,10 @@ export function FilterPanel<TItem = unknown, TProperty extends string = string>(
   onBack,
   onClose,
 }: Props<TItem, TProperty>) {
-  const normalizedRows = normalizeFilterRows(config.filters, entity);
+  const normalizedRows = config.filters;
   const filterableCount = availableFilterProperties(entity).length;
 
-  const patchFilters = useCallback((nextFilters: ReturnType<typeof normalizeFilterRows>) => {
+  const patchFilters = useCallback((nextFilters: FilterConfig[]) => {
     void onPatchConfig(patchViewConfig(config, { filters: nextFilters }));
   }, [config, onPatchConfig]);
 
