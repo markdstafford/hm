@@ -17,6 +17,7 @@ import {
   createFallbackView,
   duplicateViewDraft,
   nextPosition,
+  orderedViews,
   pickActiveViewId,
   seedCollectionViews,
   uniqueUntitledName,
@@ -141,6 +142,9 @@ export function CollectionViewerPage() {
   }
 
   async function handleDelete(viewId: string) {
+    // Capture the deleted view's position in the ordered strip before mutating state,
+    // so we can pick the nearest remaining neighbor (previous preferred, next as fallback).
+    const deletedIndex = orderedViews(views).findIndex((v) => v.id === viewId);
     try {
       if (isTauri()) {
         const result = await commands.collectionViewDelete(viewId);
@@ -153,8 +157,10 @@ export function CollectionViewerPage() {
       }
       setViews(nextViews);
       if (activeViewId === viewId || !activeViewId) {
-        const fallbackActive = pickActiveViewId(nextViews, null);
-        if (fallbackActive) await persistActive(fallbackActive);
+        const orderedNext = orderedViews(nextViews);
+        // Prefer the previous neighbor; fall back to next when deleting the first chip.
+        const neighborId = orderedNext[deletedIndex - 1]?.id ?? orderedNext[deletedIndex]?.id ?? null;
+        if (neighborId) await persistActive(neighborId);
       }
     } catch (err) {
       console.warn("[collection-views] delete failed", err);

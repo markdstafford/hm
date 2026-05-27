@@ -209,4 +209,42 @@ describe("CollectionViewerPage", () => {
       expect(screen.getByRole("button", { name: "All open" })).toHaveAttribute("aria-current", "true");
     });
   });
+
+  it("deletes the last chip in the strip and activates the previous neighbor", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    // Activate "Recently updated" (last chip, position 2)
+    fireEvent.click(await screen.findByRole("button", { name: "Recently updated" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Recently updated" })).toHaveAttribute("aria-current", "true"),
+    );
+    // Delete it via context menu
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Recently updated" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(await screen.findByRole("button", { name: /delete view/i }));
+    expect(commands.collectionViewDelete).toHaveBeenCalledWith("jira-issue-recently-updated");
+    // Should activate "Mine" (adjacent previous), not "All open" (first)
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Mine" })).toHaveAttribute("aria-current", "true");
+    });
+    expect(screen.queryByRole("button", { name: "Recently updated" })).not.toBeInTheDocument();
+  });
+
+  it("restores deletion and active-view choice after simulated app reload", async () => {
+    // Simulate reload state: Recently updated was previously deleted; Mine was saved as active.
+    const remainingViews = [
+      { id: "jira-issue-all-open", entity_kind: "jira-issue", display_name: "All open", position: 0, is_default: true, config: {} },
+      { id: "jira-issue-mine", entity_kind: "jira-issue", display_name: "Mine", position: 1, is_default: true, config: {} },
+    ];
+    vi.mocked(commands.collectionViewsSeedDefaults).mockResolvedValue({ status: "ok", data: remainingViews });
+    vi.mocked(commands.collectionViewsList).mockResolvedValue({ status: "ok", data: remainingViews });
+    vi.mocked(loadPreferences).mockResolvedValue({
+      collections: { activeViewId: { "jira-issue": "jira-issue-mine" } },
+    });
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: [], loading: false, error: null });
+    render(<CollectionViewerPage />);
+    // Mine should be restored as active; Recently updated must not appear
+    expect(await screen.findByRole("button", { name: "Mine" })).toHaveAttribute("aria-current", "true");
+    expect(screen.queryByRole("button", { name: "Recently updated" })).not.toBeInTheDocument();
+  });
 });

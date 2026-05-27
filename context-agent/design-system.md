@@ -576,6 +576,73 @@ Settings is not a modal or overlay — it is a routed page mode. There is no esc
 
 ---
 
+## Named-view chip strip
+
+The `ViewChips` + `ChipContextMenu` + `CollectionHeader` triad is a reusable header pattern for any collection page that supports named views. It lives under `src/views/collection/`.
+
+### Layout
+
+`CollectionHeader` renders a single `h-8` (`32px`) row pinned above the collection body:
+
+```
+[ All open ] [ Mine ] [ Recently updated ] [ + ]        [ sliders ]
+^--- ViewChips (left, flex-1, min-w-0) ---^              ^--- IconButton ---^
+```
+
+The chip strip takes all remaining width (`flex-1`, `min-w-0`); the settings icon is `shrink-0` and right-aligned. Both are vertically centered.
+
+### Chip states and tokens
+
+| State | Classes |
+| --- | --- |
+| Active chip | `bg-primary text-on-primary` (primary tone) |
+| Inactive chip (rest) | `border border-border bg-surface text-text` (surface tone) |
+| Inactive chip (hover) | `hover:bg-surface-1` |
+| Chip height | `h-control-sm` (`1.5rem` / 24px) |
+| Chip shape | `rounded-full px-2 text-xs font-medium` |
+| Long name | `max-w-48 truncate` — label truncates; chip does not push settings icon off-screen |
+
+The active chip sets `aria-current="true"` and `data-active="true"`.
+
+### Trailing `+` chip
+
+Always rendered after the last view. Uses the same surface-tone styling as inactive chips. `aria-label="Create named view"`. Clicking calls `onCreate`.
+
+### Context menu and delete confirmation
+
+Right-clicking a chip opens a Radix `ContextMenu` with three items in order: `Rename`, `Duplicate`, `Delete`.
+
+- **Rename** — opens a `Dialog` with a text input pre-filled with the current view name. Saves via `onRename(viewId, newName)`. Empty or whitespace names are rejected with an inline error.
+- **Duplicate** — calls `onDuplicate(viewId)` immediately; the page creates a copy and activates it.
+- **Delete** — opens an `AlertDialog` confirmation before calling `onDelete(viewId)`. The title names the view being deleted (e.g., `Delete Mine?`). Confirming calls the handler; cancelling is safe.
+
+`ChipContextMenu` manages its own `renameOpen` / `deleteOpen` state. It does not know about persistence; callers supply the handlers.
+
+### Active fallback on delete
+
+When the deleted chip was active, the page selects the **previous neighbor** in the ordered strip. If the deleted chip was first (no previous), the **next neighbor** is chosen instead. If only one view remains after deletion, it becomes active automatically. The fallback id is persisted to preferences.
+
+If all views are deleted, a safe fallback view is created before re-rendering so the strip is never empty.
+
+### Settings placeholder
+
+`CollectionHeader` renders an `IconButton` with `SlidersHorizontal` (14px) on the right. It uses `dimmed` + `disabled` semantics with `label="View settings coming next"` until issue #39 wires real behavior. Do not open a half-built settings panel; `aria-disabled` keeps the button focusable and tooltip-eligible.
+
+### Accessibility checklist
+
+- Each chip button has an accessible name (the view display name).
+- Active chip exposes `aria-current="true"`.
+- `+` chip has `aria-label="Create named view"`.
+- Context menu uses Radix focus management and keyboard navigation.
+- Delete confirmation uses `AlertDialog` with a title naming the view.
+- Settings placeholder has `aria-label` + tooltip via `IconButton`.
+
+### Reuse contract
+
+`ViewChips` and `ChipContextMenu` are entity-agnostic. Pass the ordered `CollectionView[]`, the `activeViewId`, and CRUD handlers. Jira-specific defaults live in `src/entities/jira-issue/defaults.ts`; the components know nothing about the entity.
+
+---
+
 ## Collections
 
 Configurable lists of one entity type — the read / write / enhance / history pattern every collection viewer in the app follows. Four documents specify the contract:
