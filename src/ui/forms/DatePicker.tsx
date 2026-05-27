@@ -106,6 +106,15 @@ function addDays(date: CalendarDate, delta: number): CalendarDate {
   return { year: nativeDate.getFullYear(), month: nativeDate.getMonth() + 1, day: nativeDate.getDate() };
 }
 
+function buildCalendarRows(displayMonth: CalendarDate): CalendarCell[][] {
+  const cells = buildCalendarCells(displayMonth);
+  const rows: CalendarCell[][] = [];
+  for (let i = 0; i < cells.length; i += 7) {
+    rows.push(cells.slice(i, i + 7));
+  }
+  return rows;
+}
+
 function buildCalendarCells(displayMonth: CalendarDate): CalendarCell[] {
   const firstWeekday = new Date(displayMonth.year, displayMonth.month - 1, 1).getDay();
   const totalDays = daysInMonth(displayMonth.year, displayMonth.month);
@@ -136,7 +145,7 @@ export function DatePicker({ value, onChange, placeholder = "Select date", disab
   const [displayMonth, setDisplayMonth] = useState<CalendarDate>(() => startOfMonth(clampToBounds(selectedDate ?? today, parsedMinDate, parsedMaxDate)));
   const [focusedDay, setFocusedDay] = useState<CalendarDate>(() => clampToBounds(selectedDate ?? today, parsedMinDate, parsedMaxDate));
   const displayValue = useMemo(() => (value ? formatDisplayDate(value) : null), [value]);
-  const calendarCells = useMemo(() => buildCalendarCells(displayMonth), [displayMonth]);
+  const calendarRows = useMemo(() => buildCalendarRows(displayMonth), [displayMonth]);
   const label = rest["aria-label"];
 
   useEffect(() => {
@@ -250,35 +259,45 @@ export function DatePicker({ value, onChange, placeholder = "Select date", disab
           <div className="font-medium" aria-live="polite">{monthLabel(displayMonth)}</div>
           <button type="button" aria-label="Next month" onClick={() => setDisplayMonth((current) => addMonths(current, 1))} className="inline-flex h-control-base w-control-base items-center justify-center rounded text-subtext hover:bg-surface hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">›</button>
         </div>
-        <div role="grid" aria-label={monthLabel(displayMonth)} onKeyDown={handleGridKeyDown} className="grid grid-cols-7 gap-1">
-          {WEEKDAY_SHORT_NAMES.map((weekday, index) => (
-            <div key={`${weekday}-${index}`} role="columnheader" aria-label={WEEKDAY_NAMES[index]} className="flex h-6 items-center justify-center text-xs font-medium text-subtext-1">{weekday}</div>
+        <div role="grid" aria-label={monthLabel(displayMonth)} onKeyDown={handleGridKeyDown} className="flex flex-col gap-1">
+          <div role="row" className="grid grid-cols-7 gap-1">
+            {WEEKDAY_SHORT_NAMES.map((weekday, index) => (
+              <div key={`${weekday}-${index}`} role="columnheader" aria-label={WEEKDAY_NAMES[index]} className="flex h-6 items-center justify-center text-xs font-medium text-subtext-1">{weekday}</div>
+            ))}
+          </div>
+          {calendarRows.map((row, rowIndex) => (
+            <div key={rowIndex} role="row" className="grid grid-cols-7 gap-1">
+              {row.map((cell) => {
+                if (!cell.date) return <div key={cell.key} role="gridcell" aria-hidden="true" className="h-control-base" />;
+                const dayDisabled = isDateDisabled(cell.date, parsedMinDate, parsedMaxDate);
+                const isSelected = sameDate(cell.date, selectedDate);
+                const isToday = sameDate(cell.date, today);
+                const isFocused = sameDate(cell.date, focusedDay);
+                const shouldReceiveTab = isFocused && !dayDisabled;
+                return (
+                  <div
+                    key={cell.key}
+                    role="gridcell"
+                    aria-selected={isSelected || undefined}
+                    aria-disabled={dayDisabled || undefined}
+                  >
+                    <button
+                      ref={shouldReceiveTab ? firstFocusableDayRef : undefined}
+                      type="button"
+                      aria-label={dayAccessibleName(cell.date, selectedDate, today, dayDisabled)}
+                      disabled={dayDisabled}
+                      tabIndex={shouldReceiveTab ? 0 : -1}
+                      onFocus={() => setFocusedDay(cell.date!)}
+                      onClick={() => selectDate(cell.date!)}
+                      className={`inline-flex h-control-base w-full items-center justify-center rounded text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${isSelected ? "bg-primary text-background" : dayDisabled ? "cursor-default text-subtext-1 opacity-40" : "text-text hover:bg-surface"} ${isToday && !isSelected ? "ring-1 ring-primary" : ""}`}
+                    >
+                      {cell.date.day}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           ))}
-          {calendarCells.map((cell) => {
-            if (!cell.date) return <div key={cell.key} role="gridcell" aria-hidden="true" className="h-control-base" />;
-            const dayDisabled = isDateDisabled(cell.date, parsedMinDate, parsedMaxDate);
-            const isSelected = sameDate(cell.date, selectedDate);
-            const isToday = sameDate(cell.date, today);
-            const isFocused = sameDate(cell.date, focusedDay);
-            const shouldReceiveTab = isFocused && !dayDisabled;
-            return (
-              <button
-                key={cell.key}
-                ref={shouldReceiveTab ? firstFocusableDayRef : undefined}
-                type="button"
-                aria-label={dayAccessibleName(cell.date, selectedDate, today, dayDisabled)}
-                aria-selected={isSelected || undefined}
-                disabled={dayDisabled}
-                tabIndex={shouldReceiveTab ? 0 : -1}
-                onFocus={() => setFocusedDay(cell.date!)}
-                onClick={() => selectDate(cell.date!)}
-                onKeyDown={handleGridKeyDown}
-                className={`inline-flex h-control-base items-center justify-center rounded text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${isSelected ? "bg-primary text-background" : dayDisabled ? "cursor-default text-subtext-1 opacity-40" : "text-text hover:bg-surface"} ${isToday && !isSelected ? "ring-1 ring-primary" : ""}`}
-              >
-                {cell.date.day}
-              </button>
-            );
-          })}
         </div>
         {selectedDate && (
           <div className="border-t border-border pt-2">

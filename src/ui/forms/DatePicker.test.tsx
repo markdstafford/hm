@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { DatePicker } from "./DatePicker";
@@ -182,6 +182,19 @@ describe("DatePicker", () => {
     expect(screen.getByRole("button", { name: "Updated date" })).toHaveFocus();
   });
 
+  it("keyboard Enter selection calls onChange exactly once without double-fire", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onChange = vi.fn();
+    render(<DatePicker aria-label="Updated date" value="2026-05-15" onChange={onChange} />);
+
+    await user.click(screen.getByRole("button", { name: "Updated date" }));
+    expect(screen.getByRole("button", { name: "May 15, 2026, selected" })).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("2026-05-15");
+  });
+
   it("closes with Escape without emitting a value and returns focus", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onChange = vi.fn();
@@ -195,6 +208,42 @@ describe("DatePicker", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.queryByRole("grid", { name: "May 2026" })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+
+  it("uses valid ARIA grid structure with role=row, role=columnheader, and role=gridcell", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<DatePicker aria-label="Updated date" value="2026-05-27" onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Updated date" }));
+
+    const grid = screen.getByRole("grid", { name: "May 2026" });
+    const rows = within(grid).getAllByRole("row");
+    expect(rows.length).toBeGreaterThan(1);
+
+    // First row is the column header row
+    const headerRow = rows[0];
+    const columnHeaders = within(headerRow).getAllByRole("columnheader");
+    expect(columnHeaders).toHaveLength(7);
+
+    // Day rows contain gridcells
+    const dayCells = within(grid).getAllByRole("gridcell");
+    expect(dayCells.length).toBeGreaterThan(0);
+  });
+
+  it("places aria-selected on role=gridcell elements not on the day buttons", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<DatePicker aria-label="Updated date" value="2026-05-27" onChange={() => {}} />);
+
+    await user.click(screen.getByRole("button", { name: "Updated date" }));
+
+    const grid = screen.getByRole("grid", { name: "May 2026" });
+    // getByRole with selected:true matches aria-selected="true"
+    const selectedCell = within(grid).getByRole("gridcell", { selected: true });
+    expect(selectedCell).toBeInTheDocument();
+
+    // The button inside should NOT have aria-selected
+    const dayButton = screen.getByRole("button", { name: "May 27, 2026, selected, today" });
+    expect(dayButton).not.toHaveAttribute("aria-selected");
   });
 
   it("has labelled calendar controls and no axe violations while open", async () => {
