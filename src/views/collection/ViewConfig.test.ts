@@ -127,6 +127,25 @@ describe("normalizeViewConfig", () => {
     const result = normalizeViewConfig(input, jiraIssueEntity);
     expect(result.conditionalColor).toEqual({ enabled: false, rules: [] });
   });
+
+  it("normalizes invalid layout type and preview values back to defaults", () => {
+    const config = normalizeViewConfig(
+      {
+        layout: {
+          type: "board",
+          density: "dense",
+          preview: "drawer",
+        },
+      },
+      jiraIssueEntity,
+    );
+
+    expect(config.layout).toEqual({
+      type: "table",
+      density: "regular",
+      preview: "side-peek",
+    });
+  });
 });
 
 describe("summarizeViewConfig", () => {
@@ -253,5 +272,33 @@ describe("patchViewConfig", () => {
     const patched = patchViewConfig(original, { filters: newFilters });
     expect(patched.filters).toEqual(newFilters);
     expect(patched.filters).not.toBe(newFilters); // different reference (copy)
+  });
+
+  it("patches only layout fields and preserves sort, group, and filters", () => {
+    const base = normalizeViewConfig(
+      {
+        layout: { type: "table", density: "regular", preview: "side-peek" },
+        sort: [{ property: "rank", direction: "desc" }],
+        group: { property: "name", hideEmptyGroups: false },
+        filters: [
+          { id: "filter-1", property: "name", operator: "contains", value: "A", active: true },
+        ],
+      },
+      jiraIssueEntity,
+    );
+
+    const patched = patchViewConfig(base, {
+      layout: { type: "table", density: "compact", preview: "bottom-peek" },
+    });
+
+    expect(patched.layout).toEqual({
+      type: "table",
+      density: "compact",
+      preview: "bottom-peek",
+    });
+    expect(patched.propertyVisibility).toEqual(base.propertyVisibility);
+    expect(patched.sort).toEqual(base.sort);
+    expect(patched.group).toEqual(base.group);
+    expect(patched.filters).toEqual(base.filters);
   });
 });
