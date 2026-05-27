@@ -686,6 +686,10 @@ describe("CollectionViewerPage", () => {
     expect(screen.queryByRole("button", { name: /open amp-3: open new/i })).not.toBeInTheDocument();
     // "Done new" should still be visible (different section)
     expect(screen.getByRole("button", { name: /open amp-2: done new/i })).toBeInTheDocument();
+
+    // Click "Done new" to open the preview — only 1 item is in the visible (non-collapsed) set
+    fireEvent.click(screen.getByRole("button", { name: /open amp-2: done new/i }));
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
   });
 
   it("passes active view property visibility to rows so hidden properties disappear", async () => {
