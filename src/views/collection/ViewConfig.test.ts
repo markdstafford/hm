@@ -490,7 +490,8 @@ describe("sort config helpers", () => {
         { property: "assignee", direction: "asc" as const },
       ],
     };
-    expect(addSortLevel(config, jiraIssueEntity).at(-1)).toEqual({ property: "updated_at_source", direction: "desc" });
+    const result = addSortLevel(config, jiraIssueEntity);
+    expect(result[result.length - 1]).toEqual({ property: "updated_at_source", direction: "desc" });
   });
 
   it("updates, toggles, removes, moves, and clears sort levels immutably", () => {
