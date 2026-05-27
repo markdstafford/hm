@@ -299,4 +299,157 @@ describe("CollectionViewerPage", () => {
     expect(await screen.findByRole("button", { name: "Mine" })).toHaveAttribute("aria-current", "true");
     expect(screen.queryByRole("button", { name: "Recently updated" })).not.toBeInTheDocument();
   });
+
+  it("passes active view density to rows — compact rows have py-1 class", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    await screen.findByText("AMP-1"); // wait for issues to load
+
+    // Open layout settings and switch to compact
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    fireEvent.click(screen.getByText("Layout").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: /compact/i }));
+
+    await waitFor(() => {
+      expect(commands.collectionViewSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({ layout: expect.objectContaining({ density: "compact" }) }),
+        }),
+      );
+    });
+    // Row containers should now have py-1 instead of py-2
+    await waitFor(() => {
+      const rows = document.querySelectorAll(".py-1");
+      expect(rows.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("renders side detail rail (w-[440px]) by default when a row is clicked", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    const aside = document.querySelector("aside[aria-label='Issue detail']");
+    expect(aside).toHaveClass("w-[440px]");
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+  });
+
+  it("switching to bottom preview shows h-[280px] detail pane with list rows still visible", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    await screen.findByText("AMP-1");
+
+    // Switch to bottom preview
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    fireEvent.click(screen.getByText("Layout").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+
+    await waitFor(() => expect(screen.getByRole("listbox", { name: "Preview options" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("option", { name: /bottom/i }));
+    await waitFor(() => expect(commands.collectionViewSave).toHaveBeenCalledWith(
+      expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "bottom-peek" }) }) })
+    ));
+
+    // Click a row and verify bottom pane
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    await waitFor(() => {
+      const aside = document.querySelector("aside[aria-label='Issue detail']");
+      expect(aside).toHaveClass("h-[280px]");
+    });
+    // List rows still visible
+    expect(screen.getByRole("button", { name: /open amp-2: second issue/i })).toBeInTheDocument();
+  });
+
+  it("switching to full-page preview hides list and shows nav strip", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    await screen.findByText("AMP-1");
+
+    // Switch to full-page
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    fireEvent.click(screen.getByText("Layout").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+    await waitFor(() => expect(screen.getByRole("listbox", { name: "Preview options" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("option", { name: /full page/i }));
+    await waitFor(() => expect(commands.collectionViewSave).toHaveBeenCalledWith(
+      expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "full-page" }) }) })
+    ));
+
+    // Click a row
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /open amp-1: first issue/i })).not.toBeInTheDocument();
+  });
+
+  it("Escape in full-page returns to list with row still highlighted", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    await screen.findByText("AMP-1");
+
+    // Switch to full-page
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    fireEvent.click(screen.getByText("Layout").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+    await waitFor(() => expect(screen.getByRole("listbox", { name: "Preview options" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("option", { name: /full page/i }));
+    await waitFor(() => expect(commands.collectionViewSave).toHaveBeenCalledWith(
+      expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "full-page" }) }) })
+    ));
+
+    // Click first row and enter full-page
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument());
+
+    // Press Escape via keyboard event on window
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Back to list (Esc)" })).not.toBeInTheDocument();
+    });
+    // Row still highlighted (aria-pressed=true)
+    const rowBtn = screen.getByRole("button", { name: /open amp-1: first issue/i });
+    expect(rowBtn).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("switching preview while selected keeps the same selected item", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Click first row (side preview by default)
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    expect(screen.getByRole("button", { name: "Close issue detail" })).toBeInTheDocument();
+
+    // Switch to bottom preview
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    fireEvent.click(screen.getByText("Layout").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+    await waitFor(() => expect(screen.getByRole("listbox", { name: "Preview options" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("option", { name: /bottom/i }));
+    await waitFor(() => expect(commands.collectionViewSave).toHaveBeenCalled());
+
+    // Same item should still be visible in the detail
+    await waitFor(() => {
+      const aside = document.querySelector("aside[aria-label='Issue detail']");
+      expect(aside).toHaveClass("h-[280px]");
+    });
+    expect(screen.getAllByText("First issue").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("ArrowDown moves selection to next issue in side preview", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Click first row
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
+
+    // ArrowDown should select the next item
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /open amp-2: second issue/i })).toHaveAttribute("aria-pressed", "true");
+    });
+  });
 });

@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { commands } from "../../bindings";
 import type { JiraIssueListItem } from "../../bindings";
 import { loadPreferences, savePreferences } from "../../preferences/storage";
 import type { AppPreferences } from "../../preferences";
 import { Spinner } from "../../ui/feedback/Spinner";
 import { EmptyState } from "../../ui/feedback/EmptyState";
-import { Body } from "../../views/collection/Body";
+import { Body, sortCollectionItems } from "../../views/collection/Body";
 import { CollectionHeader } from "../../views/collection/CollectionHeader";
 import { Detail } from "../../views/collection/Detail";
+import { FullPagePreview } from "../../views/collection/FullPagePreview";
 import { jiraIssueEntity } from "../../entities/jira-issue";
 import { useJiraIssues } from "./data";
 import type { CollectionView } from "../../views/collection/views/types";
@@ -22,9 +23,11 @@ import {
   seedCollectionViews,
   uniqueUntitledName,
 } from "../../views/collection/views/seed";
+import { normalizeViewConfig } from "../../views/collection/ViewConfig";
 import type { ViewConfig } from "../../views/collection/ViewConfig";
 import { buildConfigPatchView, buildRenameView } from "./viewConfigPersistence";
 import { ViewSettingsMenu } from "../../views/collection/menu/ViewSettingsMenu";
+import { useKeyboardNavigation } from "../../views/collection/useKeyboardNavigation";
 
 const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -41,11 +44,49 @@ export function CollectionViewerPage() {
   const [preferences, setPreferences] = useState<AppPreferences>({});
   const [viewsLoading, setViewsLoading] = useState(true);
   const [viewError, setViewError] = useState<string | null>(null);
-
-  const selectedItem: JiraIssueListItem | null =
-    issues.find((i) => i.work_item_id === selectedId) ?? null;
+  const [fullPageOpen, setFullPageOpen] = useState(false);
 
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
+
+  const activeConfig = useMemo(
+    () => normalizeViewConfig(activeView?.config, jiraIssueEntity),
+    [activeView?.config],
+  );
+
+  const displayItems = useMemo(
+    () => sortCollectionItems(issues, jiraIssueEntity),
+    [issues],
+  );
+
+  const selectedIndex = useMemo(
+    () => (selectedId ? displayItems.findIndex((item) => item.work_item_id === selectedId) : -1),
+    [displayItems, selectedId],
+  );
+
+  const selectedItem: JiraIssueListItem | null =
+    selectedIndex >= 0 ? displayItems[selectedIndex] : null;
+  const canMovePrevious = selectedIndex > 0;
+  const canMoveNext = selectedIndex >= 0 && selectedIndex < displayItems.length - 1;
+
+  const movePrevious = useCallback(() => {
+    if (selectedIndex <= 0) return;
+    setSelectedId(displayItems[selectedIndex - 1].work_item_id);
+  }, [displayItems, selectedIndex]);
+
+  const moveNext = useCallback(() => {
+    if (selectedIndex < 0 || selectedIndex >= displayItems.length - 1) return;
+    setSelectedId(displayItems[selectedIndex + 1].work_item_id);
+  }, [displayItems, selectedIndex]);
+
+  useKeyboardNavigation({
+    enabled: !!selectedItem,
+    mode: activeConfig.layout.preview,
+    selectedIndex,
+    total: displayItems.length,
+    onMovePrevious: movePrevious,
+    onMoveNext: moveNext,
+    onExitFullPage: () => setFullPageOpen(false),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -190,10 +231,12 @@ export function CollectionViewerPage() {
 
   function handleSelect(item: JiraIssueListItem) {
     setSelectedId(item.work_item_id);
+    if (activeConfig.layout.preview === "full-page") setFullPageOpen(true);
   }
 
   function handleClose() {
     setSelectedId(null);
+    setFullPageOpen(false);
   }
 
   let header;
@@ -258,25 +301,53 @@ export function CollectionViewerPage() {
       />
     );
   } else {
-    body = (
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
-          <Body
-            items={issues}
-            entity={jiraIssueEntity}
-            selectedId={selectedId}
-            onSelect={handleSelect}
-          />
+    const preview = activeConfig.layout.preview;
+    const showFullPage = preview === "full-page" && !!selectedItem && fullPageOpen;
+
+    if (showFullPage) {
+      body = (
+        <FullPagePreview
+          item={selectedItem}
+          entity={jiraIssueEntity}
+          index={selectedIndex}
+          total={displayItems.length}
+          canMovePrevious={canMovePrevious}
+          canMoveNext={canMoveNext}
+          onBack={() => setFullPageOpen(false)}
+          onMovePrevious={movePrevious}
+          onMoveNext={moveNext}
+        />
+      );
+    } else {
+      const peekSurface = preview === "bottom-peek" ? "bottom-peek" : "side-peek";
+      body = (
+        <div className={`flex min-h-0 flex-1 overflow-hidden ${preview === "bottom-peek" ? "flex-col" : ""}`}>
+          <div className="flex-1 overflow-y-auto">
+            <Body
+              items={issues}
+              entity={jiraIssueEntity}
+              selectedId={selectedId}
+              density={activeConfig.layout.density}
+              onSelect={handleSelect}
+            />
+          </div>
+          {selectedItem && preview !== "full-page" && (
+            <Detail
+              item={selectedItem}
+              entity={jiraIssueEntity}
+              surface={peekSurface}
+              index={selectedIndex}
+              total={displayItems.length}
+              canMovePrevious={canMovePrevious}
+              canMoveNext={canMoveNext}
+              onClose={handleClose}
+              onMovePrevious={movePrevious}
+              onMoveNext={moveNext}
+            />
+          )}
         </div>
-        {selectedItem && (
-          <Detail
-            item={selectedItem}
-            entity={jiraIssueEntity}
-            onClose={handleClose}
-          />
-        )}
-      </div>
-    );
+      );
+    }
   }
 
   return (
