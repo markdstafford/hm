@@ -1,5 +1,10 @@
 import type { ReactNode, ComponentType } from "react";
 import type { CollectionView } from "./views/types";
+import type {
+  FilterKind,
+  FilterOption,
+  FilterOptionContext,
+} from "./filter/types";
 
 export type PropertySide = "left" | "right";
 export type PropertyKind = "text" | "number" | "date" | "categorical" | "tags";
@@ -54,6 +59,13 @@ export type GroupableProperty<TItem, TProperty extends string> = {
   bucketOrder: (items?: TItem[], context?: BucketContext) => BucketDefinition[];
 };
 
+export type FilterableProperty<TItem, TProperty extends string> = {
+  property: TProperty;
+  kind: FilterKind;
+  getValue: (item: TItem) => unknown;
+  options?: (context: FilterOptionContext<TItem>) => FilterOption[];
+};
+
 export type EntityContract<TItem, TProperty extends string> = {
   id: string;
   label: string;
@@ -64,6 +76,7 @@ export type EntityContract<TItem, TProperty extends string> = {
   defaultSort: (a: TItem, b: TItem) => number;
   sortableProperties?: SortableProperty<TItem, TProperty>[];
   groupableProperties?: GroupableProperty<TItem, TProperty>[];
+  filterableProperties?: FilterableProperty<TItem, TProperty>[];
   Detail: ComponentType<{ item: TItem }>;
   defaultViews: CollectionView[];
 };
