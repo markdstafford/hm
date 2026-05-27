@@ -75,6 +75,73 @@ function isSide(value: unknown): value is PropertySide {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function titlePropertyId(entity: EntityContract<any, any>): string | null {
+  return entity.properties.find((property) => property.isStretch)?.id ?? null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function defaultPropertyRow(
+  entity: EntityContract<any, any>,
+  propertyId: string,
+): PropertyVisibilityConfig {
+  const defaultRow = entity.defaultProperties.find((row) => row.property === propertyId);
+  return {
+    property: propertyId,
+    side: defaultRow?.side ?? "left",
+    visible: defaultRow?.visible ?? true,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizePropertyVisibilityRows(
+  input: unknown,
+  entity: EntityContract<any, any>,
+): PropertyVisibilityConfig[] {
+  const currentIds = entity.properties.map((property) => String(property.id));
+  const currentSet = new Set(currentIds);
+  // Use defaultProperties order for appending, to match defaultViewConfig ordering
+  const defaultOrder = entity.defaultProperties.map((row) => row.property);
+  const titleId = titlePropertyId(entity);
+  const seen = new Set<string>();
+  const rows: PropertyVisibilityConfig[] = [];
+
+  if (Array.isArray(input)) {
+    for (const rawRow of input) {
+      if (!isObject(rawRow) || typeof rawRow["property"] !== "string") continue;
+      const propertyId = rawRow["property"];
+      if (!currentSet.has(propertyId) || seen.has(propertyId)) continue;
+      const defaultRow = defaultPropertyRow(entity, propertyId);
+      rows.push({
+        property: propertyId,
+        side: isSide(rawRow["side"]) ? rawRow["side"] : defaultRow.side,
+        visible:
+          propertyId === titleId
+            ? true
+            : typeof rawRow["visible"] === "boolean"
+              ? rawRow["visible"]
+              : defaultRow.visible,
+      });
+      seen.add(propertyId);
+    }
+  }
+
+  for (const propertyId of defaultOrder) {
+    if (seen.has(propertyId)) continue;
+    const row = defaultPropertyRow(entity, propertyId);
+    rows.push({ ...row, visible: propertyId === titleId ? true : row.visible });
+  }
+
+  // Append any properties in entity.properties not covered by defaultProperties
+  for (const propertyId of currentIds) {
+    if (seen.has(propertyId) || defaultOrder.includes(propertyId)) continue;
+    const row = defaultPropertyRow(entity, propertyId);
+    rows.push({ ...row, visible: propertyId === titleId ? true : row.visible });
+  }
+
+  return rows;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function propertyLabel(entity: EntityContract<any, any>, propertyId: string): string {
   const found = entity.properties.find((p) => p.id === propertyId);
   if (found) return found.label;
@@ -125,24 +192,7 @@ export function normalizeViewConfig(input: unknown, entity: EntityContract<any, 
   }
 
   // propertyVisibility
-  let propertyVisibility = defaults.propertyVisibility;
-  const rawPV = input["propertyVisibility"];
-  if (Array.isArray(rawPV)) {
-    const valid = rawPV.filter(
-      (row): row is PropertyVisibilityConfig =>
-        isObject(row) &&
-        typeof row["property"] === "string" &&
-        isSide(row["side"]) &&
-        typeof row["visible"] === "boolean"
-    );
-    if (valid.length > 0) {
-      propertyVisibility = valid.map((row) => ({
-        property: row.property,
-        side: row.side,
-        visible: row.visible,
-      }));
-    }
-  }
+  const propertyVisibility = normalizePropertyVisibilityRows(input["propertyVisibility"], entity);
 
   // sort
   let sort: SortLevelConfig[] = [];
@@ -252,4 +302,65 @@ export function patchViewConfig(config: ViewConfig, patch: Partial<ViewConfig>):
     filters: patch.filters ? [...patch.filters] : [...config.filters],
     conditionalColor: { enabled: false, rules: [] },
   };
+}
+
+export function setPropertyVisible(
+  rows: PropertyVisibilityConfig[],
+  propertyId: string,
+  visible: boolean,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  entity: EntityContract<any, any>,
+): PropertyVisibilityConfig[] {
+  const titleId = titlePropertyId(entity);
+  return rows.map((row) =>
+    row.property === propertyId
+      ? { ...row, visible: row.property === titleId ? true : visible }
+      : { ...row },
+  );
+}
+
+export function setPropertySide(
+  rows: PropertyVisibilityConfig[],
+  propertyId: string,
+  side: PropertySide,
+): PropertyVisibilityConfig[] {
+  return rows.map((row) =>
+    row.property === propertyId ? { ...row, side } : { ...row },
+  );
+}
+
+export function moveProperty(
+  rows: PropertyVisibilityConfig[],
+  propertyId: string,
+  targetIndex: number,
+): PropertyVisibilityConfig[] {
+  const next = rows.map((row) => ({ ...row }));
+  const currentIndex = next.findIndex((row) => row.property === propertyId);
+  if (currentIndex < 0) return next;
+  const [moved] = next.splice(currentIndex, 1);
+  const safeIndex = Math.max(0, Math.min(targetIndex, next.length));
+  next.splice(safeIndex, 0, moved);
+  return next;
+}
+
+export function applyPropertyDrop(
+  rows: PropertyVisibilityConfig[],
+  activeId: string,
+  overId: string | null,
+  destinationVisible: boolean,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  entity: EntityContract<any, any>,
+): PropertyVisibilityConfig[] {
+  const activeIndex = rows.findIndex((row) => row.property === activeId);
+  if (activeIndex < 0) return rows.map((row) => ({ ...row }));
+
+  const withoutActive = rows.filter((row) => row.property !== activeId);
+  const overIndex = overId
+    ? withoutActive.findIndex((row) => row.property === overId)
+    : withoutActive.length;
+  const targetIndex = overIndex < 0 ? withoutActive.length : overIndex;
+  const activeRow = setPropertyVisible([rows[activeIndex]], activeId, destinationVisible, entity)[0];
+  const next = withoutActive.map((row) => ({ ...row }));
+  next.splice(targetIndex, 0, { ...activeRow });
+  return next;
 }
