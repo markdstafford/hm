@@ -753,7 +753,8 @@ mod tests {
         finish_run, start_run, update_progress, upsert_cursor,
     };
     use crate::issues::repository::{
-        upsert_source_system, upsert_work_item, SourceSystemInput, WorkItemInput,
+        upsert_source_system, upsert_work_item, upsert_work_item_term, SourceSystemInput,
+        WorkItemInput, WorkItemTermInput,
     };
 
     const NOW: &str = "2026-05-25T17:00:00Z";
@@ -1086,5 +1087,77 @@ mod tests {
         )
         .expect("list");
         assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn jira_issues_list_returns_priority_name_and_labels() {
+        let conn = open_in_memory().expect("db");
+        let ssid = seed_source_system(&conn, "src_jira");
+
+        // Seed a work item with priority_name set.
+        upsert_work_item(
+            &conn,
+            NOW,
+            &WorkItemInput {
+                id: "wi_high",
+                source_system_id: &ssid,
+                source_kind: "jira_issue",
+                upstream_id: "30001",
+                key: Some("AMP-99"),
+                url: None,
+                title: "Priority issue",
+                body: None,
+                state: "open",
+                status_name: Some("To Do"),
+                resolution_name: None,
+                priority_name: Some("High"),
+                item_type: Some("Bug"),
+                project_key: Some("AMP"),
+                project_name: Some("AMP"),
+                assignee_person_id: None,
+                reporter_person_id: None,
+                created_at_source: None,
+                updated_at_source: Some("2026-05-25T00:00:00Z"),
+                resolved_at_source: None,
+                due_at_source: None,
+                raw_updated_hash: "h99",
+            },
+        )
+        .expect("upsert work item");
+
+        // Seed two label terms.
+        for label in &["backend", "infra"] {
+            upsert_work_item_term(
+                &conn,
+                &WorkItemTermInput {
+                    work_item_id: "wi_high",
+                    term_kind: "label",
+                    term_key: label,
+                    term_name: Some(label),
+                    raw_json: None,
+                },
+            )
+            .expect("upsert label term");
+        }
+
+        let results = list_jira_issues_from_conn(
+            &conn,
+            &JiraIssueListFilter {
+                source_id: Some("src_jira".into()),
+                project_key: Some("AMP".into()),
+                limit: None,
+            },
+        )
+        .expect("list");
+
+        assert_eq!(results.len(), 1);
+        let item = &results[0];
+        assert_eq!(item.key, "AMP-99");
+        assert_eq!(item.priority_name.as_deref(), Some("High"));
+        // Labels are aggregated via GROUP_CONCAT; order is not guaranteed, so
+        // check membership rather than exact order.
+        assert_eq!(item.labels.len(), 2);
+        assert!(item.labels.contains(&"backend".to_string()));
+        assert!(item.labels.contains(&"infra".to_string()));
     }
 }

@@ -172,6 +172,22 @@ pub fn upsert_work_item_term(conn: &Connection, input: &WorkItemTermInput<'_>) -
     Ok(())
 }
 
+/// Delete all `work_item_terms` rows for the given `(work_item_id, term_kind)`.
+///
+/// Call this before upserting the current set of terms so that terms removed
+/// upstream do not persist after a resync.
+pub fn delete_work_item_terms_by_kind(
+    conn: &Connection,
+    work_item_id: &str,
+    term_kind: &str,
+) -> Result<()> {
+    conn.execute(
+        "DELETE FROM work_item_terms WHERE work_item_id = ?1 AND term_kind = ?2",
+        params![work_item_id, term_kind],
+    )?;
+    Ok(())
+}
+
 pub struct WorkItemRelationshipInput<'a> {
     pub id: &'a str,
     pub source_system_id: &'a str,
@@ -741,5 +757,67 @@ mod tests {
             )
             .expect("count after");
         assert_eq!(count_after, 2, "repeat upsert with same hash must not duplicate");
+    }
+
+    #[test]
+    fn delete_work_item_terms_by_kind_removes_stale_labels() {
+        let conn = open_in_memory().expect("db");
+        seed_source_system(&conn, "src-1");
+        seed_work_item(&conn, "wi-1", "src-1", "10001");
+
+        // Seed two label terms representing the first sync.
+        for label in &["bug", "backend"] {
+            upsert_work_item_term(
+                &conn,
+                &WorkItemTermInput {
+                    work_item_id: "wi-1",
+                    term_kind: "label",
+                    term_key: label,
+                    term_name: Some(label),
+                    raw_json: None,
+                },
+            )
+            .expect("seed label");
+        }
+        let before: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_item_terms WHERE work_item_id = 'wi-1' AND term_kind = 'label'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count before");
+        assert_eq!(before, 2);
+
+        // Simulate resync: delete existing labels, then insert only the current set.
+        delete_work_item_terms_by_kind(&conn, "wi-1", "label").expect("delete labels");
+        upsert_work_item_term(
+            &conn,
+            &WorkItemTermInput {
+                work_item_id: "wi-1",
+                term_kind: "label",
+                term_key: "bug",
+                term_name: Some("bug"),
+                raw_json: None,
+            },
+        )
+        .expect("upsert remaining label");
+
+        let after: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM work_item_terms WHERE work_item_id = 'wi-1' AND term_kind = 'label'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count after");
+        assert_eq!(after, 1, "stale 'backend' label must be removed after resync");
+
+        let remaining_key: String = conn
+            .query_row(
+                "SELECT term_key FROM work_item_terms WHERE work_item_id = 'wi-1' AND term_kind = 'label'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("remaining key");
+        assert_eq!(remaining_key, "bug");
     }
 }
