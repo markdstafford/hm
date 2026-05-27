@@ -51,7 +51,7 @@ export function CollectionViewerPage() {
   }
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
+    <div className="flex h-full min-h-0 overflow-hidden">
       <div className="flex-1 overflow-y-auto">
         <Body
           items={issues}
