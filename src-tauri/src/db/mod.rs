@@ -19,6 +19,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );",
     )?;
+    crate::collections::views::setup_schema(conn)?;
     crate::issues::schema::setup_schema(conn)?;
     Ok(())
 }
@@ -98,6 +99,35 @@ mod tests {
             )
             .expect("query should succeed");
         assert_eq!(count, 1, "shared_settings table must exist after schema setup");
+    }
+
+    #[test]
+    fn schema_creates_collection_views_table() {
+        let conn = open_in_memory().expect("database should open");
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='collection_views'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query should succeed");
+        assert_eq!(count, 1, "collection_views table must exist after schema setup");
+    }
+
+    #[test]
+    fn schema_creates_collection_view_seed_state_table() {
+        let conn = open_in_memory().expect("database should open");
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='collection_view_seed_state'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query should succeed");
+        assert_eq!(
+            count, 1,
+            "collection_view_seed_state table must exist after schema setup"
+        );
     }
 
     #[test]

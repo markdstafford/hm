@@ -81,6 +81,25 @@ describe("normalizePreferences", () => {
     expect(win.width).toBe(1200);
     expect(win.extra).toBe("keep");
   });
+
+  it("preserves valid collection active view ids", () => {
+    const result = normalizePreferences({
+      collections: { activeViewId: { "jira-issue": "jira-issue-mine" } },
+    });
+    expect(result.collections?.activeViewId?.["jira-issue"]).toBe("jira-issue-mine");
+  });
+
+  it("drops invalid active view ids but preserves unknown collection keys", () => {
+    const result = normalizePreferences({
+      collections: {
+        activeViewId: { "jira-issue": "   ", "github-issue": 42 },
+        customCollectionKey: { keep: true },
+      },
+    }) as Record<string, unknown>;
+    const collections = result.collections as Record<string, unknown>;
+    expect(collections.activeViewId).toEqual({});
+    expect(collections.customCollectionKey).toEqual({ keep: true });
+  });
 });
 
 describe("color scheme normalization", () => {
@@ -174,6 +193,17 @@ describe("mergePreferences", () => {
     expect(result.appearance?.themeMode).toBe("dark");
     expect(result.window?.width).toBe(1200);
     expect(result.window?.height).toBe(600);
+  });
+
+  it("merges collection active view ids without erasing existing entities", () => {
+    const current = { collections: { activeViewId: { "jira-issue": "all", "github-issue": "mine" } } };
+    const result = mergePreferences(current, {
+      collections: { activeViewId: { "jira-issue": "recent" } },
+    });
+    expect(result.collections?.activeViewId).toEqual({
+      "jira-issue": "recent",
+      "github-issue": "mine",
+    });
   });
 });
 

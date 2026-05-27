@@ -1,4 +1,5 @@
 import type { ReactNode, ComponentType } from "react";
+import type { CollectionView } from "./views/types";
 
 export type PropertySide = "left" | "right";
 export type PropertyKind = "text" | "number" | "date" | "categorical" | "tags";
@@ -32,4 +33,5 @@ export type EntityContract<TItem, TProperty extends string> = {
   defaultProperties: PropertyConfig<TProperty>[];
   defaultSort: (a: TItem, b: TItem) => number;
   Detail: ComponentType<{ item: TItem }>;
+  defaultViews: CollectionView[];
 };

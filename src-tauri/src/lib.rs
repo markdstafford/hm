@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod collections;
 pub mod commands;
 pub mod db;
 pub mod ingestion;
@@ -40,6 +41,10 @@ pub fn run() {
         commands::jira_issue_ingestion_status,
         commands::jira_issue_ingestion_progress,
         commands::jira_issues_list,
+        commands::collection_views_list,
+        commands::collection_view_save,
+        commands::collection_view_delete,
+        commands::collection_views_seed_defaults,
     ]);
 
     #[cfg(debug_assertions)]
@@ -117,6 +122,10 @@ mod tests {
                     commands::jira_issue_ingestion_status,
                     commands::jira_issue_ingestion_progress,
                     commands::jira_issues_list,
+                    commands::collection_views_list,
+                    commands::collection_view_save,
+                    commands::collection_view_delete,
+                    commands::collection_views_seed_defaults,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)

@@ -1,18 +1,172 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { commands } from "../../bindings";
+import type { JiraIssueListItem } from "../../bindings";
+import { loadPreferences, savePreferences } from "../../preferences/storage";
+import type { AppPreferences } from "../../preferences";
 import { Spinner } from "../../ui/feedback/Spinner";
 import { EmptyState } from "../../ui/feedback/EmptyState";
 import { Body } from "../../views/collection/Body";
+import { CollectionHeader } from "../../views/collection/CollectionHeader";
 import { Detail } from "../../views/collection/Detail";
 import { jiraIssueEntity } from "../../entities/jira-issue";
 import { useJiraIssues } from "./data";
-import type { JiraIssueListItem } from "../../bindings";
+import type { CollectionView } from "../../views/collection/views/types";
+import { fromCollectionViewRecord, toCollectionViewSaveInput } from "../../views/collection/views/types";
+import {
+  activeViewPreferencePatch,
+  createFallbackView,
+  duplicateViewDraft,
+  nextPosition,
+  orderedViews,
+  pickActiveViewId,
+  seedCollectionViews,
+  uniqueUntitledName,
+} from "../../views/collection/views/seed";
+
+const isTauri = (): boolean =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+function newViewId(entityKind: string): string {
+  return `${entityKind}-view-${Date.now()}`;
+}
 
 export function CollectionViewerPage() {
   const { issues, loading, error } = useJiraIssues();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [views, setViews] = useState<CollectionView[]>([]);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<AppPreferences>({});
+  const [viewsLoading, setViewsLoading] = useState(true);
+  const [viewError, setViewError] = useState<string | null>(null);
 
   const selectedItem: JiraIssueListItem | null =
     issues.find((i) => i.work_item_id === selectedId) ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadViews() {
+      setViewsLoading(true);
+      setViewError(null);
+      try {
+        const [seededViews, prefs] = await Promise.all([
+          seedCollectionViews(jiraIssueEntity.id, jiraIssueEntity.defaultViews),
+          loadPreferences(),
+        ]);
+        if (cancelled) return;
+        const safeViews = seededViews.length > 0 ? seededViews : [createFallbackView(jiraIssueEntity.id)];
+        const savedId = prefs.collections?.activeViewId?.[jiraIssueEntity.id] ?? null;
+        const activeId = pickActiveViewId(safeViews, savedId);
+        setPreferences(prefs);
+        setViews(safeViews);
+        setActiveViewId(activeId);
+        setViewsLoading(false);
+        if (activeId && activeId !== savedId) {
+          const result = await savePreferences(prefs, activeViewPreferencePatch(jiraIssueEntity.id, activeId));
+          if (!cancelled) setPreferences(result.next);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.warn("[collection-views] load failed", err);
+        setViewError("Could not load collection views");
+        setViewsLoading(false);
+      }
+    }
+    loadViews();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function persistActive(viewId: string) {
+    setActiveViewId(viewId);
+    const result = await savePreferences(preferences, activeViewPreferencePatch(jiraIssueEntity.id, viewId));
+    setPreferences(result.next);
+    if (!result.ok) console.warn("[collection-views] active preference save failed", result.error);
+  }
+
+  async function saveView(view: CollectionView): Promise<CollectionView> {
+    if (!isTauri()) return view;
+    const result = await commands.collectionViewSave(toCollectionViewSaveInput(view));
+    if (result.status === "error") throw new Error(result.error);
+    return fromCollectionViewRecord(result.data);
+  }
+
+  async function handlePick(viewId: string) {
+    await persistActive(viewId);
+  }
+
+  async function handleCreate() {
+    const source = views.find((view) => view.id === activeViewId) ?? views[0] ?? createFallbackView(jiraIssueEntity.id);
+    const draft: CollectionView = {
+      ...source,
+      id: newViewId(jiraIssueEntity.id),
+      displayName: uniqueUntitledName(views),
+      position: nextPosition(views),
+      isDefault: false,
+      config: source.config,
+    };
+    try {
+      const saved = await saveView(draft);
+      const nextViews = [...views, saved];
+      setViews(nextViews);
+      await persistActive(saved.id);
+    } catch (err) {
+      console.warn("[collection-views] create failed", err);
+      setViewError("Could not save collection view");
+    }
+  }
+
+  async function handleRename(viewId: string, displayName: string) {
+    const existing = views.find((view) => view.id === viewId);
+    if (!existing) return;
+    try {
+      const saved = await saveView({ ...existing, displayName });
+      setViews(views.map((view) => (view.id === viewId ? saved : view)));
+    } catch (err) {
+      console.warn("[collection-views] rename failed", err);
+      setViewError("Could not save collection view");
+    }
+  }
+
+  async function handleDuplicate(viewId: string) {
+    const source = views.find((view) => view.id === viewId);
+    if (!source) return;
+    try {
+      const saved = await saveView(duplicateViewDraft(source, views));
+      setViews([...views, saved]);
+      await persistActive(saved.id);
+    } catch (err) {
+      console.warn("[collection-views] duplicate failed", err);
+      setViewError("Could not save collection view");
+    }
+  }
+
+  async function handleDelete(viewId: string) {
+    // Capture the deleted view's position in the ordered strip before mutating state,
+    // so we can pick the nearest remaining neighbor (previous preferred, next as fallback).
+    const deletedIndex = orderedViews(views).findIndex((v) => v.id === viewId);
+    try {
+      if (isTauri()) {
+        const result = await commands.collectionViewDelete(viewId);
+        if (result.status === "error") throw new Error(result.error);
+      }
+      let nextViews = views.filter((view) => view.id !== viewId);
+      if (nextViews.length === 0) {
+        const fallback = await saveView(createFallbackView(jiraIssueEntity.id));
+        nextViews = [fallback];
+      }
+      setViews(nextViews);
+      if (activeViewId === viewId || !activeViewId) {
+        const orderedNext = orderedViews(nextViews);
+        // Prefer the previous neighbor; fall back to next when deleting the first chip.
+        const neighborId = orderedNext[deletedIndex - 1]?.id ?? orderedNext[deletedIndex]?.id ?? null;
+        if (neighborId) await persistActive(neighborId);
+      }
+    } catch (err) {
+      console.warn("[collection-views] delete failed", err);
+      setViewError("Could not delete collection view");
+    }
+  }
 
   function handleSelect(item: JiraIssueListItem) {
     setSelectedId(item.work_item_id);
@@ -22,51 +176,85 @@ export function CollectionViewerPage() {
     setSelectedId(null);
   }
 
+  let header;
+  if (viewsLoading) {
+    header = (
+      <div className="flex h-8 shrink-0 items-center border-b border-border/60 px-3">
+        <Spinner label="Loading collection views" size={14} />
+      </div>
+    );
+  } else if (viewError && views.length === 0) {
+    header = (
+      <div className="flex h-8 shrink-0 items-center border-b border-border/60 px-3 text-sm text-red">
+        {viewError}
+      </div>
+    );
+  } else {
+    header = (
+      <>
+        <CollectionHeader
+          views={views}
+          activeViewId={activeViewId}
+          onPick={handlePick}
+          onCreate={handleCreate}
+          onRename={handleRename}
+          onDuplicate={handleDuplicate}
+          onDelete={handleDelete}
+        />
+        {viewError && <div className="border-b border-border/60 px-3 py-1 text-sm text-red">{viewError}</div>}
+      </>
+    );
+  }
+
+  let body;
   if (loading) {
-    return (
+    body = (
       <div className="flex items-center justify-center flex-1 p-8">
         <Spinner label="Loading Jira issues" size={20} />
       </div>
     );
-  }
-
-  if (error) {
-    return (
+  } else if (error) {
+    body = (
       <EmptyState
         title="Could not load Jira issues"
         description="Something went wrong. Check the console for details."
         className="flex-1"
       />
     );
-  }
-
-  if (issues.length === 0) {
-    return (
+  } else if (issues.length === 0) {
+    body = (
       <EmptyState
         title="No Jira issues yet"
         description="Run Jira ingestion from Settings → Sources to populate this list."
         className="flex-1"
       />
     );
+  } else {
+    body = (
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
+          <Body
+            items={issues}
+            entity={jiraIssueEntity}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+          />
+        </div>
+        {selectedItem && (
+          <Detail
+            item={selectedItem}
+            entity={jiraIssueEntity}
+            onClose={handleClose}
+          />
+        )}
+      </div>
+    );
   }
 
   return (
-    <div className="flex h-full min-h-0 overflow-hidden">
-      <div className="flex-1 overflow-y-auto">
-        <Body
-          items={issues}
-          entity={jiraIssueEntity}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-        />
-      </div>
-      {selectedItem && (
-        <Detail
-          item={selectedItem}
-          entity={jiraIssueEntity}
-          onClose={handleClose}
-        />
-      )}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {header}
+      {body}
     </div>
   );
 }

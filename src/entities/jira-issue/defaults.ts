@@ -1,5 +1,33 @@
 import type { PropertyConfig } from "../../views/collection/types";
+import type { CollectionView } from "../../views/collection/views/types";
 import type { JiraIssueProperty } from "./properties";
+
+export const JIRA_ISSUE_DEFAULT_VIEWS: CollectionView[] = [
+  {
+    id: "jira-issue-all-open",
+    entityKind: "jira-issue",
+    displayName: "All open",
+    position: 0,
+    isDefault: true,
+    config: {},
+  },
+  {
+    id: "jira-issue-mine",
+    entityKind: "jira-issue",
+    displayName: "Mine",
+    position: 1,
+    isDefault: true,
+    config: {},
+  },
+  {
+    id: "jira-issue-recently-updated",
+    entityKind: "jira-issue",
+    displayName: "Recently updated",
+    position: 2,
+    isDefault: true,
+    config: {},
+  },
+];
 
 export const DEFAULT_PROPERTIES: PropertyConfig<JiraIssueProperty>[] = [
   { property: "key",               side: "left",  visible: true  },

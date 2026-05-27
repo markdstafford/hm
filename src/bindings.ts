@@ -52,6 +52,10 @@ export const commands = {
 	error_summary: string | null,
 } | null, string>(__TAURI_INVOKE("jira_issue_ingestion_progress", { sourceId })),
 	jiraIssuesList: (filter: JiraIssueListFilter) => typedError<JiraIssueListItem[], string>(__TAURI_INVOKE("jira_issues_list", { filter })),
+	collectionViewsList: (entityKind: string) => typedError<CollectionViewRecord[], string>(__TAURI_INVOKE("collection_views_list", { entityKind })),
+	collectionViewSave: (view: CollectionViewSaveInput) => typedError<CollectionViewRecord, string>(__TAURI_INVOKE("collection_view_save", { view })),
+	collectionViewDelete: (id: string) => typedError<null, string>(__TAURI_INVOKE("collection_view_delete", { id })),
+	collectionViewsSeedDefaults: (input: CollectionViewSeedInput) => typedError<CollectionViewRecord[], string>(__TAURI_INVOKE("collection_views_seed_defaults", { input })),
 };
 
 /* Types */
@@ -96,6 +100,29 @@ export type AiRunner = "AnthropicMessages" | "OpenAiChatCompletions";
 export type AppStatus = {
 	version: string,
 	ready: boolean,
+};
+
+export type CollectionViewRecord = {
+	id: string,
+	entity_kind: string,
+	display_name: string,
+	position: number,
+	is_default: boolean,
+	config: unknown,
+};
+
+export type CollectionViewSaveInput = {
+	id: string,
+	entity_kind: string,
+	display_name: string,
+	position: number,
+	is_default: boolean,
+	config: unknown,
+};
+
+export type CollectionViewSeedInput = {
+	entity_kind: string,
+	defaults: CollectionViewSaveInput[],
 };
 
 export type ConnectionTestStatus = "NotTested" | "Success" | "Error" | "Unavailable";
