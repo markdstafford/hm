@@ -163,10 +163,24 @@ For any interactive component with accessibility requirements (focus management,
 | `Field` | composed (label + control + help/error) | Form field wrapper. Generates an id via `useId` and exposes it via a `(id) => ReactNode` render-prop so the child input is properly associated with the label. |
 | `Select` | `@radix-ui/react-select` | Single-select dropdown. |
 | `MultiSelect` | `Popover` + checkbox list | Multi-value selection. |
+| `DatePicker` | `Popover` + native buttons | Controlled absolute date input. Accepts and emits date-only ISO strings (`YYYY-MM-DD`) or `null`; renders a TextField-like button trigger and an owned token-styled month calendar. |
 | `Checkbox` | `@radix-ui/react-checkbox` | Boolean toggle in lists. |
 | `Switch` | `@radix-ui/react-switch` | Inline boolean toggle. Accepts `hideLabelText?: boolean` — set `true` to visually hide the label while keeping it accessible to screen readers (`sr-only`). Use when the surrounding layout (e.g. a settings row) already provides a visible label and a duplicate visible label would be redundant. |
 | `RadioGroup` | `@radix-ui/react-radio-group` | Single-choice from a small set. Compound: `RadioGroup` + `RadioGroup.Item` (each item carries its own label). |
 | `SettingRow` | layout | Label + optional description on the left, control on the right, hairline below. Used by settings categories (General, Appearance). |
+
+**`DatePicker` contract:**
+
+| Prop | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `value` | `string \| null` | required | Controlled date-only ISO value (`YYYY-MM-DD`) or empty state. Invalid external strings render as empty and are never re-emitted. |
+| `onChange` | `(next: string \| null) => void` | required | Called with a valid ISO date when a selectable day is chosen, or `null` when Clear is activated. |
+| `aria-label` | `string` | required | Accessible name for compact rows where no visible field label exists. |
+| `placeholder` | `string` | `"Select date"` | Trigger text when `value` is `null` or invalid. |
+| `disabled` | `boolean` | `false` | Uses native disabled button semantics and blocks popover opening. |
+| `minDate` / `maxDate` | `string` | — | Optional ISO bounds. Out-of-bound days render disabled and cannot be emitted. |
+
+The trigger is a button, not an `<input type="date">`, so WebView-native date controls never appear. It mirrors `TextField` sizing (`h-control-base`), border, background, text, placeholder, disabled styling, and `focus-visible:ring-focus` behavior. The popover uses the shared `Popover` primitive, aligns to the trigger start, shows previous/next month controls, weekday headers, selectable day buttons, today and selected states, and a `Clear` action only when `value` is non-null. Keyboard support includes trigger activation, arrow-key day movement, `Enter` selection, `Escape` close without change, and focus return to the trigger after selection, clear, or escape. Styling must use semantic token utilities only; no native date input and no general-purpose date-picker dependency.
 
 ### Overlays — `src/ui/overlays/`
 
