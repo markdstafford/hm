@@ -4,12 +4,16 @@ import { axe } from "jest-axe";
 import { describe, expect, it, vi } from "vitest";
 import { jiraIssueEntity } from "../../../../entities/jira-issue";
 import { defaultViewConfig } from "../../ViewConfig";
+import type { EntityContract } from "../../types";
 import { PropertyVisibilityPanel } from "./PropertyVisibilityPanel";
+
+// Cast to EntityContract<unknown, string> — the panel is generic and works with any entity
+const entity = jiraIssueEntity as EntityContract<unknown, string>;
 
 function renderPanel(overrides?: Partial<Parameters<typeof PropertyVisibilityPanel>[0]>) {
   return render(
     <PropertyVisibilityPanel
-      entity={jiraIssueEntity}
+      entity={entity}
       config={defaultViewConfig(jiraIssueEntity)}
       onPatchConfig={vi.fn()}
       onBack={vi.fn()}
@@ -64,7 +68,7 @@ describe("PropertyVisibilityPanel", () => {
     const config = defaultViewConfig(jiraIssueEntity);
     render(
       <PropertyVisibilityPanel
-        entity={jiraIssueEntity}
+        entity={entity}
         config={config}
         onPatchConfig={onPatchConfig}
         onBack={vi.fn()}
@@ -88,7 +92,7 @@ describe("PropertyVisibilityPanel", () => {
     const config = defaultViewConfig(jiraIssueEntity);
     render(
       <PropertyVisibilityPanel
-        entity={jiraIssueEntity}
+        entity={entity}
         config={config}
         onPatchConfig={onPatchConfig}
         onBack={vi.fn()}
@@ -110,7 +114,7 @@ describe("PropertyVisibilityPanel", () => {
     const onPatchConfig = vi.fn();
     render(
       <PropertyVisibilityPanel
-        entity={jiraIssueEntity}
+        entity={entity}
         config={defaultViewConfig(jiraIssueEntity)}
         onPatchConfig={onPatchConfig}
         onBack={vi.fn()}
@@ -146,7 +150,7 @@ describe("PropertyVisibilityPanel", () => {
     const config = defaultViewConfig(jiraIssueEntity);
     render(
       <PropertyVisibilityPanel
-        entity={jiraIssueEntity}
+        entity={entity}
         config={config}
         onPatchConfig={onPatchConfig}
         onBack={vi.fn()}

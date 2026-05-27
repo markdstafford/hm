@@ -430,7 +430,7 @@ describe("property visibility helpers", () => {
     const base = defaultViewConfig(jiraIssueEntity).propertyVisibility;
     const result = applyPropertyDrop(base, "key", null, false, jiraIssueEntity);
 
-    expect(result.at(-1)).toEqual({ property: "key", side: "left", visible: false });
+    expect(result[result.length - 1]).toEqual({ property: "key", side: "left", visible: false });
   });
 
   it("applyPropertyDrop keeps title visible when dropped into hidden", () => {
