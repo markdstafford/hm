@@ -172,4 +172,47 @@ describe("SortPanel", () => {
     expect(screen.getByRole("button", { name: "Reorder sort level 1" })).toHaveAttribute("data-drag-handle", "true");
     expect(screen.getByRole("button", { name: "Reorder sort level 2" })).toHaveAttribute("data-drag-handle", "true");
   });
+
+  it("keyboard reorder moves a sort level down and patches the reordered sort array", async () => {
+    const user = userEvent.setup();
+    const config = baseConfig({
+      sort: [
+        { property: "status", direction: "asc" },
+        { property: "priority", direction: "asc" },
+      ],
+    });
+    const { onPatchConfig } = renderPanel(config);
+
+    // Give the sortable li elements distinct vertical positions so @dnd-kit can resolve the ArrowDown target.
+    let top = 0;
+    document.querySelectorAll("[data-sort-level-id]").forEach((el) => {
+      vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+        top,
+        bottom: top + 40,
+        left: 0,
+        right: 200,
+        width: 200,
+        height: 40,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect);
+      top += 40;
+    });
+
+    const handle1 = screen.getByRole("button", { name: "Reorder sort level 1" });
+    handle1.focus();
+    await user.keyboard("[Space]");  // activate drag
+    await user.keyboard("[ArrowDown]");  // move level 1 below level 2
+    await user.keyboard("[Space]");  // drop
+
+    expect(onPatchConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sort: [
+          { property: "priority", direction: "asc" },
+          { property: "status", direction: "asc" },
+        ],
+      }),
+    );
+  });
 });

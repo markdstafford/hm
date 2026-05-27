@@ -35,7 +35,24 @@ test("sort controls reorder visible Jira rows when deterministic rows are availa
     return;
   }
 
-  const before = await rows.allTextContents();
+  const extractKey = (text: string) => text.match(/([A-Z]+-\d+)/)?.[1] ?? "";
+
+  // Capture initial row keys before touching the sort UI.
+  const initialTexts = await rows.allTextContents();
+  const initialKeys = initialTexts.map(extractKey).filter(Boolean);
+
+  // Compute expected order for Key descending from the actual keys present.
+  const expectedKeyDescOrder = [...initialKeys].sort((a, b) => b.localeCompare(a));
+
+  // If initial order already matches Key desc, the test cannot verify a visual reorder.
+  if (JSON.stringify(initialKeys) === JSON.stringify(expectedKeyDescOrder)) {
+    test.skip(
+      true,
+      "Initial row order already matches Key descending; cannot verify reordering with non-deterministic fixture data.",
+    );
+    return;
+  }
+
   await page.getByRole("button", { name: /open view settings/i }).click();
   await page.getByRole("button", { name: /^sort$/i }).click();
   await page.getByRole("button", { name: "+ Add sort" }).click();
@@ -44,6 +61,8 @@ test("sort controls reorder visible Jira rows when deterministic rows are availa
   await page.getByRole("button", { name: /switch sort level 1 to descending/i }).click();
   await page.keyboard.press("Escape");
 
-  const after = await rows.allTextContents();
-  expect(after).not.toEqual(before);
+  // Verify rows are now in the expected Key descending order.
+  const afterTexts = await rows.allTextContents();
+  const afterKeys = afterTexts.map(extractKey).filter(Boolean);
+  expect(afterKeys).toEqual(expectedKeyDescOrder);
 });

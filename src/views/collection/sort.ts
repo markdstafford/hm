@@ -1,26 +1,30 @@
 import type { SortLevelConfig } from "./ViewConfig";
-import type { EntityContract, PropertyComparator } from "./types";
-
-function comparatorMap<TItem, TProperty extends string>(
-  entity: EntityContract<TItem, TProperty>,
-): Map<string, PropertyComparator<TItem>> {
-  return new Map(
-    (entity.sortableProperties ?? []).map((row) => [String(row.property), row.compare]),
-  );
-}
+import type { EntityContract } from "./types";
 
 export function buildCollectionComparator<TItem, TProperty extends string>(
   levels: SortLevelConfig[],
   entity: EntityContract<TItem, TProperty>,
 ): (a: TItem, b: TItem) => number {
-  const comparators = comparatorMap(entity);
-  const validLevels = levels.filter((level) => comparators.has(level.property));
+  const sortPropMap = new Map(
+    (entity.sortableProperties ?? []).map((row) => [String(row.property), row]),
+  );
+  const validLevels = levels.filter((level) => sortPropMap.has(level.property));
 
   return (a, b) => {
     for (const level of validLevels) {
-      const compare = comparators.get(level.property);
-      if (!compare) continue;
-      const result = compare(a, b);
+      const sortProp = sortPropMap.get(level.property);
+      if (!sortProp) continue;
+
+      // When the property declares isNull, apply null-last independently of direction.
+      if (sortProp.isNull) {
+        const aNull = sortProp.isNull(a);
+        const bNull = sortProp.isNull(b);
+        if (aNull && bNull) continue;
+        if (aNull) return 1;
+        if (bNull) return -1;
+      }
+
+      const result = sortProp.compare(a, b);
       if (result !== 0) return level.direction === "desc" ? -result : result;
     }
     return entity.defaultSort(a, b);

@@ -22,6 +22,7 @@ const entity: EntityContract<Item, Prop> = {
     { property: "status", compare: (a, b) => a.status.localeCompare(b.status) },
     {
       property: "updated",
+      isNull: (item) => item.updated === null,
       compare: (a, b) => {
         if (a.updated === null && b.updated === null) return 0;
         if (a.updated === null) return 1;
@@ -77,5 +78,37 @@ describe("buildCollectionComparator", () => {
     expect(sorted).not.toBe(items);
     expect(items).toEqual(original);
     expect(sorted.map((item) => item.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("preserves null-last placement for descending sorts when isNull is provided", () => {
+    const nullItem = { id: "null", status: "Done", updated: null, sequence: 10 };
+    const earlyItem = { id: "early", status: "Done", updated: "2024-01-01T00:00:00Z", sequence: 11 };
+    const lateItem = { id: "late", status: "Done", updated: "2024-12-01T00:00:00Z", sequence: 12 };
+
+    const sorted = sortCollectionItems(
+      [nullItem, earlyItem, lateItem],
+      entity,
+      [{ property: "updated", direction: "desc" }],
+    );
+
+    // Descending: newer dates first, but null is always last regardless of direction
+    expect(sorted.map((i) => i.id)).toEqual(["late", "early", "null"]);
+  });
+
+  it("applies null-last to both items in a two-null pair and falls through to next level", () => {
+    const alpha = { id: "alpha", status: "A", updated: null, sequence: 1 };
+    const beta = { id: "beta", status: "B", updated: null, sequence: 2 };
+
+    const sorted = sortCollectionItems(
+      [beta, alpha],
+      entity,
+      [
+        { property: "updated", direction: "desc" },
+        { property: "status", direction: "asc" },
+      ],
+    );
+
+    // Both have null updated → tie on updated → sort by status asc
+    expect(sorted.map((i) => i.id)).toEqual(["alpha", "beta"]);
   });
 });

@@ -14,6 +14,7 @@ import {
   compareJiraIssueByProjectKey,
 } from "./compare";
 import { jiraIssueEntity } from ".";
+import { buildCollectionComparator } from "../../views/collection/sort";
 import type { JiraIssueListItem } from "../../bindings";
 
 const makeItem = (overrides: Partial<JiraIssueListItem>): JiraIssueListItem => ({
@@ -158,5 +159,55 @@ describe("Jira sortable properties", () => {
     expect(compareJiraIssueByUpdated(alpha, beta)).toBeLessThan(0);
     expect(compareJiraIssueByPriority(alpha, beta)).toBeLessThan(0);
     expect(compareJiraIssueByProjectKey(alpha, beta)).toBeLessThan(0);
+  });
+});
+
+describe("Jira descending sort preserves null-last placement", () => {
+  it("places null updated_at_source last even when direction is desc", () => {
+    const withDate = makeItem({ work_item_id: "d", updated_at_source: "2024-06-01T00:00:00Z" });
+    const withNull = makeItem({ work_item_id: "n", updated_at_source: null });
+    const comparator = buildCollectionComparator(
+      [{ property: "updated_at_source", direction: "desc" }],
+      jiraIssueEntity,
+    );
+    const sorted = [withNull, withDate].sort(comparator);
+    expect(sorted[0].work_item_id).toBe("d");
+    expect(sorted[1].work_item_id).toBe("n");
+  });
+
+  it("places unassigned assignee last even when direction is desc", () => {
+    const alice = makeItem({ work_item_id: "alice", assignee_display_name: "Alice" });
+    const unassigned = makeItem({ work_item_id: "none", assignee_display_name: null });
+    const comparator = buildCollectionComparator(
+      [{ property: "assignee", direction: "desc" }],
+      jiraIssueEntity,
+    );
+    const sorted = [unassigned, alice].sort(comparator);
+    expect(sorted[0].work_item_id).toBe("alice");
+    expect(sorted[1].work_item_id).toBe("none");
+  });
+
+  it("places empty-string status last in desc sort (normalized to null)", () => {
+    const withStatus = makeItem({ work_item_id: "s", status_name: "In Progress" });
+    const emptyStatus = makeItem({ work_item_id: "e", status_name: "" });
+    const comparator = buildCollectionComparator(
+      [{ property: "status", direction: "desc" }],
+      jiraIssueEntity,
+    );
+    const sorted = [emptyStatus, withStatus].sort(comparator);
+    expect(sorted[0].work_item_id).toBe("s");
+    expect(sorted[1].work_item_id).toBe("e");
+  });
+
+  it("sorts non-null updated_at_source values by date in desc order", () => {
+    const older = makeItem({ work_item_id: "old", updated_at_source: "2024-01-01T00:00:00Z" });
+    const newer = makeItem({ work_item_id: "new", updated_at_source: "2024-12-01T00:00:00Z" });
+    const comparator = buildCollectionComparator(
+      [{ property: "updated_at_source", direction: "desc" }],
+      jiraIssueEntity,
+    );
+    const sorted = [older, newer].sort(comparator);
+    expect(sorted[0].work_item_id).toBe("new");
+    expect(sorted[1].work_item_id).toBe("old");
   });
 });
