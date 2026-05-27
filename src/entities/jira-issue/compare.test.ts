@@ -9,6 +9,8 @@ const makeItem = (overrides: Partial<JiraIssueListItem>): JiraIssueListItem => (
   assignee_display_name: null,
   updated_at_source: null,
   project_key: null,
+  priority_name: null,
+  labels: [],
   ...overrides,
 });
 

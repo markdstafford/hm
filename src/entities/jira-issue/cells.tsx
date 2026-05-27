@@ -60,3 +60,19 @@ export function UpdatedCell({ item }: CellProps) {
     </span>
   );
 }
+
+export function PriorityCell({ item }: CellProps) {
+  if (!item.priority_name) return null;
+  return <Badge tone="neutral">{item.priority_name}</Badge>;
+}
+
+export function LabelsCell({ item }: CellProps) {
+  if (!item.labels || item.labels.length === 0) return null;
+  return (
+    <span className="flex gap-1 flex-wrap">
+      {item.labels.map((label) => (
+        <Badge key={label} tone="mauve">{label}</Badge>
+      ))}
+    </span>
+  );
+}

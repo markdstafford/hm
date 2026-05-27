@@ -324,6 +324,8 @@ pub struct JiraIssueListItem {
     pub assignee_display_name: Option<String>,
     pub updated_at_source: Option<String>,
     pub project_key: Option<String>,
+    pub priority_name: Option<String>,
+    pub labels: Vec<String>,
 }
 
 /// Derive the synthetic `source_systems.id` we use for a given config
@@ -623,7 +625,10 @@ pub(crate) fn list_jira_issues_from_conn(
     let limit = filter.limit.unwrap_or(100).min(500) as i64;
     let mut sql = String::from(
         "SELECT w.id, w.key, w.title, w.status_name, p.display_name, \
-                w.updated_at_source, w.project_key \
+                w.updated_at_source, w.project_key, w.priority_name, \
+                (SELECT GROUP_CONCAT(wt.term_name, '\x1f') \
+                   FROM work_item_terms wt \
+                  WHERE wt.work_item_id = w.id AND wt.term_kind = 'label') AS labels \
            FROM work_items w \
            LEFT JOIN people p ON p.id = w.assignee_person_id \
           WHERE w.source_kind = 'jira_issue'",
@@ -651,6 +656,10 @@ pub(crate) fn list_jira_issues_from_conn(
     let mut out = Vec::new();
     while let Some(row) = rows.next().map_err(|e| e.to_string())? {
         let key: Option<String> = row.get(1).map_err(|e| e.to_string())?;
+        let labels_concat: Option<String> = row.get(8).map_err(|e| e.to_string())?;
+        let labels = labels_concat
+            .map(|s| s.split('\x1f').map(str::to_owned).collect())
+            .unwrap_or_default();
         out.push(JiraIssueListItem {
             work_item_id: row.get(0).map_err(|e| e.to_string())?,
             key: key.unwrap_or_default(),
@@ -659,6 +668,8 @@ pub(crate) fn list_jira_issues_from_conn(
             assignee_display_name: row.get(4).map_err(|e| e.to_string())?,
             updated_at_source: row.get(5).map_err(|e| e.to_string())?,
             project_key: row.get(6).map_err(|e| e.to_string())?,
+            priority_name: row.get(7).map_err(|e| e.to_string())?,
+            labels,
         });
     }
     Ok(out)
@@ -1015,6 +1026,8 @@ mod tests {
             assignee_display_name: None,
             updated_at_source: None,
             project_key: None,
+            priority_name: None,
+            labels: vec![],
         };
         let v = serde_json::to_value(&item).expect("serialize");
         let keys: std::collections::BTreeSet<&str> =
@@ -1027,6 +1040,8 @@ mod tests {
             "assignee_display_name",
             "updated_at_source",
             "project_key",
+            "priority_name",
+            "labels",
         ]
         .into_iter()
         .collect();

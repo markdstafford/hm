@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { KeyCell, TitleCell, StatusCell, AssigneeCell, UpdatedCell } from "./cells";
+import { KeyCell, TitleCell, StatusCell, AssigneeCell, UpdatedCell, PriorityCell, LabelsCell } from "./cells";
 import type { JiraIssueListItem } from "../../bindings";
 
 const base: JiraIssueListItem = {
@@ -10,6 +10,8 @@ const base: JiraIssueListItem = {
   assignee_display_name: "Alice Smith",
   updated_at_source: "2024-06-01T10:00:00Z",
   project_key: "AMP",
+  priority_name: null,
+  labels: [],
 };
 
 describe("KeyCell", () => {
@@ -69,6 +71,31 @@ describe("UpdatedCell", () => {
 
   it("renders nothing when updated_at_source is null", () => {
     const { container } = render(<UpdatedCell item={{ ...base, updated_at_source: null }} property="updated_at_source" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("PriorityCell", () => {
+  it("renders the priority name", () => {
+    render(<PriorityCell item={{ ...base, priority_name: "High" }} property="priority" />);
+    expect(screen.getByText("High")).toBeInTheDocument();
+  });
+
+  it("renders nothing when priority_name is null", () => {
+    const { container } = render(<PriorityCell item={{ ...base, priority_name: null }} property="priority" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("LabelsCell", () => {
+  it("renders each label as a badge", () => {
+    render(<LabelsCell item={{ ...base, labels: ["backend", "urgent"] }} property="labels" />);
+    expect(screen.getByText("backend")).toBeInTheDocument();
+    expect(screen.getByText("urgent")).toBeInTheDocument();
+  });
+
+  it("renders nothing when labels is empty", () => {
+    const { container } = render(<LabelsCell item={{ ...base, labels: [] }} property="labels" />);
     expect(container).toBeEmptyDOMElement();
   });
 });

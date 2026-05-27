@@ -3,7 +3,7 @@ import type { JiraIssueListItem } from "../../bindings";
 import type { JiraIssueProperty } from "./properties";
 import { DEFAULT_PROPERTIES, JIRA_ISSUE_DEFAULT_VIEWS } from "./defaults";
 import { defaultJiraSort } from "./compare";
-import { KeyCell, TitleCell, StatusCell, AssigneeCell, UpdatedCell } from "./cells";
+import { KeyCell, TitleCell, StatusCell, AssigneeCell, UpdatedCell, PriorityCell, LabelsCell } from "./cells";
 import { JiraIssueDetail } from "./detail";
 
 const PROPERTY_DEFINITIONS: PropertyDefinition<JiraIssueListItem, JiraIssueProperty>[] = [
@@ -42,13 +42,13 @@ const PROPERTY_DEFINITIONS: PropertyDefinition<JiraIssueListItem, JiraIssuePrope
     id: "priority",
     label: "Priority",
     kind: "categorical",
-    renderCell: () => null,
+    renderCell: (props) => <PriorityCell {...props} />,
   },
   {
     id: "labels",
     label: "Labels",
     kind: "tags",
-    renderCell: () => null,
+    renderCell: (props) => <LabelsCell {...props} />,
   },
   {
     id: "project_key",

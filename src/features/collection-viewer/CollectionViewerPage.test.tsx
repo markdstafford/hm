@@ -25,6 +25,8 @@ const mockIssues: JiraIssueListItem[] = [
     assignee_display_name: "Alice",
     updated_at_source: "2024-06-01T10:00:00Z",
     project_key: "AMP",
+    priority_name: null,
+    labels: [],
   },
   {
     work_item_id: "wid-2",
@@ -34,6 +36,8 @@ const mockIssues: JiraIssueListItem[] = [
     assignee_display_name: "Bob",
     updated_at_source: "2024-01-01T10:00:00Z",
     project_key: "AMP",
+    priority_name: null,
+    labels: [],
   },
 ];
 

@@ -17,6 +17,8 @@ const mockIssue: JiraIssueListItem = {
   assignee_display_name: "Bob",
   updated_at_source: "2024-01-01T00:00:00Z",
   project_key: "AMP",
+  priority_name: null,
+  labels: [],
 };
 
 beforeEach(() => {
