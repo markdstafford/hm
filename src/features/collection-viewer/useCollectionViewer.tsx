@@ -6,6 +6,7 @@ import type { AppPreferences } from "../../preferences";
 import { Spinner } from "../../ui/feedback/Spinner";
 import { EmptyState } from "../../ui/feedback/EmptyState";
 import { Body } from "../../views/collection/Body";
+import { bucketCollectionItems, flattenBucketedGroups } from "../../views/collection/bucket";
 import { sortCollectionItems } from "../../views/collection/sort";
 import { CollectionHeader } from "../../views/collection/CollectionHeader";
 import { Detail } from "../../views/collection/Detail";
@@ -59,6 +60,7 @@ export function useCollectionViewer({
 }: UseCollectionViewerArgs): UseCollectionViewerResult {
   const { issues, loading, error } = useJiraIssues();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
   const [views, setViews] = useState<CollectionView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<AppPreferences>({});
@@ -74,10 +76,41 @@ export function useCollectionViewer({
     [activeView?.config],
   );
 
-  const displayItems = useMemo(
+  const sortedItems = useMemo(
     () => sortCollectionItems(issues, jiraIssueEntity, activeConfig.sort),
     [issues, activeConfig.sort],
   );
+
+  const groupedItems = useMemo(
+    () =>
+      activeConfig.group.property === null
+        ? []
+        : bucketCollectionItems({
+            items: sortedItems,
+            entity: jiraIssueEntity,
+            group: activeConfig.group,
+          }),
+    [sortedItems, activeConfig.group],
+  );
+
+  const displayItems = useMemo(
+    () =>
+      activeConfig.group.property === null
+        ? sortedItems
+        : flattenBucketedGroups(groupedItems, { collapsedGroupKeys }),
+    [activeConfig.group.property, collapsedGroupKeys, groupedItems, sortedItems],
+  );
+
+  useEffect(() => {
+    setCollapsedGroupKeys(new Set());
+  }, [activeConfig.group.property]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    if (displayItems.some((item) => item.work_item_id === selectedId)) return;
+    const first = displayItems[0];
+    setSelectedId(first?.work_item_id ?? null);
+  }, [displayItems, selectedId]);
 
   const selectedIndex = useMemo(
     () =>
@@ -112,6 +145,15 @@ export function useCollectionViewer({
     if (displayItems.length === 0) return;
     setSelectedId(displayItems[displayItems.length - 1].work_item_id);
   }, [displayItems]);
+
+  const toggleGroupCollapsed = useCallback((bucketKey: string) => {
+    setCollapsedGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(bucketKey)) next.delete(bucketKey);
+      else next.add(bucketKey);
+      return next;
+    });
+  }, []);
 
   const openPreview = useCallback(() => setPreviewOpen(true), []);
   const closePreview = useCallback(() => setPreviewOpen(false), []);
@@ -393,6 +435,9 @@ export function useCollectionViewer({
               entity={jiraIssueEntity}
               properties={activeConfig.propertyVisibility as PropertyConfig<JiraIssueProperty>[]}
               sort={activeConfig.sort}
+              group={activeConfig.group}
+              collapsedGroupKeys={collapsedGroupKeys}
+              onToggleGroupCollapsed={toggleGroupCollapsed}
               selectedId={selectedId}
               density={activeConfig.layout.density}
               onSelect={handleSelect}

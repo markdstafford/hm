@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Body } from "./Body";
 import { sortCollectionItems } from "./sort";
 import type { EntityContract } from "./types";
@@ -157,5 +158,120 @@ describe("Body", () => {
 
     expect(screen.getByText("Xray")).toBeInTheDocument();
     expect(screen.queryByText("5")).not.toBeInTheDocument();
+  });
+
+  it("renders grouped section headers when group prop is provided and hides empty buckets by default", () => {
+    const groupedEntity = {
+      ...entity,
+      groupableProperties: [
+        {
+          property: "name" as Prop,
+          bucketKeyFor: (item: Item) => (item.name.startsWith("A") ? "a" : "b"),
+          bucketOrder: () => [
+            { key: "a", label: "A names" },
+            { key: "b", label: "B names" },
+            { key: "c", label: "C names" },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <Body
+        items={[
+          { id: "a", name: "Alpha", rank: 2 },
+          { id: "b", name: "Beta", rank: 1 },
+        ]}
+        entity={groupedEntity}
+        group={{ property: "name", hideEmptyGroups: true }}
+        selectedId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("A names")).toBeInTheDocument();
+    expect(screen.getByText("B names")).toBeInTheDocument();
+    expect(screen.queryByText("C names")).not.toBeInTheDocument();
+  });
+
+  it("renders empty buckets with count zero when hideEmptyGroups is false", () => {
+    const groupedEntity = {
+      ...entity,
+      groupableProperties: [
+        {
+          property: "name" as Prop,
+          bucketKeyFor: (item: Item) => (item.name.startsWith("A") ? "a" : "b"),
+          bucketOrder: () => [
+            { key: "a", label: "A names" },
+            { key: "b", label: "B names" },
+          ],
+        },
+      ],
+    };
+
+    render(
+      <Body
+        items={[{ id: "a", name: "Alpha", rank: 2 }]}
+        entity={groupedEntity}
+        group={{ property: "name", hideEmptyGroups: false }}
+        selectedId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("B names")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /collapse b names/i })).toBeInTheDocument();
+  });
+
+  it("collapses and expands grouped rows when the section chevron is toggled", async () => {
+    const user = userEvent.setup();
+    const groupedEntity = {
+      ...entity,
+      groupableProperties: [
+        {
+          property: "name" as Prop,
+          bucketKeyFor: () => "a",
+          bucketOrder: () => [{ key: "a", label: "A names" }],
+        },
+      ],
+    };
+
+    render(
+      <Body
+        items={[{ id: "a", name: "Alpha", rank: 2 }]}
+        entity={groupedEntity}
+        group={{ property: "name", hideEmptyGroups: true }}
+        selectedId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    // Initially expanded: row is visible
+    expect(screen.getByRole("button", { name: /open a/i })).toBeInTheDocument();
+
+    // Collapse
+    await user.click(screen.getByRole("button", { name: /collapse a names/i }));
+    expect(screen.queryByRole("button", { name: /open a/i })).not.toBeInTheDocument();
+
+    // Expand again
+    await user.click(screen.getByRole("button", { name: /expand a names/i }));
+    expect(screen.getByRole("button", { name: /open a/i })).toBeInTheDocument();
+  });
+
+  it("renders flat rows when group prop is not provided or property is null", () => {
+    render(
+      <Body
+        items={[
+          { id: "a", name: "Alpha", rank: 2 },
+          { id: "b", name: "Beta", rank: 1 },
+        ]}
+        entity={entity}
+        selectedId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /open a/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open b/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /collapse/i })).not.toBeInTheDocument();
   });
 });
