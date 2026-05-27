@@ -135,14 +135,14 @@ describe("CollectionViewerPage", () => {
     expect(await screen.findByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
   });
 
-  it("Escape does NOT close the side detail panel (only X button closes side preview)", async () => {
+  it("Escape closes the side detail panel and keeps the row selected", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
     await screen.findByRole("button", { name: /close issue detail/i });
     fireEvent.keyDown(window, { key: "Escape" });
-    // Escape does nothing in side-peek — detail stays open
-    expect(screen.getByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
+    // Escape closes the preview in any mode (consistent keyboard model)
+    expect(screen.queryByRole("button", { name: /close issue detail/i })).not.toBeInTheDocument();
     // Row remains selected
     expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
   });

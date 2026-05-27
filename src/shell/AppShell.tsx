@@ -95,7 +95,7 @@ export function AppShell({
             )}
           </div>
           {mainHeader && (
-            <div className="flex items-center px-3" style={{ height: "var(--height-header-bar)" }}>
+            <div className="flex items-center px-3 border-b border-border/60" style={{ height: "var(--height-header-bar)" }}>
               <span className="titlebar-no-drag flex items-center gap-2 min-w-0 flex-1">{mainHeader}</span>
             </div>
           )}

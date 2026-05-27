@@ -2,58 +2,105 @@ import { useEffect } from "react";
 import { isFormFieldTarget } from "../../shell/keys";
 
 export type UseKeyboardNavigationArgs = {
+  /** False when the collection viewer is not the focused surface (settings open, etc.). */
   enabled: boolean;
-  mode: "side-peek" | "bottom-peek" | "full-page";
   selectedIndex: number;
   total: number;
+  previewOpen: boolean;
+  onSelectFirst: () => void;
+  onSelectLast: () => void;
   onMovePrevious: () => void;
   onMoveNext: () => void;
-  onExitFullPage: () => void;
+  onOpenPreview: () => void;
+  onClosePreview: () => void;
 };
 
+/**
+ * Keyboard model for the collection viewer.
+ *
+ * Always active when the collection is the focused surface:
+ *   ArrowDown / j → next row (selects first if none selected)
+ *   ArrowUp / k   → previous row (selects last if none selected)
+ *   Enter         → open preview when row selected and preview closed
+ *   Escape        → close preview when open; selection stays
+ *
+ * Form fields (`input`, `textarea`, `contenteditable`) suppress all bindings so
+ * typing in the rename textbox or any filter input doesn't move selection.
+ */
 export function useKeyboardNavigation({
   enabled,
-  mode,
   selectedIndex,
   total,
+  previewOpen,
+  onSelectFirst,
+  onSelectLast,
   onMovePrevious,
   onMoveNext,
-  onExitFullPage,
+  onOpenPreview,
+  onClosePreview,
 }: UseKeyboardNavigationArgs): void {
   useEffect(() => {
-    if (!enabled || selectedIndex < 0 || total <= 0) return;
+    if (!enabled || total <= 0) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (isFormFieldTarget(event.target)) return;
-      // isFormFieldTarget checks contentEditable via the IDL property, which some environments
-      // (e.g., jsdom) do not implement. Fall back to the reflected HTML attribute.
+      // isFormFieldTarget checks contentEditable via the IDL property, which some
+      // environments (e.g., jsdom) do not implement. Fall back to the reflected
+      // HTML attribute.
       if (event.target instanceof HTMLElement) {
         const attr = event.target.getAttribute("contenteditable");
         if (attr === "true" || attr === "plaintext-only" || attr === "") return;
       }
-      const canMovePrevious = selectedIndex > 0;
-      const canMoveNext = selectedIndex < total - 1;
-      const isFullPage = mode === "full-page";
 
-      if (event.key === "ArrowUp" && canMovePrevious) {
+      const k = event.key;
+      const moveDown = k === "ArrowDown" || k === "j";
+      const moveUp = k === "ArrowUp" || k === "k";
+
+      if (moveDown) {
         event.preventDefault();
-        onMovePrevious();
-      } else if (event.key === "ArrowDown" && canMoveNext) {
+        if (selectedIndex < 0) {
+          onSelectFirst();
+        } else if (selectedIndex < total - 1) {
+          onMoveNext();
+        }
+        return;
+      }
+      if (moveUp) {
         event.preventDefault();
-        onMoveNext();
-      } else if (isFullPage && event.key === "k" && canMovePrevious) {
+        if (selectedIndex < 0) {
+          onSelectLast();
+        } else if (selectedIndex > 0) {
+          onMovePrevious();
+        }
+        return;
+      }
+      if (k === "Enter") {
+        if (selectedIndex < 0) return;
+        if (previewOpen) return; // open already; user said noop
         event.preventDefault();
-        onMovePrevious();
-      } else if (isFullPage && event.key === "j" && canMoveNext) {
+        onOpenPreview();
+        return;
+      }
+      if (k === "Escape") {
+        if (!previewOpen) return;
         event.preventDefault();
-        onMoveNext();
-      } else if (isFullPage && event.key === "Escape") {
-        event.preventDefault();
-        onExitFullPage();
+        onClosePreview();
+        return;
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [enabled, mode, selectedIndex, total, onMovePrevious, onMoveNext, onExitFullPage]);
+  }, [
+    enabled,
+    selectedIndex,
+    total,
+    previewOpen,
+    onSelectFirst,
+    onSelectLast,
+    onMovePrevious,
+    onMoveNext,
+    onOpenPreview,
+    onClosePreview,
+  ]);
 }

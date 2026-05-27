@@ -2,36 +2,49 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useKeyboardNavigation } from "./useKeyboardNavigation";
 
-type Mode = "side-peek" | "bottom-peek" | "full-page";
-
-// Renders a <select> alongside the hook harness for filter testing
 function HarnessWithSelect({
   onMoveNext,
   onMovePrevious,
 }: { onMoveNext: () => void; onMovePrevious: () => void }) {
   useKeyboardNavigation({
     enabled: true,
-    mode: "side-peek",
     selectedIndex: 1,
     total: 5,
+    previewOpen: false,
+    onSelectFirst: vi.fn(),
+    onSelectLast: vi.fn(),
     onMovePrevious,
     onMoveNext,
-    onExitFullPage: vi.fn(),
+    onOpenPreview: vi.fn(),
+    onClosePreview: vi.fn(),
   });
   return <select data-testid="select-input"><option>A</option></select>;
 }
 
-// Minimal harness component
 function Harness({
   enabled = true,
-  mode = "side-peek" as Mode,
   selectedIndex = 1,
   total = 5,
+  previewOpen = false,
+  onSelectFirst = vi.fn(),
+  onSelectLast = vi.fn(),
   onMovePrevious = vi.fn(),
   onMoveNext = vi.fn(),
-  onExitFullPage = vi.fn(),
+  onOpenPreview = vi.fn(),
+  onClosePreview = vi.fn(),
 }: Partial<Parameters<typeof useKeyboardNavigation>[0]>) {
-  useKeyboardNavigation({ enabled, mode, selectedIndex, total, onMovePrevious, onMoveNext, onExitFullPage });
+  useKeyboardNavigation({
+    enabled,
+    selectedIndex,
+    total,
+    previewOpen,
+    onSelectFirst,
+    onSelectLast,
+    onMovePrevious,
+    onMoveNext,
+    onOpenPreview,
+    onClosePreview,
+  });
   return (
     <div>
       <input data-testid="text-input" />
@@ -42,128 +55,141 @@ function Harness({
 }
 
 describe("useKeyboardNavigation", () => {
-  it("ArrowUp calls onMovePrevious when canMovePrevious (index > 0)", () => {
-    const onMovePrevious = vi.fn();
-    render(<Harness selectedIndex={2} onMovePrevious={onMovePrevious} />);
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    expect(onMovePrevious).toHaveBeenCalledTimes(1);
-  });
-
-  it("ArrowDown calls onMoveNext when canMoveNext (index < total-1)", () => {
+  // ── ArrowDown / j ────────────────────────────────────────────────────
+  it("ArrowDown moves next when canMoveNext", () => {
     const onMoveNext = vi.fn();
     render(<Harness selectedIndex={1} total={5} onMoveNext={onMoveNext} />);
     fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(onMoveNext).toHaveBeenCalledTimes(1);
   });
 
-  it("ArrowUp does nothing when at first item (index 0)", () => {
-    const onMovePrevious = vi.fn();
-    render(<Harness selectedIndex={0} onMovePrevious={onMovePrevious} />);
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    expect(onMovePrevious).not.toHaveBeenCalled();
+  it("j moves next regardless of preview state", () => {
+    const onMoveNext = vi.fn();
+    render(<Harness selectedIndex={1} total={5} previewOpen={false} onMoveNext={onMoveNext} />);
+    fireEvent.keyDown(window, { key: "j" });
+    expect(onMoveNext).toHaveBeenCalledTimes(1);
   });
 
-  it("ArrowDown does nothing when at last item (index === total-1)", () => {
+  it("j moves next even when preview is open", () => {
+    const onMoveNext = vi.fn();
+    render(<Harness selectedIndex={1} total={5} previewOpen={true} onMoveNext={onMoveNext} />);
+    fireEvent.keyDown(window, { key: "j" });
+    expect(onMoveNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("ArrowDown does nothing at the last item", () => {
     const onMoveNext = vi.fn();
     render(<Harness selectedIndex={4} total={5} onMoveNext={onMoveNext} />);
     fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(onMoveNext).not.toHaveBeenCalled();
   });
 
+  it("ArrowDown selects first when nothing is selected", () => {
+    const onSelectFirst = vi.fn();
+    render(<Harness selectedIndex={-1} total={5} onSelectFirst={onSelectFirst} />);
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    expect(onSelectFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it("j selects first when nothing is selected", () => {
+    const onSelectFirst = vi.fn();
+    render(<Harness selectedIndex={-1} total={5} onSelectFirst={onSelectFirst} />);
+    fireEvent.keyDown(window, { key: "j" });
+    expect(onSelectFirst).toHaveBeenCalledTimes(1);
+  });
+
+  // ── ArrowUp / k ──────────────────────────────────────────────────────
+  it("ArrowUp moves previous when canMovePrevious", () => {
+    const onMovePrevious = vi.fn();
+    render(<Harness selectedIndex={2} onMovePrevious={onMovePrevious} />);
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(onMovePrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it("k moves previous regardless of preview state", () => {
+    const onMovePrevious = vi.fn();
+    render(<Harness selectedIndex={2} previewOpen={false} onMovePrevious={onMovePrevious} />);
+    fireEvent.keyDown(window, { key: "k" });
+    expect(onMovePrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it("k moves previous even when preview is open", () => {
+    const onMovePrevious = vi.fn();
+    render(<Harness selectedIndex={2} previewOpen={true} onMovePrevious={onMovePrevious} />);
+    fireEvent.keyDown(window, { key: "k" });
+    expect(onMovePrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it("ArrowUp does nothing at the first item", () => {
+    const onMovePrevious = vi.fn();
+    render(<Harness selectedIndex={0} onMovePrevious={onMovePrevious} />);
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(onMovePrevious).not.toHaveBeenCalled();
+  });
+
+  it("ArrowUp selects last when nothing is selected", () => {
+    const onSelectLast = vi.fn();
+    render(<Harness selectedIndex={-1} total={5} onSelectLast={onSelectLast} />);
+    fireEvent.keyDown(window, { key: "ArrowUp" });
+    expect(onSelectLast).toHaveBeenCalledTimes(1);
+  });
+
+  it("k selects last when nothing is selected", () => {
+    const onSelectLast = vi.fn();
+    render(<Harness selectedIndex={-1} total={5} onSelectLast={onSelectLast} />);
+    fireEvent.keyDown(window, { key: "k" });
+    expect(onSelectLast).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Enter ────────────────────────────────────────────────────────────
+  it("Enter opens preview when row selected and preview closed", () => {
+    const onOpenPreview = vi.fn();
+    render(<Harness selectedIndex={1} previewOpen={false} onOpenPreview={onOpenPreview} />);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onOpenPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("Enter is a no-op when preview is already open", () => {
+    const onOpenPreview = vi.fn();
+    render(<Harness selectedIndex={1} previewOpen={true} onOpenPreview={onOpenPreview} />);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onOpenPreview).not.toHaveBeenCalled();
+  });
+
+  it("Enter is a no-op when no row is selected", () => {
+    const onOpenPreview = vi.fn();
+    render(<Harness selectedIndex={-1} previewOpen={false} onOpenPreview={onOpenPreview} />);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onOpenPreview).not.toHaveBeenCalled();
+  });
+
+  // ── Escape ───────────────────────────────────────────────────────────
+  it("Escape closes preview when open (any preview mode)", () => {
+    const onClosePreview = vi.fn();
+    render(<Harness previewOpen={true} onClosePreview={onClosePreview} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClosePreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape is a no-op when preview is closed", () => {
+    const onClosePreview = vi.fn();
+    render(<Harness previewOpen={false} onClosePreview={onClosePreview} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClosePreview).not.toHaveBeenCalled();
+  });
+
+  // ── Enabled gate ─────────────────────────────────────────────────────
   it("does nothing when disabled", () => {
     const onMoveNext = vi.fn();
-    render(<Harness enabled={false} onMoveNext={onMoveNext} />);
+    const onClosePreview = vi.fn();
+    render(<Harness enabled={false} previewOpen={true} onMoveNext={onMoveNext} onClosePreview={onClosePreview} />);
     fireEvent.keyDown(window, { key: "ArrowDown" });
-    expect(onMoveNext).not.toHaveBeenCalled();
-  });
-
-  it("does nothing when selectedIndex is negative (no selection)", () => {
-    const onMovePrevious = vi.fn();
-    render(<Harness selectedIndex={-1} onMovePrevious={onMovePrevious} />);
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    expect(onMovePrevious).not.toHaveBeenCalled();
-  });
-
-  it("ArrowUp and ArrowDown work in side-peek mode", () => {
-    const onMoveNext = vi.fn();
-    const onMovePrevious = vi.fn();
-    render(<Harness mode="side-peek" selectedIndex={1} onMoveNext={onMoveNext} onMovePrevious={onMovePrevious} />);
-    fireEvent.keyDown(window, { key: "ArrowDown" });
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    expect(onMoveNext).toHaveBeenCalledTimes(1);
-    expect(onMovePrevious).toHaveBeenCalledTimes(1);
-  });
-
-  it("ArrowUp and ArrowDown work in bottom-peek mode", () => {
-    const onMoveNext = vi.fn();
-    render(<Harness mode="bottom-peek" selectedIndex={1} total={5} onMoveNext={onMoveNext} />);
-    fireEvent.keyDown(window, { key: "ArrowDown" });
-    expect(onMoveNext).toHaveBeenCalledTimes(1);
-  });
-
-  it("j calls onMoveNext only in full-page mode", () => {
-    const onMoveNext = vi.fn();
-    render(<Harness mode="full-page" selectedIndex={1} total={5} onMoveNext={onMoveNext} />);
-    fireEvent.keyDown(window, { key: "j" });
-    expect(onMoveNext).toHaveBeenCalledTimes(1);
-  });
-
-  it("j does NOT call onMoveNext in side-peek mode", () => {
-    const onMoveNext = vi.fn();
-    render(<Harness mode="side-peek" selectedIndex={1} total={5} onMoveNext={onMoveNext} />);
-    fireEvent.keyDown(window, { key: "j" });
-    expect(onMoveNext).not.toHaveBeenCalled();
-  });
-
-  it("j does NOT call onMoveNext in bottom-peek mode", () => {
-    const onMoveNext = vi.fn();
-    render(<Harness mode="bottom-peek" selectedIndex={1} total={5} onMoveNext={onMoveNext} />);
-    fireEvent.keyDown(window, { key: "j" });
-    expect(onMoveNext).not.toHaveBeenCalled();
-  });
-
-  it("k calls onMovePrevious only in full-page mode", () => {
-    const onMovePrevious = vi.fn();
-    render(<Harness mode="full-page" selectedIndex={2} onMovePrevious={onMovePrevious} />);
-    fireEvent.keyDown(window, { key: "k" });
-    expect(onMovePrevious).toHaveBeenCalledTimes(1);
-  });
-
-  it("k does NOT call onMovePrevious in side-peek mode", () => {
-    const onMovePrevious = vi.fn();
-    render(<Harness mode="side-peek" selectedIndex={2} onMovePrevious={onMovePrevious} />);
-    fireEvent.keyDown(window, { key: "k" });
-    expect(onMovePrevious).not.toHaveBeenCalled();
-  });
-
-  it("k does NOT call onMovePrevious in bottom-peek mode", () => {
-    const onMovePrevious = vi.fn();
-    render(<Harness mode="bottom-peek" selectedIndex={2} onMovePrevious={onMovePrevious} />);
-    fireEvent.keyDown(window, { key: "k" });
-    expect(onMovePrevious).not.toHaveBeenCalled();
-  });
-
-  it("Escape calls onExitFullPage when mode is full-page", () => {
-    const onExitFullPage = vi.fn();
-    render(<Harness mode="full-page" onExitFullPage={onExitFullPage} />);
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(onExitFullPage).toHaveBeenCalledTimes(1);
+    expect(onMoveNext).not.toHaveBeenCalled();
+    expect(onClosePreview).not.toHaveBeenCalled();
   });
 
-  it("Escape does NOT call onExitFullPage in side-peek mode", () => {
-    const onExitFullPage = vi.fn();
-    render(<Harness mode="side-peek" onExitFullPage={onExitFullPage} />);
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(onExitFullPage).not.toHaveBeenCalled();
-  });
-
-  it("Escape does NOT call onExitFullPage in bottom-peek mode", () => {
-    const onExitFullPage = vi.fn();
-    render(<Harness mode="bottom-peek" onExitFullPage={onExitFullPage} />);
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(onExitFullPage).not.toHaveBeenCalled();
-  });
-
+  // ── Form field suppression ───────────────────────────────────────────
   it("ignores ArrowDown when target is an input", () => {
     const onMoveNext = vi.fn();
     render(<Harness onMoveNext={onMoveNext} />);

@@ -14,6 +14,9 @@ export type CollectionHeaderProps = {
   settingsSlot?: ReactNode;
 };
 
+// Rendered inside the AppShell's `mainHeader` slot. The slot provides height,
+// horizontal padding, vertical centering, and the bottom border — this
+// component just lays out chips on the left and the settings slot on the right.
 export function CollectionHeader({
   views,
   activeViewId,
@@ -25,7 +28,7 @@ export function CollectionHeader({
   settingsSlot,
 }: CollectionHeaderProps) {
   return (
-    <div className="flex h-8 shrink-0 items-center gap-3 border-b border-border/60 px-3">
+    <div className="flex w-full items-center gap-3">
       <div className="min-w-0 flex-1">
         <ViewChips
           views={views}
