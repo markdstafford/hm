@@ -1,14 +1,21 @@
 import { describe, it, expect } from "vitest";
 import { jiraIssueEntity } from "../../entities/jira-issue";
 import {
+  addSortLevel,
+  availableSortProperties,
+  clearSort,
   defaultViewConfig,
+  moveSortLevel,
   normalizeViewConfig,
-  summarizeViewConfig,
+  removeSortLevel,
+  setSortProperty,
+  toggleSortDirection,
   patchViewConfig,
   setPropertyVisible,
   setPropertySide,
   moveProperty,
   applyPropertyDrop,
+  summarizeViewConfig,
 } from "./ViewConfig";
 
 describe("defaultViewConfig", () => {
@@ -438,5 +445,94 @@ describe("property visibility helpers", () => {
     const result = applyPropertyDrop(base, "title", "labels", false, jiraIssueEntity);
 
     expect(result.find((row) => row.property === "title")?.visible).toBe(true);
+  });
+});
+
+describe("sort config normalization", () => {
+  it("drops stale properties, invalid directions, and duplicate sort properties", () => {
+    const config = normalizeViewConfig(
+      {
+        sort: [
+          { property: "status", direction: "asc" },
+          { property: "missing", direction: "asc" },
+          { property: "updated_at_source", direction: "sideways" },
+          { property: "status", direction: "desc" },
+          { property: "priority", direction: "desc" },
+        ],
+      },
+      jiraIssueEntity,
+    );
+
+    expect(config.sort).toEqual([
+      { property: "status", direction: "asc" },
+      { property: "priority", direction: "desc" },
+    ]);
+  });
+
+  it("keeps sort empty when no sort is configured", () => {
+    expect(normalizeViewConfig({}, jiraIssueEntity).sort).toEqual([]);
+  });
+});
+
+describe("sort config helpers", () => {
+  it("adds the first unused sortable property with its default direction", () => {
+    const config = { ...defaultViewConfig(jiraIssueEntity), sort: [] };
+    expect(addSortLevel(config, jiraIssueEntity)).toEqual([{ property: "key", direction: "asc" }]);
+  });
+
+  it("adds Updated with its property default direction when earlier properties are used", () => {
+    const config = {
+      ...defaultViewConfig(jiraIssueEntity),
+      sort: [
+        { property: "key", direction: "asc" as const },
+        { property: "title", direction: "asc" as const },
+        { property: "status", direction: "asc" as const },
+        { property: "assignee", direction: "asc" as const },
+      ],
+    };
+    expect(addSortLevel(config, jiraIssueEntity).at(-1)).toEqual({ property: "updated_at_source", direction: "desc" });
+  });
+
+  it("updates, toggles, removes, moves, and clears sort levels immutably", () => {
+    const sort = [
+      { property: "status", direction: "asc" as const },
+      { property: "updated_at_source", direction: "desc" as const },
+      { property: "priority", direction: "asc" as const },
+    ];
+
+    expect(setSortProperty(sort, 1, "assignee")).toEqual([
+      { property: "status", direction: "asc" },
+      { property: "assignee", direction: "desc" },
+      { property: "priority", direction: "asc" },
+    ]);
+    expect(toggleSortDirection(sort, 0)).toEqual([
+      { property: "status", direction: "desc" },
+      { property: "updated_at_source", direction: "desc" },
+      { property: "priority", direction: "asc" },
+    ]);
+    expect(removeSortLevel(sort, 1)).toEqual([
+      { property: "status", direction: "asc" },
+      { property: "priority", direction: "asc" },
+    ]);
+    expect(moveSortLevel(sort, 2, 0)).toEqual([
+      { property: "priority", direction: "asc" },
+      { property: "status", direction: "asc" },
+      { property: "updated_at_source", direction: "desc" },
+    ]);
+    expect(clearSort()).toEqual([]);
+    expect(sort[0]).toEqual({ property: "status", direction: "asc" });
+  });
+
+  it("availableSortProperties keeps the current row selectable and excludes other used properties", () => {
+    const options = availableSortProperties(
+      jiraIssueEntity,
+      [
+        { property: "status", direction: "asc" },
+        { property: "updated_at_source", direction: "desc" },
+      ],
+      "status",
+    );
+    expect(options.map((option) => option.id)).toContain("status");
+    expect(options.map((option) => option.id)).not.toContain("updated_at_source");
   });
 });

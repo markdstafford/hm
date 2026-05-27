@@ -52,6 +52,12 @@ export type ViewConfigSummary = {
   conditionalColor: "Soon";
 };
 
+export type SortPropertyOption = {
+  id: string;
+  label: string;
+  defaultDirection: SortDirection;
+};
+
 // --- Internal guards ---
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -142,6 +148,33 @@ function normalizePropertyVisibilityRows(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function sortablePropertyIds(entity: EntityContract<any, any>): string[] {
+  return (entity.sortableProperties ?? []).map((row) => String(row.property));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeSortRows(input: unknown, entity: EntityContract<any, any>): SortLevelConfig[] {
+  const sortableIds = new Set(sortablePropertyIds(entity));
+  const seen = new Set<string>();
+  const rows: SortLevelConfig[] = [];
+
+  if (!Array.isArray(input)) return rows;
+
+  for (const rawRow of input) {
+    if (!isObject(rawRow)) continue;
+    const property = rawRow["property"];
+    const direction = rawRow["direction"];
+    if (typeof property !== "string") continue;
+    if (!isSortDirection(direction)) continue;
+    if (!sortableIds.has(property) || seen.has(property)) continue;
+    rows.push({ property, direction });
+    seen.add(property);
+  }
+
+  return rows;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function propertyLabel(entity: EntityContract<any, any>, propertyId: string): string {
   const found = entity.properties.find((p) => p.id === propertyId);
   if (found) return found.label;
@@ -195,18 +228,7 @@ export function normalizeViewConfig(input: unknown, entity: EntityContract<any, 
   const propertyVisibility = normalizePropertyVisibilityRows(input["propertyVisibility"], entity);
 
   // sort
-  let sort: SortLevelConfig[] = [];
-  const rawSort = input["sort"];
-  if (Array.isArray(rawSort)) {
-    sort = rawSort
-      .filter(
-        (row): row is SortLevelConfig =>
-          isObject(row) &&
-          typeof row["property"] === "string" &&
-          isSortDirection(row["direction"])
-      )
-      .map((row) => ({ property: row.property, direction: row.direction }));
-  }
+  const sort = normalizeSortRows(input["sort"], entity);
 
   // group
   let group = defaults.group;
@@ -249,6 +271,70 @@ export function normalizeViewConfig(input: unknown, entity: EntityContract<any, 
     filters,
     conditionalColor: { enabled: false, rules: [] },
   };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function availableSortProperties(
+  entity: EntityContract<any, any>,
+  currentSort: SortLevelConfig[],
+  currentProperty?: string,
+): SortPropertyOption[] {
+  const used = new Set(currentSort.map((row) => row.property));
+  return (entity.sortableProperties ?? [])
+    .filter((row) => {
+      const id = String(row.property);
+      return id === currentProperty || !used.has(id);
+    })
+    .map((row) => {
+      const id = String(row.property);
+      return {
+        id,
+        label: propertyLabel(entity, id),
+        defaultDirection: row.defaultDirection ?? "asc",
+      };
+    });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function addSortLevel(config: ViewConfig, entity: EntityContract<any, any>): SortLevelConfig[] {
+  const option = availableSortProperties(entity, config.sort)[0];
+  if (!option) return config.sort.map((row) => ({ ...row }));
+  return [...config.sort.map((row) => ({ ...row })), { property: option.id, direction: option.defaultDirection }];
+}
+
+export function setSortProperty(
+  rows: SortLevelConfig[],
+  index: number,
+  property: string,
+): SortLevelConfig[] {
+  return rows.map((row, rowIndex) =>
+    rowIndex === index ? { ...row, property } : { ...row },
+  );
+}
+
+export function toggleSortDirection(rows: SortLevelConfig[], index: number): SortLevelConfig[] {
+  return rows.map((row, rowIndex) =>
+    rowIndex === index
+      ? { ...row, direction: row.direction === "asc" ? "desc" : "asc" }
+      : { ...row },
+  );
+}
+
+export function removeSortLevel(rows: SortLevelConfig[], index: number): SortLevelConfig[] {
+  return rows.filter((_, rowIndex) => rowIndex !== index).map((row) => ({ ...row }));
+}
+
+export function moveSortLevel(rows: SortLevelConfig[], fromIndex: number, toIndex: number): SortLevelConfig[] {
+  const next = rows.map((row) => ({ ...row }));
+  if (fromIndex < 0 || fromIndex >= next.length) return next;
+  const [moved] = next.splice(fromIndex, 1);
+  const safeIndex = Math.max(0, Math.min(toIndex, next.length));
+  next.splice(safeIndex, 0, moved);
+  return next;
+}
+
+export function clearSort(): SortLevelConfig[] {
+  return [];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
