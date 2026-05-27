@@ -230,6 +230,58 @@ describe("CollectionViewerPage", () => {
     expect(screen.queryByRole("button", { name: "Recently updated" })).not.toBeInTheDocument();
   });
 
+  it("opens view settings with normalized summaries", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    expect(screen.getByRole("heading", { name: "View settings" })).toBeInTheDocument();
+    expect(screen.getByLabelText("View name")).toHaveValue("All open");
+    expect(screen.getByText("Table · Regular")).toBeInTheDocument();
+  });
+
+  it("renames through the menu and updates the active chip", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    const input = screen.getByLabelText("View name");
+    fireEvent.change(input, { target: { value: "Assigned to me" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() =>
+      expect(commands.collectionViewSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "jira-issue-all-open",
+          display_name: "Assigned to me",
+          config: expect.objectContaining({ layout: expect.objectContaining({ type: "table" }) }),
+        }),
+      ),
+    );
+    expect(await screen.findByRole("button", { name: "Assigned to me" })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("rejects blank names in the menu", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    const input = screen.getByLabelText("View name");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByText("View name cannot be blank")).toBeInTheDocument();
+    expect(commands.collectionViewSave).not.toHaveBeenCalledWith(
+      expect.objectContaining({ display_name: "" }),
+    );
+  });
+
+  it("closes the settings menu when the active chip changes", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    expect(screen.getByRole("heading", { name: "View settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mine" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "View settings" })).not.toBeInTheDocument(),
+    );
+  });
+
   it("restores deletion and active-view choice after simulated app reload", async () => {
     // Simulate reload state: Recently updated was previously deleted; Mine was saved as active.
     const remainingViews = [

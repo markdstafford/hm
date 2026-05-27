@@ -1,5 +1,4 @@
-import { SlidersHorizontal } from "lucide-react";
-import { IconButton } from "../../ui/buttons/IconButton";
+import type { ReactNode } from "react";
 import { ChipContextMenu } from "./ChipContextMenu";
 import { ViewChips } from "./ViewChips";
 import type { CollectionView } from "./views/types";
@@ -12,6 +11,7 @@ export type CollectionHeaderProps = {
   onRename: (viewId: string, displayName: string) => void;
   onDuplicate: (viewId: string) => void;
   onDelete: (viewId: string) => void;
+  settingsSlot?: ReactNode;
 };
 
 export function CollectionHeader({
@@ -22,6 +22,7 @@ export function CollectionHeader({
   onRename,
   onDuplicate,
   onDelete,
+  settingsSlot,
 }: CollectionHeaderProps) {
   return (
     <div className="flex h-8 shrink-0 items-center gap-3 border-b border-border/60 px-3">
@@ -43,9 +44,7 @@ export function CollectionHeader({
           )}
         />
       </div>
-      <IconButton label="View settings coming next" dimmed disabled>
-        <SlidersHorizontal size={14} />
-      </IconButton>
+      {settingsSlot}
     </div>
   );
 }
