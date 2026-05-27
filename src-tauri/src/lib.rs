@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod collections;
 pub mod commands;
 pub mod db;
 pub mod ingestion;
