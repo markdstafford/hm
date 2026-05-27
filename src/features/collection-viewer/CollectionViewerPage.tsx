@@ -78,6 +78,14 @@ export function CollectionViewerPage() {
     setSelectedId(displayItems[selectedIndex + 1].work_item_id);
   }, [displayItems, selectedIndex]);
 
+  // When preview changes to full-page while a row is already selected, open the full-page surface.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (activeConfig.layout.preview === "full-page" && selectedId !== null) {
+      setFullPageOpen(true);
+    }
+  }, [activeConfig.layout.preview]);
+
   useKeyboardNavigation({
     enabled: !!selectedItem,
     mode: activeConfig.layout.preview,

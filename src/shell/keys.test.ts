@@ -37,6 +37,10 @@ describe("isFormFieldTarget", () => {
     expect(isFormFieldTarget(ta)).toBe(true);
     expect(isFormFieldTarget(ce)).toBe(true);
   });
+  it("returns true for SELECT", () => {
+    const sel = document.createElement("select");
+    expect(isFormFieldTarget(sel)).toBe(true);
+  });
   it("returns false for non-form elements", () => {
     expect(isFormFieldTarget(document.createElement("button"))).toBe(false);
     expect(isFormFieldTarget(null)).toBe(false);

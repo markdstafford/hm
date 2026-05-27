@@ -117,7 +117,7 @@ export function LayoutPanel({ config, onPatchConfig, onBack, onClose }: Props) {
             trigger={
               <button
                 type="button"
-                aria-label="Preview"
+                aria-label={`Preview ${previewLabel(config.layout.preview)}`}
                 className="flex w-full items-center justify-between rounded px-1 py-1.5 text-sm hover:bg-surface"
               >
                 <span className="text-text">Preview</span>

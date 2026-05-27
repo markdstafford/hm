@@ -437,6 +437,31 @@ describe("CollectionViewerPage", () => {
     expect(screen.getAllByText("First issue").length).toBeGreaterThanOrEqual(1);
   });
 
+  it("switching to full-page while an item is selected immediately shows full-page surface", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Click a row while in default side preview
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    expect(screen.getByRole("button", { name: "Close issue detail" })).toBeInTheDocument();
+
+    // Switch to full-page preview without clicking a row again
+    fireEvent.click(await screen.findByRole("button", { name: /open view settings/i }));
+    fireEvent.click(screen.getByText("Layout").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: /preview side/i }));
+    await waitFor(() => expect(screen.getByRole("listbox", { name: "Preview options" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("option", { name: /full page/i }));
+    await waitFor(() => expect(commands.collectionViewSave).toHaveBeenCalledWith(
+      expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "full-page" }) }) })
+    ));
+
+    // Full-page surface should open automatically
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /open amp-1: first issue/i })).not.toBeInTheDocument();
+  });
+
   it("ArrowDown moves selection to next issue in side preview", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);

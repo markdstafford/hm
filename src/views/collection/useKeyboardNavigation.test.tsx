@@ -3,6 +3,23 @@ import { describe, expect, it, vi } from "vitest";
 import { useKeyboardNavigation } from "./useKeyboardNavigation";
 import type { PreviewSurface } from "./ViewConfig";
 
+// Renders a <select> alongside the hook harness for filter testing
+function HarnessWithSelect({
+  onMoveNext,
+  onMovePrevious,
+}: { onMoveNext: () => void; onMovePrevious: () => void }) {
+  useKeyboardNavigation({
+    enabled: true,
+    mode: "side-peek",
+    selectedIndex: 1,
+    total: 5,
+    onMovePrevious,
+    onMoveNext,
+    onExitFullPage: vi.fn(),
+  });
+  return <select data-testid="select-input"><option>A</option></select>;
+}
+
 // Minimal harness component
 function Harness({
   enabled = true,
@@ -129,6 +146,14 @@ describe("useKeyboardNavigation", () => {
     render(<Harness onMoveNext={onMoveNext} />);
     const ce = screen.getByTestId("content-editable");
     fireEvent.keyDown(ce, { key: "ArrowDown" });
+    expect(onMoveNext).not.toHaveBeenCalled();
+  });
+
+  it("ignores ArrowDown when target is a select element", () => {
+    const onMoveNext = vi.fn() as () => void;
+    render(<HarnessWithSelect onMoveNext={onMoveNext} onMovePrevious={vi.fn() as () => void} />);
+    const sel = screen.getByTestId("select-input");
+    fireEvent.keyDown(sel, { key: "ArrowDown" });
     expect(onMoveNext).not.toHaveBeenCalled();
   });
 });
