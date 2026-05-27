@@ -183,6 +183,27 @@ describe("Row", () => {
     expect(screen.getByRole("button", { name: /open item-1/i })).toBeInTheDocument();
   });
 
+  it("hides only the active grouped property cell without mutating property visibility", () => {
+    const onSelect = vi.fn();
+    const properties = entity.defaultProperties;
+
+    render(
+      <Row
+        item={item}
+        entity={entity}
+        properties={properties}
+        groupedPropertyId="count"
+        selectedId={null}
+        onSelect={onSelect}
+      />,
+    );
+
+    expect(screen.getByTestId("cell-name")).toBeInTheDocument();
+    expect(screen.queryByTestId("cell-count")).not.toBeInTheDocument();
+    // Verify properties array not mutated
+    expect(properties).toEqual(entity.defaultProperties);
+  });
+
   it("does not crash when a property id is not in entity.properties", () => {
     const onSelect = vi.fn();
     const unknownProp = [

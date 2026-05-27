@@ -8,6 +8,7 @@ type Props<TItem, TProperty extends string> = {
   properties: PropertyConfig<TProperty>[];
   selectedId: string | null;
   density?: ViewDensity;
+  groupedPropertyId?: string | null;
   onSelect: (item: TItem) => void;
 };
 
@@ -17,13 +18,18 @@ export function Row<TItem, TProperty extends string>({
   properties,
   selectedId,
   density = "regular",
+  groupedPropertyId = null,
   onSelect,
 }: Props<TItem, TProperty>) {
   const itemId = entity.getId(item);
   const isSelected = itemId === selectedId;
 
-  const visibleLeft = properties.filter((p) => p.visible && p.side === "left");
-  const visibleRight = properties.filter((p) => p.visible && p.side === "right");
+  const visibleLeft = properties.filter(
+    (p) => p.visible && p.side === "left" && String(p.property) !== groupedPropertyId,
+  );
+  const visibleRight = properties.filter(
+    (p) => p.visible && p.side === "right" && String(p.property) !== groupedPropertyId,
+  );
 
   const getDefinition = (propId: TProperty) =>
     entity.properties.find((def) => def.id === propId);

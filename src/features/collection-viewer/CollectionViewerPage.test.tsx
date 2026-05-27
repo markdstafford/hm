@@ -637,6 +637,61 @@ describe("CollectionViewerPage", () => {
     });
   });
 
+  it("groups Jira issues by status after grouping config is set via view settings", async () => {
+    // Use a view record with group config set to status
+    mockViewCommands([
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: { group: { property: "status", hideEmptyGroups: true } },
+      },
+    ]);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: sortableIssues, loading: false, error: null });
+
+    render(<CollectionViewerPage />);
+
+    // Section headers should appear (sortableIssues has "Open" and "Done" statuses)
+    expect(await screen.findByText("Open")).toBeInTheDocument();
+    expect(await screen.findByText("Done")).toBeInTheDocument();
+    // Rows should still be present
+    expect(screen.getByRole("button", { name: /open amp-1/i })).toBeInTheDocument();
+  });
+
+  it("collapses a group section when its chevron is toggled", async () => {
+    mockViewCommands([
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: { group: { property: "status", hideEmptyGroups: true } },
+      },
+    ]);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: sortableIssues, loading: false, error: null });
+
+    render(<CollectionViewerPage />);
+
+    // Wait for sections to load
+    await screen.findByText("Open");
+
+    // Collapse "Open" section
+    fireEvent.click(screen.getByRole("button", { name: /collapse open/i }));
+
+    // "Open old" and "Open new" rows should be hidden
+    expect(screen.queryByRole("button", { name: /open amp-1: open old/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open amp-3: open new/i })).not.toBeInTheDocument();
+    // "Done new" should still be visible (different section)
+    expect(screen.getByRole("button", { name: /open amp-2: done new/i })).toBeInTheDocument();
+
+    // Click "Done new" to open the preview — only 1 item is in the visible (non-collapsed) set
+    fireEvent.click(screen.getByRole("button", { name: /open amp-2: done new/i }));
+    expect(await screen.findByText("1 of 1")).toBeInTheDocument();
+  });
+
   it("passes active view property visibility to rows so hidden properties disappear", async () => {
     const records = [
       {

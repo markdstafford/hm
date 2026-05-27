@@ -1,4 +1,4 @@
-import type { PropertySide, EntityContract } from "./types";
+import type { PropertySide, EntityContract, GroupableProperty } from "./types";
 
 export type LayoutType = "table";
 export type ViewDensity = "compact" | "regular";
@@ -153,6 +153,18 @@ function sortablePropertyIds(entity: EntityContract<any, any>): string[] {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+function groupablePropertyIds(entity: EntityContract<any, any>): string[] {
+  return (entity.groupableProperties ?? []).map((row) => String(row.property));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function groupablePropertyLabel(entity: EntityContract<any, any>, propertyId: string): string | null {
+  const groupable = (entity.groupableProperties ?? []).find((row) => row.property === propertyId);
+  if (!groupable) return null;
+  return entity.properties.find((p) => p.id === groupable.property)?.label ?? "Unknown property";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normalizeSortRows(input: unknown, entity: EntityContract<any, any>): SortLevelConfig[] {
   const sortableIds = new Set(sortablePropertyIds(entity));
   const seen = new Set<string>();
@@ -236,9 +248,14 @@ export function normalizeViewConfig(input: unknown, entity: EntityContract<any, 
   if (isObject(rawGroup)) {
     const gProperty = rawGroup["property"];
     const gHide = rawGroup["hideEmptyGroups"];
-    if ((gProperty === null || typeof gProperty === "string") && typeof gHide === "boolean") {
-      group = { property: gProperty as string | null, hideEmptyGroups: gHide };
-    }
+    const groupableIds = new Set(groupablePropertyIds(entity));
+    group = {
+      property:
+        typeof gProperty === "string" && groupableIds.has(gProperty)
+          ? gProperty
+          : null,
+      hideEmptyGroups: typeof gHide === "boolean" ? gHide : true,
+    };
   }
 
   // filters
@@ -337,6 +354,23 @@ export function clearSort(): SortLevelConfig[] {
   return [];
 }
 
+export function setGroupProperty(group: GroupConfig, property: string | null): GroupConfig {
+  return { property, hideEmptyGroups: group.hideEmptyGroups };
+}
+
+export function removeGrouping(group: GroupConfig): GroupConfig {
+  return { property: null, hideEmptyGroups: group.hideEmptyGroups };
+}
+
+export function setHideEmptyGroups(group: GroupConfig, hideEmptyGroups: boolean): GroupConfig {
+  return { property: group.property, hideEmptyGroups };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function availableGroupProperties(entity: EntityContract<any, any>): GroupableProperty<any, any>[] {
+  return entity.groupableProperties ?? [];
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function summarizeViewConfig(config: ViewConfig, entity: EntityContract<any, any>): ViewConfigSummary {
   // layout
@@ -358,10 +392,10 @@ export function summarizeViewConfig(config: ViewConfig, entity: EntityContract<a
   }
 
   // group
-  let group = "None";
-  if (config.group.property !== null) {
-    group = propertyLabel(entity, config.group.property);
-  }
+  const group =
+    config.group.property === null
+      ? "None"
+      : groupablePropertyLabel(entity, config.group.property) ?? "Unknown property";
 
   // filter
   const activeFilterCount = config.filters.filter((f) => f.active).length;

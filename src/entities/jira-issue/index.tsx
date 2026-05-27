@@ -1,6 +1,6 @@
-import type { EntityContract, PropertyDefinition } from "../../views/collection/types";
+import type { EntityContract, GroupableProperty, PropertyDefinition } from "../../views/collection/types";
 import type { JiraIssueListItem } from "../../bindings";
-import type { JiraIssueProperty } from "./properties";
+import { bucketUpdatedAtSource, updatedAtBucketOrder, type JiraIssueProperty } from "./properties";
 import { DEFAULT_PROPERTIES, JIRA_ISSUE_DEFAULT_VIEWS } from "./defaults";
 import {
   defaultJiraSort,
@@ -69,6 +69,67 @@ const PROPERTY_DEFINITIONS: PropertyDefinition<JiraIssueListItem, JiraIssuePrope
   },
 ];
 
+// Jira workflow category order; true workflow metadata is not available in list items,
+// so we use this stable category order as a deterministic fallback.
+const STATUS_CATEGORY_ORDER = ["To do", "In progress", "Done"];
+
+function stableUnique(values: (string | null | undefined)[], fallback: string): string[] {
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = raw?.trim() || fallback;
+    seen.add(value);
+  }
+  return [...seen].sort((a, b) => {
+    if (a === fallback && b !== fallback) return 1;
+    if (b === fallback && a !== fallback) return -1;
+    return a.localeCompare(b);
+  });
+}
+
+const GROUPABLE_PROPERTIES: GroupableProperty<JiraIssueListItem, JiraIssueProperty>[] = [
+  {
+    property: "status",
+    bucketKeyFor: (item) => item.status_name?.trim() || "No status",
+    bucketOrder: (items = []) => {
+      const discovered = stableUnique(items.map((item) => item.status_name), "No status");
+      const ordered = [...STATUS_CATEGORY_ORDER, ...discovered.filter((value) => !STATUS_CATEGORY_ORDER.includes(value))];
+      return ordered.map((key) => ({ key, label: key }));
+    },
+  },
+  {
+    property: "assignee",
+    bucketKeyFor: (item) => item.assignee_display_name?.trim() || "Unassigned",
+    bucketOrder: (items = []) =>
+      stableUnique(items.map((item) => item.assignee_display_name), "Unassigned").map((key) => ({
+        key,
+        label: key,
+      })),
+  },
+  {
+    property: "priority",
+    bucketKeyFor: (item) => item.priority_name?.trim() || "No priority",
+    bucketOrder: (items = []) =>
+      stableUnique(items.map((item) => item.priority_name), "No priority").map((key) => ({
+        key,
+        label: key,
+      })),
+  },
+  {
+    property: "project_key",
+    bucketKeyFor: (item) => item.project_key?.trim() || "No project",
+    bucketOrder: (items = []) =>
+      stableUnique(items.map((item) => item.project_key), "No project").map((key) => ({
+        key,
+        label: key,
+      })),
+  },
+  {
+    property: "updated_at_source",
+    bucketKeyFor: (item, context) => bucketUpdatedAtSource(item.updated_at_source, context?.now),
+    bucketOrder: () => updatedAtBucketOrder(),
+  },
+];
+
 export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssueProperty> = {
   id: "jira-issue",
   label: "Jira issues",
@@ -89,6 +150,7 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
     { property: "priority", compare: compareJiraIssueByPriority, isNull: (item) => !item.priority_name?.trim() },
     { property: "project_key", compare: compareJiraIssueByProjectKey, isNull: (item) => !item.project_key?.trim() },
   ],
+  groupableProperties: GROUPABLE_PROPERTIES,
   Detail: JiraIssueDetail,
   defaultViews: JIRA_ISSUE_DEFAULT_VIEWS,
 };

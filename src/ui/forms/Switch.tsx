@@ -8,9 +8,11 @@ type Props = {
   onCheckedChange?: (v: boolean) => void;
   disabled?: boolean;
   id?: string;
+  /** Visually hides the label text while keeping it accessible to screen readers. */
+  hideLabelText?: boolean;
 };
 
-export function Switch({ label, id, ...rest }: Props) {
+export function Switch({ label, id, hideLabelText, ...rest }: Props) {
   const auto = useId();
   const fieldId = id ?? auto;
   return (
@@ -22,7 +24,7 @@ export function Switch({ label, id, ...rest }: Props) {
       >
         <RS.Thumb className="block h-3 w-3 translate-x-0.5 rounded-full bg-background transition-transform data-[state=checked]:translate-x-3.5" />
       </RS.Root>
-      <span>{label}</span>
+      <span className={hideLabelText ? "sr-only" : undefined}>{label}</span>
     </label>
   );
 }

@@ -122,13 +122,15 @@ describe("ViewSettingsMenu", () => {
     expect(screen.getByRole("button", { name: "+ Add sort" })).toBeInTheDocument();
   });
 
-  it("clicking Group opens Group panel", async () => {
+  it("clicking Group opens functional Group panel", async () => {
     const user = userEvent.setup();
     renderMenu();
     await user.click(screen.getByRole("button", { name: "Open view settings" }));
     await user.click(screen.getByText("Group").closest("button")!);
     expect(screen.getByRole("heading", { name: "Group" })).toBeInTheDocument();
-    expect(screen.getByText("Coming in #43")).toBeInTheDocument();
+    expect(screen.queryByText("Coming in #43")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /group by none/i })).toBeInTheDocument();
+    expect(screen.getByLabelText("Hide empty groups")).toBeInTheDocument();
   });
 
   it("clicking Filter opens Filter panel", async () => {
