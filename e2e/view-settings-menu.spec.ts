@@ -33,9 +33,15 @@ test("Jira view settings menu opens, renames, navigates, and dismisses", async (
   await page.getByRole("button", { name: /back to view settings/i }).click();
   await expect(page.getByRole("heading", { name: "View settings" })).toBeVisible();
 
-  // Drill into each sub-panel and verify title + placeholder body, then back
+  // Drill into Property visibility — now has real controls
+  await page.getByRole("button", { name: /property visibility/i }).click();
+  await expect(page.getByRole("heading", { name: "Property visibility" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Search properties" })).toBeVisible();
+  await page.getByRole("button", { name: /back to view settings/i }).click();
+  await expect(page.getByRole("heading", { name: "View settings" })).toBeVisible();
+
+  // Drill into each remaining sub-panel and verify title + placeholder body, then back
   const panels = [
-    { row: "Property visibility", body: "Coming in #41" },
     { row: "Sort", body: "Coming in #42" },
     { row: "Group", body: "Coming in #43" },
     { row: "Filter", body: "Coming in #44" },
