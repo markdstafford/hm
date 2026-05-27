@@ -116,6 +116,9 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
         )}
         {panel === "property-visibility" && (
           <PropertyVisibilityPanel
+            entity={entity}
+            config={normalizedConfig}
+            onPatchConfig={handlePatchConfig}
             onBack={() => setPanel("top")}
             onClose={() => handleOpenChange(false)}
           />

@@ -1,0 +1,60 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { axe } from "jest-axe";
+import { describe, expect, it, vi } from "vitest";
+import { jiraIssueEntity } from "../../../../entities/jira-issue";
+import { defaultViewConfig } from "../../ViewConfig";
+import { PropertyVisibilityPanel } from "./PropertyVisibilityPanel";
+
+function renderPanel(overrides?: Partial<Parameters<typeof PropertyVisibilityPanel>[0]>) {
+  return render(
+    <PropertyVisibilityPanel
+      entity={jiraIssueEntity}
+      config={defaultViewConfig(jiraIssueEntity)}
+      onPatchConfig={vi.fn()}
+      onBack={vi.fn()}
+      onClose={vi.fn()}
+      {...overrides}
+    />,
+  );
+}
+
+describe("PropertyVisibilityPanel", () => {
+  it("renders header, search input, shown section, and hidden section", () => {
+    renderPanel();
+
+    expect(screen.getByRole("heading", { name: "Property visibility" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search properties" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Shown" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Hidden" })).toBeInTheDocument();
+  });
+
+  it("renders one row per property with handle, side controls, and visibility control", () => {
+    renderPanel();
+
+    expect(screen.getByRole("button", { name: "Reorder Title" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move Title left" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Move Title right" })).toHaveAttribute("aria-pressed", "false");
+    // Title eye button: always visible = disabled
+    expect(screen.getByRole("button", { name: "Title is always visible" })).toHaveAttribute("aria-disabled", "true");
+    // Priority is hidden by default
+    expect(screen.getByRole("button", { name: "Show Priority" })).toBeInTheDocument();
+  });
+
+  it("filters rows by case-insensitive property label and shows section empty text", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.type(screen.getByRole("textbox", { name: "Search properties" }), "priority");
+
+    expect(screen.getByText("Priority")).toBeInTheDocument();
+    expect(screen.queryByText("Title")).not.toBeInTheDocument();
+    // Priority is hidden, so Shown section should show empty text
+    expect(screen.getByText("No shown properties match")).toBeInTheDocument();
+  });
+
+  it("has no axe violations", async () => {
+    const { container } = renderPanel();
+    expect(await axe(container)).toHaveNoViolations();
+  });
+});

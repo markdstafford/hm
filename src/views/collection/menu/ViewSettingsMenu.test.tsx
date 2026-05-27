@@ -100,13 +100,16 @@ describe("ViewSettingsMenu", () => {
     );
   });
 
-  it("clicking Property visibility opens that panel", async () => {
+  it("clicking Property visibility opens functional property controls", async () => {
     const user = userEvent.setup();
     renderMenu();
     await user.click(screen.getByRole("button", { name: "Open view settings" }));
     await user.click(screen.getByText("Property visibility").closest("button")!);
+
     expect(screen.getByRole("heading", { name: "Property visibility" })).toBeInTheDocument();
-    expect(screen.getByText("Coming in #41")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search properties" })).toBeInTheDocument();
+    expect(screen.queryByText("Coming in #41")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reorder Title" })).toBeInTheDocument();
   });
 
   it("clicking Sort opens Sort panel", async () => {
