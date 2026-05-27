@@ -112,14 +112,14 @@ describe("ViewSettingsMenu", () => {
     expect(screen.getByRole("button", { name: "Reorder Title" })).toBeInTheDocument();
   });
 
-  it("clicking Sort opens Sort panel", async () => {
+  it("clicking Sort opens functional sort panel", async () => {
     const user = userEvent.setup();
     renderMenu();
     await user.click(screen.getByRole("button", { name: "Open view settings" }));
-    // "Sort" text appears multiple times (row label + possible elsewhere); use the one inside a button
     await user.click(screen.getByText("Sort").closest("button")!);
     expect(screen.getByRole("heading", { name: "Sort" })).toBeInTheDocument();
-    expect(screen.getByText("Coming in #42")).toBeInTheDocument();
+    expect(screen.queryByText("Coming in #42")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Add sort" })).toBeInTheDocument();
   });
 
   it("clicking Group opens Group panel", async () => {
@@ -258,6 +258,20 @@ describe("ViewSettingsMenu", () => {
         ]),
       }),
     );
+  });
+
+  it("top sheet summary reflects the first configured sort level", async () => {
+    const user = userEvent.setup();
+    renderMenu({
+      activeView: {
+        ...activeView,
+        config: { sort: [{ property: "status", direction: "asc" }] },
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Open view settings" }));
+
+    expect(screen.getByText("Status ↑")).toBeInTheDocument();
   });
 
   it("top sheet summary reflects property visibility count from active view config", async () => {
