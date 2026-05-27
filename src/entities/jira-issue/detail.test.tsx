@@ -10,6 +10,8 @@ const full: JiraIssueListItem = {
   assignee_display_name: "Alice Smith",
   updated_at_source: "2024-06-01T10:00:00Z",
   project_key: "AMP",
+  priority_name: null,
+  labels: [],
 };
 
 describe("JiraIssueDetail", () => {

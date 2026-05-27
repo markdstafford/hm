@@ -200,6 +200,8 @@ export type JiraIssueListItem = {
 	assignee_display_name: string | null,
 	updated_at_source: string | null,
 	project_key: string | null,
+	priority_name: string | null,
+	labels: string[],
 };
 
 export type JiraProjectFilter = {

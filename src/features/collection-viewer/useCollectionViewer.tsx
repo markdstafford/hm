@@ -10,6 +10,8 @@ import { CollectionHeader } from "../../views/collection/CollectionHeader";
 import { Detail } from "../../views/collection/Detail";
 import { FullPagePreview } from "../../views/collection/FullPagePreview";
 import { jiraIssueEntity } from "../../entities/jira-issue";
+import type { JiraIssueProperty } from "../../entities/jira-issue/properties";
+import type { PropertyConfig } from "../../views/collection/types";
 import { useJiraIssues } from "./data";
 import type { CollectionView } from "../../views/collection/views/types";
 import {
@@ -62,6 +64,7 @@ export function useCollectionViewer({
   const [viewsLoading, setViewsLoading] = useState(true);
   const [viewError, setViewError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
 
@@ -113,7 +116,7 @@ export function useCollectionViewer({
   const closePreview = useCallback(() => setPreviewOpen(false), []);
 
   useKeyboardNavigation({
-    enabled: active,
+    enabled: active && !settingsOpen,
     selectedIndex,
     total: displayItems.length,
     previewOpen,
@@ -323,6 +326,7 @@ export function useCollectionViewer({
             entity={jiraIssueEntity}
             onRenameView={handleRename}
             onPatchConfig={handlePatchViewConfig}
+            onOpenChange={setSettingsOpen}
           />
         }
       />
@@ -386,6 +390,7 @@ export function useCollectionViewer({
             <Body
               items={issues}
               entity={jiraIssueEntity}
+              properties={activeConfig.propertyVisibility as PropertyConfig<JiraIssueProperty>[]}
               selectedId={selectedId}
               density={activeConfig.layout.density}
               onSelect={handleSelect}

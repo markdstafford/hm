@@ -25,6 +25,8 @@ const mockIssues: JiraIssueListItem[] = [
     assignee_display_name: "Alice",
     updated_at_source: "2024-06-01T10:00:00Z",
     project_key: "AMP",
+    priority_name: null,
+    labels: [],
   },
   {
     work_item_id: "wid-2",
@@ -34,6 +36,8 @@ const mockIssues: JiraIssueListItem[] = [
     assignee_display_name: "Bob",
     updated_at_source: "2024-01-01T10:00:00Z",
     project_key: "AMP",
+    priority_name: null,
+    labels: [],
   },
 ];
 
@@ -417,6 +421,10 @@ describe("CollectionViewerPage", () => {
       expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "full-page" }) }) })
     ));
 
+    // Dismiss the settings menu so keyboard nav re-enables before pressing Escape
+    fireEvent.click(screen.getByRole("button", { name: "Close view settings" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Layout" })).not.toBeInTheDocument());
+
     // Click first row to open full-page preview
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument());
@@ -495,5 +503,91 @@ describe("CollectionViewerPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /open amp-2: second issue/i })).toHaveAttribute("aria-pressed", "true");
     });
+  });
+
+  it("hiding a property through the panel saves config and updates rows", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Wait for the page to load
+    await screen.findByText("AMP-1");
+
+    // Open view settings
+    fireEvent.click(screen.getByRole("button", { name: /open view settings/i }));
+    // Open Property visibility panel
+    await screen.findByText("Property visibility");
+    fireEvent.click(screen.getByText("Property visibility").closest("button")!);
+
+    // Hide the Assignee property
+    await screen.findByRole("button", { name: "Hide Assignee" });
+    fireEvent.click(screen.getByRole("button", { name: "Hide Assignee" }));
+
+    // collectionViewSave should have been called with assignee hidden
+    await waitFor(() => {
+      expect(commands.collectionViewSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            propertyVisibility: expect.arrayContaining([
+              expect.objectContaining({ property: "assignee", visible: false }),
+            ]),
+          }),
+        }),
+      );
+    });
+
+    // Alice (the assignee) should no longer appear in the rows
+    await waitFor(() => expect(screen.queryByText("Alice")).not.toBeInTheDocument());
+  });
+
+  it("Arrow keys do not change collection row selection while view settings is open", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Wait for rows to load — no row selected yet
+    await screen.findByRole("button", { name: /open amp-1: first issue/i });
+
+    // Open view settings — keyboard nav should be gated while popover is open
+    fireEvent.click(screen.getByRole("button", { name: /open view settings/i }));
+    expect(await screen.findByRole("heading", { name: "View settings" })).toBeInTheDocument();
+
+    // ArrowDown should not select any row while settings is open
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+
+    // First row must remain unselected (not aria-pressed="true")
+    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).not.toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("passes active view property visibility to rows so hidden properties disappear", async () => {
+    const records = [
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: {
+          propertyVisibility: [
+            { property: "key", side: "left", visible: true },
+            { property: "title", side: "left", visible: true },
+            { property: "assignee", side: "right", visible: false },
+            { property: "status", side: "right", visible: false },
+            { property: "updated_at_source", side: "right", visible: false },
+            { property: "priority", side: "left", visible: false },
+            { property: "labels", side: "left", visible: false },
+            { property: "project_key", side: "left", visible: false },
+          ],
+        },
+      },
+    ];
+    mockViewCommands(records);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+
+    render(<CollectionViewerPage />);
+
+    expect(await screen.findByText("AMP-1")).toBeInTheDocument();
+    expect(screen.getByText("First issue")).toBeInTheDocument();
+    // Status and Assignee are hidden
+    expect(screen.queryByText("Open")).not.toBeInTheDocument();
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
   });
 });

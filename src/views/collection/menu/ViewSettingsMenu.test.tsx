@@ -100,13 +100,16 @@ describe("ViewSettingsMenu", () => {
     );
   });
 
-  it("clicking Property visibility opens that panel", async () => {
+  it("clicking Property visibility opens functional property controls", async () => {
     const user = userEvent.setup();
     renderMenu();
     await user.click(screen.getByRole("button", { name: "Open view settings" }));
     await user.click(screen.getByText("Property visibility").closest("button")!);
+
     expect(screen.getByRole("heading", { name: "Property visibility" })).toBeInTheDocument();
-    expect(screen.getByText("Coming in #41")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search properties" })).toBeInTheDocument();
+    expect(screen.queryByText("Coming in #41")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reorder Title" })).toBeInTheDocument();
   });
 
   it("clicking Sort opens Sort panel", async () => {
@@ -236,6 +239,50 @@ describe("ViewSettingsMenu", () => {
     await user.clear(input);
     fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.getByText("View name cannot be blank")).toBeInTheDocument();
+  });
+
+  it("property visibility side change calls onPatchConfig with active view id and updated config", async () => {
+    const user = userEvent.setup();
+    const onPatchConfig = vi.fn();
+    renderMenu({ onPatchConfig });
+
+    await user.click(screen.getByRole("button", { name: "Open view settings" }));
+    await user.click(screen.getByText("Property visibility").closest("button")!);
+    await user.click(screen.getByRole("button", { name: "Move Priority left" }));
+
+    expect(onPatchConfig).toHaveBeenCalledWith(
+      "jira-issue-mine",
+      expect.objectContaining({
+        propertyVisibility: expect.arrayContaining([
+          expect.objectContaining({ property: "priority", side: "left" }),
+        ]),
+      }),
+    );
+  });
+
+  it("top sheet summary reflects property visibility count from active view config", async () => {
+    const user = userEvent.setup();
+    // Create a view where assignee is hidden (4 of 8 visible)
+    const hiddenAssigneeView: CollectionView = {
+      ...activeView,
+      config: {
+        propertyVisibility: [
+          { property: "key",               side: "left",  visible: true  },
+          { property: "title",             side: "left",  visible: true  },
+          { property: "assignee",          side: "right", visible: false },
+          { property: "status",            side: "right", visible: true  },
+          { property: "updated_at_source", side: "right", visible: true  },
+          { property: "priority",          side: "right", visible: false },
+          { property: "labels",            side: "right", visible: false },
+          { property: "project_key",       side: "right", visible: false },
+        ],
+      },
+    };
+
+    renderMenu({ activeView: hiddenAssigneeView });
+    await user.click(screen.getByRole("button", { name: "Open view settings" }));
+
+    expect(screen.getByText("4 of 8")).toBeInTheDocument();
   });
 
   it("active-view change closes the menu", async () => {

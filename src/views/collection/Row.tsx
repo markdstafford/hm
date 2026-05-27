@@ -57,6 +57,7 @@ export function Row<TItem, TProperty extends string>({
           return (
             <span
               key={String(config.property)}
+              data-property-id={String(config.property)}
               className={def.isStretch ? "flex-1 min-w-0 truncate" : "flex-none"}
             >
               {def.renderCell({ item, property: config.property })}
@@ -72,7 +73,7 @@ export function Row<TItem, TProperty extends string>({
           const def = getDefinition(config.property);
           if (!def) return null;
           return (
-            <span key={String(config.property)} className="flex-none shrink-0">
+            <span key={String(config.property)} data-property-id={String(config.property)} className="flex-none shrink-0">
               {def.renderCell({ item, property: config.property })}
             </span>
           );

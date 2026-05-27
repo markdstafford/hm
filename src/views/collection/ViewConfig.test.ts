@@ -5,6 +5,10 @@ import {
   normalizeViewConfig,
   summarizeViewConfig,
   patchViewConfig,
+  setPropertyVisible,
+  setPropertySide,
+  moveProperty,
+  applyPropertyDrop,
 } from "./ViewConfig";
 
 describe("defaultViewConfig", () => {
@@ -83,12 +87,19 @@ describe("normalizeViewConfig", () => {
     const input = {
       propertyVisibility: [
         { property: "key", side: "left", visible: true },
-        { property: 123, side: "left", visible: true }, // invalid property
-        { property: "status", side: "invalid-side", visible: true }, // invalid side
+        { property: 123, side: "left", visible: true }, // invalid property type
+        { property: "status", side: "invalid-side", visible: true }, // invalid side -> falls back to default side
       ],
     };
     const result = normalizeViewConfig(input, jiraIssueEntity);
-    expect(result.propertyVisibility).toEqual([{ property: "key", side: "left", visible: true }]);
+    // key appears first (from input), status appears at its input position but with fixed side,
+    // the rest are appended in entity definition order
+    expect(result.propertyVisibility.find((row) => row.property === "key")).toEqual({ property: "key", side: "left", visible: true });
+    // status gets default side since "invalid-side" is invalid
+    expect(result.propertyVisibility.find((row) => row.property === "status")).toEqual({ property: "status", side: "right", visible: true });
+    // The row with property: 123 is dropped
+    expect(result.propertyVisibility.find((row) => (row as any).property === undefined)).toBeUndefined();
+    expect(result.propertyVisibility).toHaveLength(8); // all 8 jira properties
   });
 
   it("falls back to default propertyVisibility when no valid rows", () => {
@@ -300,5 +311,132 @@ describe("patchViewConfig", () => {
     expect(patched.sort).toEqual(base.sort);
     expect(patched.group).toEqual(base.group);
     expect(patched.filters).toEqual(base.filters);
+  });
+});
+
+describe("normalizeViewConfig propertyVisibility enhancement", () => {
+  it("normalizes propertyVisibility to one current entity property per row", () => {
+    const result = normalizeViewConfig(
+      {
+        propertyVisibility: [
+          { property: "status", side: "right", visible: true },
+          { property: "stale_property", side: "left", visible: true },
+          { property: "key", side: "left", visible: false },
+        ],
+      },
+      jiraIssueEntity,
+    );
+
+    // status and key come first (in input order), stale_property dropped, rest appended
+    expect(result.propertyVisibility.map((row) => row.property)).toEqual([
+      "status",
+      "key",
+      "title",
+      "assignee",
+      "updated_at_source",
+      "priority",
+      "labels",
+      "project_key",
+    ]);
+    expect(result.propertyVisibility.find((row) => row.property === "stale_property")).toBeUndefined();
+    expect(result.propertyVisibility.find((row) => row.property === "status")).toEqual({
+      property: "status",
+      side: "right",
+      visible: true,
+    });
+  });
+
+  it("forces the stretch title property visible during normalization", () => {
+    const result = normalizeViewConfig(
+      {
+        propertyVisibility: jiraIssueEntity.defaultProperties.map((row) =>
+          row.property === "title" ? { ...row, visible: false } : row,
+        ),
+      },
+      jiraIssueEntity,
+    );
+
+    expect(result.propertyVisibility.find((row) => row.property === "title")).toEqual({
+      property: "title",
+      side: "left",
+      visible: true,
+    });
+  });
+
+  it("falls back invalid property side to entity default side", () => {
+    const result = normalizeViewConfig(
+      {
+        propertyVisibility: [
+          { property: "status", side: "middle", visible: true },
+        ],
+      },
+      jiraIssueEntity,
+    );
+
+    expect(result.propertyVisibility.find((row) => row.property === "status")?.side).toBe("right");
+  });
+});
+
+describe("property visibility helpers", () => {
+  it("setPropertyVisible toggles one property and keeps other rows stable", () => {
+    const base = defaultViewConfig(jiraIssueEntity);
+    const result = setPropertyVisible(base.propertyVisibility, "labels", true, jiraIssueEntity);
+
+    expect(result.find((row) => row.property === "labels")?.visible).toBe(true);
+    expect(result.filter((row) => row.property !== "labels")).toEqual(
+      base.propertyVisibility.filter((row) => row.property !== "labels"),
+    );
+    expect(result).not.toBe(base.propertyVisibility);
+  });
+
+  it("setPropertyVisible refuses to hide the title property", () => {
+    const base = defaultViewConfig(jiraIssueEntity);
+    const result = setPropertyVisible(base.propertyVisibility, "title", false, jiraIssueEntity);
+
+    expect(result.find((row) => row.property === "title")?.visible).toBe(true);
+  });
+
+  it("setPropertySide changes side without changing list order", () => {
+    const base = defaultViewConfig(jiraIssueEntity);
+    const result = setPropertySide(base.propertyVisibility, "priority", "right");
+
+    expect(result.map((row) => row.property)).toEqual(base.propertyVisibility.map((row) => row.property));
+    expect(result.find((row) => row.property === "priority")?.side).toBe("right");
+  });
+
+  it("moveProperty places a property at the requested canonical index", () => {
+    const base = defaultViewConfig(jiraIssueEntity).propertyVisibility;
+    // default order: key, title, assignee, status, updated_at_source, priority, labels, project_key
+    // move "assignee" (index 2) to index 1 -> key, assignee, title, status, ...
+    const result = moveProperty(base, "assignee", 1);
+
+    expect(result.map((row) => row.property).slice(0, 4)).toEqual(["key", "assignee", "title", "status"]);
+  });
+
+  it("applyPropertyDrop reorders and sets destination visibility", () => {
+    const base = defaultViewConfig(jiraIssueEntity).propertyVisibility;
+    // Move "labels" to just before "status" (in the base order, status is at index 3)
+    // After removing labels (index 6), "status" is at index 3 -> targetIndex=3
+    // -> key, title, assignee, labels, status, ...
+    const result = applyPropertyDrop(base, "labels", "status", true, jiraIssueEntity);
+
+    expect(result.find((row) => row.property === "labels")?.visible).toBe(true);
+    const labelIndex = result.findIndex((row) => row.property === "labels");
+    const statusIndex = result.findIndex((row) => row.property === "status");
+    expect(labelIndex).toBeLessThan(statusIndex);
+  });
+
+  it("applyPropertyDrop appends to the end when overId is null", () => {
+    const base = defaultViewConfig(jiraIssueEntity).propertyVisibility;
+    const result = applyPropertyDrop(base, "key", null, false, jiraIssueEntity);
+
+    expect(result[result.length - 1]).toEqual({ property: "key", side: "left", visible: false });
+  });
+
+  it("applyPropertyDrop keeps title visible when dropped into hidden", () => {
+    const base = defaultViewConfig(jiraIssueEntity).propertyVisibility;
+    const result = applyPropertyDrop(base, "title", "labels", false, jiraIssueEntity);
+
+    expect(result.find((row) => row.property === "title")?.visible).toBe(true);
   });
 });

@@ -25,10 +25,11 @@ use serde_json::Value;
 use crate::issues::ids::{content_hash, stable_id};
 use crate::issues::people::{upsert_source_identity, SourceIdentityInput, UpsertedIdentity};
 use crate::issues::repository::{
-    upsert_indexable_document, upsert_jira_remote_link, upsert_jira_worklog, upsert_work_item,
-    upsert_work_item_comment, upsert_work_item_relationship, upsert_work_item_term,
-    IndexableDocumentInput, JiraRemoteLinkInput, JiraWorklogInput, WorkItemCommentInput,
-    WorkItemInput, WorkItemRelationshipInput, WorkItemTermInput,
+    delete_work_item_terms_by_kind, upsert_indexable_document, upsert_jira_remote_link,
+    upsert_jira_worklog, upsert_work_item, upsert_work_item_comment,
+    upsert_work_item_relationship, upsert_work_item_term, IndexableDocumentInput,
+    JiraRemoteLinkInput, JiraWorklogInput, WorkItemCommentInput, WorkItemInput,
+    WorkItemRelationshipInput, WorkItemTermInput,
 };
 use crate::sources::jira_types::{JiraComment, JiraIssue, JiraRemoteLink, JiraWorklog};
 
@@ -943,6 +944,9 @@ pub fn project_jira_issue(
     // covers that.
 
     // ── 5. Terms ──────────────────────────────────────────────────────────────
+    // Delete existing label terms before upserting current ones so that labels
+    // removed upstream do not persist after a resync.
+    delete_work_item_terms_by_kind(conn, &work_item_id, "label")?;
     for label in &fields.labels {
         upsert_work_item_term(
             conn,

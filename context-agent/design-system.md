@@ -679,12 +679,14 @@ Sub-panel implementation status:
 | Panel | Status |
 |-------|--------|
 | Layout | Real controls (issue #40) |
-| Property visibility | `Coming in #41` |
+| Property visibility | Real controls (issue #41) — see "Property visibility sub-panel" below |
 | Sort | `Coming in #42` |
 | Group | `Coming in #43` |
 | Filter | `Coming in #44` |
 
 **Layout sub-panel** (`src/views/collection/menu/sub-panels/LayoutPanel.tsx`): Type tiles (3-col grid; `Table` enabled, others `aria-disabled`), density segmented toggle (`Compact` / `Regular`, maps to `py-1` / `py-2` on rows), and a `PreviewPopover` trigger row. `PreviewPopover` (`src/views/collection/menu/sub-panels/PreviewPopover.tsx`) shows three options (`side-peek` → Side, `bottom-peek` → Bottom, `full-page` → Full page) via `role="listbox"` + `role="option"` ARIA pattern with `aria-selected`.
+
+**Property visibility sub-panel** (`src/views/collection/menu/sub-panels/PropertyVisibilityPanel.tsx`): Search field (`aria-label="Search properties"`) that filters the property list by case-insensitive substring match. Two sections — `Shown` and `Hidden` — each wrapped in a `<section aria-labelledby>` with a small-caps heading. Each property row contains a drag handle (`Reorder {label}`), a property icon, the label, a compact `← | →` segmented control (two `<button>` elements with `aria-pressed`), and an eye/eye-off `IconButton`. Drag reordering uses `@dnd-kit/core` + `@dnd-kit/sortable` with both pointer and keyboard sensors; dragging within a section reorders the canonical list; dragging across sections also toggles `visible`. The title/stretch property's eye button is `aria-disabled` with tooltip `"Title is always visible"`. Drag is disabled while search is active; a muted note explains why. Patches only `propertyVisibility` via `patchViewConfig`; unrelated config fields are preserved. The panel uses `DndContext` + `SortableContext` per section with `useDroppable` section containers so cross-section drops resolve correctly.
 
 **Panel state values:** `"top" | "layout" | "property-visibility" | "sort" | "group" | "filter"` (exported as `ViewSettingsPanel` from `ViewSettingsMenu.tsx`).
 

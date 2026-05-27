@@ -222,3 +222,113 @@ describe("Row", () => {
     expect(container.firstChild).not.toHaveClass("py-1.5");
   });
 });
+
+describe("Row property layout", () => {
+  type LayoutProp = "b" | "e" | "a" | "m" | "o" | "g" | "c" | "i";
+  type LayoutItem = { id: string };
+
+  const layoutEntity: EntityContract<LayoutItem, LayoutProp> = {
+    id: "layout-test",
+    label: "Layout test",
+    getId: (item) => item.id,
+    properties: [
+      { id: "b", label: "B", kind: "text", renderCell: () => <span data-testid="cell-b">B</span> },
+      { id: "e", label: "E", kind: "text", renderCell: () => <span data-testid="cell-e">E</span> },
+      { id: "a", label: "A", kind: "text", isStretch: true, renderCell: () => <span data-testid="cell-a">A</span> },
+      { id: "m", label: "M", kind: "text", renderCell: () => <span data-testid="cell-m">M</span> },
+      { id: "o", label: "O", kind: "text", renderCell: () => <span data-testid="cell-o">O</span> },
+      { id: "g", label: "G", kind: "text", renderCell: () => <span data-testid="cell-g">G</span> },
+      { id: "c", label: "C", kind: "text", renderCell: () => <span data-testid="cell-c">C</span> },
+      { id: "i", label: "I", kind: "text", renderCell: () => <span data-testid="cell-i">I</span> },
+    ],
+    defaultProperties: [],
+    defaultSort: () => 0,
+    Detail: () => null,
+    defaultViews: [],
+  };
+
+  const layoutItem: LayoutItem = { id: "layout-item" };
+
+  it("renders B E A M O G C I with sides R L L R L R R L as E A O I then B M G C", () => {
+    render(
+      <Row
+        item={layoutItem}
+        entity={layoutEntity}
+        selectedId={null}
+        onSelect={vi.fn()}
+        properties={[
+          { property: "b", side: "right", visible: true },
+          { property: "e", side: "left", visible: true },
+          { property: "a", side: "left", visible: true },
+          { property: "m", side: "right", visible: true },
+          { property: "o", side: "left", visible: true },
+          { property: "g", side: "right", visible: true },
+          { property: "c", side: "right", visible: true },
+          { property: "i", side: "left", visible: true },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByTestId(/^cell-/).map((node) => node.textContent)).toEqual([
+      "E", "A", "O", "I", "B", "M", "G", "C",
+    ]);
+    // 'a' is the stretch property, so its parent should have flex-1
+    expect(screen.getByTestId("cell-a").parentElement).toHaveClass("flex-1");
+  });
+
+  it("renders an invisible spacer when the stretch property is on the right", () => {
+    const { container } = render(
+      <Row
+        item={layoutItem}
+        entity={layoutEntity}
+        selectedId={null}
+        onSelect={vi.fn()}
+        properties={[
+          { property: "e", side: "left", visible: true },
+          { property: "a", side: "right", visible: true },
+          { property: "b", side: "right", visible: true },
+        ]}
+      />,
+    );
+
+    // The invisible spacer has aria-hidden and flex-1
+    expect(container.querySelector("span.flex-1[aria-hidden]")).toBeInTheDocument();
+    // 'a' is on the right, so it's NOT the stretch span; it should be flex-none (shrink-0)
+    expect(screen.getByTestId("cell-a").parentElement).not.toHaveClass("flex-1");
+  });
+
+  it("hidden properties do not appear in the row", () => {
+    render(
+      <Row
+        item={layoutItem}
+        entity={layoutEntity}
+        selectedId={null}
+        onSelect={vi.fn()}
+        properties={[
+          { property: "e", side: "left", visible: true },
+          { property: "a", side: "left", visible: true },
+          { property: "b", side: "right", visible: false },
+          { property: "m", side: "right", visible: false },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("cell-e")).toBeInTheDocument();
+    expect(screen.getByTestId("cell-a")).toBeInTheDocument();
+    expect(screen.queryByTestId("cell-b")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("cell-m")).not.toBeInTheDocument();
+  });
+
+  it("cell wrappers have data-property-id attribute for stable key verification", () => {
+    render(
+      <Row
+        item={layoutItem}
+        entity={layoutEntity}
+        selectedId={null}
+        onSelect={vi.fn()}
+        properties={[{ property: "b", side: "left", visible: true }]}
+      />,
+    );
+    expect(screen.getByTestId("cell-b").parentElement).toHaveAttribute("data-property-id", "b");
+  });
+});
