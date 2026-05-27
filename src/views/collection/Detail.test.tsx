@@ -32,6 +32,7 @@ const entity: EntityContract<Item, Prop> = {
   defaultProperties: [{ property: "name", side: "left", visible: true }],
   defaultSort: () => 0,
   Detail: ({ item }) => <div data-testid="entity-detail">Detail body: {item.name}</div>,
+  defaultViews: [],
 };
 
 const item: Item = { id: "1", name: "Alpha" };

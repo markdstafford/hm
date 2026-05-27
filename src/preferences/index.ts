@@ -45,6 +45,10 @@ export type AppPreferences = {
     x?: number;
     y?: number;
   };
+  collections?: {
+    activeViewId?: Record<string, string>;
+    [collectionKey: string]: unknown;
+  };
 };
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
@@ -149,6 +153,31 @@ export function normalizePreferences(raw: unknown): AppPreferences {
     delete result.window;
   }
 
+  if (typeof obj.collections === "object" && obj.collections !== null) {
+    const rawCollections = obj.collections as Record<string, unknown>;
+    const collections: Record<string, unknown> = { ...rawCollections };
+    const rawActive = rawCollections.activeViewId;
+    const activeViewId: Record<string, string> = {};
+
+    if (typeof rawActive === "object" && rawActive !== null) {
+      for (const [entityKind, viewId] of Object.entries(rawActive as Record<string, unknown>)) {
+        if (
+          typeof entityKind === "string" &&
+          entityKind.trim().length > 0 &&
+          typeof viewId === "string" &&
+          viewId.trim().length > 0
+        ) {
+          activeViewId[entityKind] = viewId.trim();
+        }
+      }
+    }
+
+    collections.activeViewId = activeViewId;
+    result.collections = collections;
+  } else {
+    delete result.collections;
+  }
+
   return result as unknown as AppPreferences;
 }
 
@@ -167,6 +196,15 @@ export function mergePreferences(current: AppPreferences, patch: Partial<AppPref
     window: {
       ...current.window,
       ...patch.window,
+    },
+    collections: {
+      ...current.collections,
+      ...(patch.collections ? {
+        ...patch.collections,
+        activeViewId: patch.collections.activeViewId !== undefined
+          ? { ...current.collections?.activeViewId, ...patch.collections.activeViewId }
+          : current.collections?.activeViewId,
+      } : {}),
     },
   };
 }

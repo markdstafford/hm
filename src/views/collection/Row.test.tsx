@@ -30,6 +30,7 @@ const entity: EntityContract<Item, Prop> = {
   ],
   defaultSort: (a, b) => a.name.localeCompare(b.name),
   Detail: ({ item }) => <div>Detail: {item.name}</div>,
+  defaultViews: [],
 };
 
 const item: Item = { id: "item-1", name: "Alpha", count: 42 };

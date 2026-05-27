@@ -30,6 +30,7 @@ const entity: EntityContract<Item, Prop> = {
   ],
   defaultSort: (a, b) => a.rank - b.rank,
   Detail: ({ item }) => <div>Detail: {item.name}</div>,
+  defaultViews: [],
 };
 
 describe("Body", () => {

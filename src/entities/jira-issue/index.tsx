@@ -1,7 +1,7 @@
 import type { EntityContract, PropertyDefinition } from "../../views/collection/types";
 import type { JiraIssueListItem } from "../../bindings";
 import type { JiraIssueProperty } from "./properties";
-import { DEFAULT_PROPERTIES } from "./defaults";
+import { DEFAULT_PROPERTIES, JIRA_ISSUE_DEFAULT_VIEWS } from "./defaults";
 import { defaultJiraSort } from "./compare";
 import { KeyCell, TitleCell, StatusCell, AssigneeCell, UpdatedCell } from "./cells";
 import { JiraIssueDetail } from "./detail";
@@ -72,4 +72,5 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
   defaultProperties: DEFAULT_PROPERTIES,
   defaultSort: defaultJiraSort,
   Detail: JiraIssueDetail,
+  defaultViews: JIRA_ISSUE_DEFAULT_VIEWS,
 };
