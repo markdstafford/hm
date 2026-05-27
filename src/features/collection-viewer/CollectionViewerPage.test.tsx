@@ -692,6 +692,51 @@ describe("CollectionViewerPage", () => {
     expect(await screen.findByText("1 of 1")).toBeInTheDocument();
   });
 
+  it("applies filters before rendering rows — filtered items do not appear", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: sortableIssues, loading: false, error: null });
+
+    // Seed with a view config that has Status is filter
+    const viewWithFilter = [
+      {
+        id: "jira-issue-all-open", entity_kind: "jira-issue", display_name: "All open",
+        position: 0, is_default: true,
+        config: {
+          filters: [{ id: "f1", property: "status", operator: "is", value: "Open", active: true }]
+        }
+      },
+      ...defaultViewRecords.slice(1),
+    ];
+    mockViewCommands(viewWithFilter);
+
+    render(<CollectionViewerPage />);
+
+    // Only Open items should be visible (AMP-1, AMP-3 are Open; AMP-2 is Done)
+    await screen.findByText("AMP-1");
+    expect(screen.getByText("AMP-3")).toBeInTheDocument();
+    expect(screen.queryByText("AMP-2")).not.toBeInTheDocument();
+  });
+
+  it("shows filtered empty state when filters exclude all items", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: sortableIssues, loading: false, error: null });
+
+    const viewWithNoMatchFilter = [
+      {
+        id: "jira-issue-all-open", entity_kind: "jira-issue", display_name: "All open",
+        position: 0, is_default: true,
+        config: {
+          filters: [{ id: "f1", property: "title", operator: "is", value: "nonexistent-xyz", active: true }]
+        }
+      },
+      ...defaultViewRecords.slice(1),
+    ];
+    mockViewCommands(viewWithNoMatchFilter);
+
+    render(<CollectionViewerPage />);
+
+    expect(await screen.findByText(/no matching jira issues/i)).toBeInTheDocument();
+    expect(screen.getByText(/try changing or clearing filters/i)).toBeInTheDocument();
+  });
+
   it("passes active view property visibility to rows so hidden properties disappear", async () => {
     const records = [
       {

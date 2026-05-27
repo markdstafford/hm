@@ -3,15 +3,14 @@ import { EmptyState } from "../../ui/feedback/EmptyState";
 import { bucketCollectionItems } from "./bucket";
 import { Row } from "./Row";
 import { SectionHeader } from "./SectionHeader";
-import { sortCollectionItems } from "./sort";
-import type { GroupConfig, SortLevelConfig, ViewDensity } from "./ViewConfig";
+import type { GroupConfig, ViewDensity } from "./ViewConfig";
 import type { EntityContract, PropertyConfig } from "./types";
 
 type Props<TItem, TProperty extends string> = {
   items: TItem[];
+  unfilteredCount?: number;
   entity: EntityContract<TItem, TProperty>;
   properties?: PropertyConfig<TProperty>[];
-  sort?: SortLevelConfig[];
   group?: GroupConfig;
   collapsedGroupKeys?: ReadonlySet<string>;
   onToggleGroupCollapsed?: (bucketKey: string) => void;
@@ -22,9 +21,9 @@ type Props<TItem, TProperty extends string> = {
 
 export function Body<TItem, TProperty extends string>({
   items,
+  unfilteredCount,
   entity,
   properties,
-  sort = [],
   group,
   collapsedGroupKeys,
   onToggleGroupCollapsed,
@@ -33,7 +32,6 @@ export function Body<TItem, TProperty extends string>({
   onSelect,
 }: Props<TItem, TProperty>) {
   const resolvedProperties = properties ?? entity.defaultProperties;
-  const sorted = sortCollectionItems(items, entity, sort);
   const activeGroupProperty = group?.property ?? null;
 
   const [localCollapsed, setLocalCollapsed] = useState<Set<string>>(new Set());
@@ -42,10 +40,10 @@ export function Body<TItem, TProperty extends string>({
   const grouped = useMemo(
     () =>
       group && group.property !== null
-        ? bucketCollectionItems({ items: sorted, entity, group })
+        ? bucketCollectionItems({ items, entity, group })
         : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entity, group, sorted],
+    [entity, group, items],
   );
 
   useEffect(() => {
@@ -65,7 +63,15 @@ export function Body<TItem, TProperty extends string>({
     });
   }
 
-  if (sorted.length === 0) {
+  if (items.length === 0) {
+    if ((unfilteredCount ?? 0) > 0) {
+      return (
+        <EmptyState
+          title={`No matching ${entity.label}`}
+          description="Try changing or clearing filters for this view."
+        />
+      );
+    }
     return (
       <EmptyState
         title={`No ${entity.label} yet`}
@@ -107,7 +113,7 @@ export function Body<TItem, TProperty extends string>({
 
   return (
     <div className="flex flex-col">
-      {sorted.map((item) => (
+      {items.map((item) => (
         <Row
           key={entity.getId(item)}
           item={item}
