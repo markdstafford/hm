@@ -576,6 +576,19 @@ Settings is not a modal or overlay — it is a routed page mode. There is no esc
 
 ---
 
+## Collections
+
+Configurable lists of one entity type — the read / write / enhance / history pattern every collection viewer in the app follows. Four documents specify the contract:
+
+- [`collections/collection-read.md`](collections/collection-read.md) — display, named views, view-settings menu, sub-panels, preview surfaces, entity contract (read side).
+- [`collections/collection-write.md`](collections/collection-write.md) — selection, bulk-action bar, confirm modal, undo toast, audit log, action contract.
+- [`collections/collection-enhance.md`](collections/collection-enhance.md) — the entity contract applied to backlog hygiene, including the five action verbs and reversibility.
+- [`collections/collection-history.md`](collections/collection-history.md) — the audit-log entry as an entity and the history view with per-entry + per-batch undo.
+
+Read `collection-read.md` first; the others build on it.
+
+---
+
 ## Maintenance contract
 
 This is the contract every agent (and human) commits to when working in this repo. Violating it means the doc rots and stops being trustworthy.
