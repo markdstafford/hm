@@ -14,6 +14,7 @@ import {
 } from "./compare";
 import { KeyCell, TitleCell, StatusCell, AssigneeCell, UpdatedCell, PriorityCell, LabelsCell } from "./cells";
 import { JiraIssueDetail } from "./detail";
+import { jiraIssueFilterableProperties } from "./filterable";
 
 const PROPERTY_DEFINITIONS: PropertyDefinition<JiraIssueListItem, JiraIssueProperty>[] = [
   {
@@ -151,6 +152,7 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
     { property: "project_key", compare: compareJiraIssueByProjectKey, isNull: (item) => !item.project_key?.trim() },
   ],
   groupableProperties: GROUPABLE_PROPERTIES,
+  filterableProperties: jiraIssueFilterableProperties,
   Detail: JiraIssueDetail,
   defaultViews: JIRA_ISSUE_DEFAULT_VIEWS,
 };
