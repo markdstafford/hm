@@ -21,11 +21,11 @@ const mockIssue: JiraIssueListItem = {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  (window as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
 });
 
 afterEach(() => {
-  delete (window as Record<string, unknown>).__TAURI_INTERNALS__;
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
 describe("useJiraIssues", () => {
