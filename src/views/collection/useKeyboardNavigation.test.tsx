@@ -1,7 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useKeyboardNavigation } from "./useKeyboardNavigation";
-import type { PreviewSurface } from "./ViewConfig";
 
 // Renders a <select> alongside the hook harness for filter testing
 function HarnessWithSelect({
@@ -10,12 +9,13 @@ function HarnessWithSelect({
 }: { onMoveNext: () => void; onMovePrevious: () => void }) {
   useKeyboardNavigation({
     enabled: true,
-    mode: "side-peek",
+    previewOpen: false,
     selectedIndex: 1,
     total: 5,
     onMovePrevious,
     onMoveNext,
-    onExitFullPage: vi.fn(),
+    onOpenPreview: vi.fn(),
+    onClosePreview: vi.fn(),
   });
   return <select data-testid="select-input"><option>A</option></select>;
 }
@@ -23,14 +23,15 @@ function HarnessWithSelect({
 // Minimal harness component
 function Harness({
   enabled = true,
-  mode = "side-peek" as PreviewSurface,
+  previewOpen = false,
   selectedIndex = 1,
   total = 5,
   onMovePrevious = vi.fn(),
   onMoveNext = vi.fn(),
-  onExitFullPage = vi.fn(),
+  onOpenPreview = vi.fn(),
+  onClosePreview = vi.fn(),
 }: Partial<Parameters<typeof useKeyboardNavigation>[0]>) {
-  useKeyboardNavigation({ enabled, mode, selectedIndex, total, onMovePrevious, onMoveNext, onExitFullPage });
+  useKeyboardNavigation({ enabled, previewOpen, selectedIndex, total, onMovePrevious, onMoveNext, onOpenPreview, onClosePreview });
   return (
     <div>
       <input data-testid="text-input" />
@@ -83,46 +84,46 @@ describe("useKeyboardNavigation", () => {
     expect(onMovePrevious).not.toHaveBeenCalled();
   });
 
-  it("j calls onMoveNext in full-page mode", () => {
+  it("j calls onMoveNext in any mode", () => {
     const onMoveNext = vi.fn();
-    render(<Harness mode="full-page" onMoveNext={onMoveNext} />);
+    render(<Harness onMoveNext={onMoveNext} />);
     fireEvent.keyDown(window, { key: "j" });
     expect(onMoveNext).toHaveBeenCalledTimes(1);
   });
 
-  it("k calls onMovePrevious in full-page mode", () => {
+  it("k calls onMovePrevious in any mode", () => {
     const onMovePrevious = vi.fn();
-    render(<Harness mode="full-page" selectedIndex={2} onMovePrevious={onMovePrevious} />);
+    render(<Harness selectedIndex={2} onMovePrevious={onMovePrevious} />);
     fireEvent.keyDown(window, { key: "k" });
     expect(onMovePrevious).toHaveBeenCalledTimes(1);
   });
 
-  it("j does NOT call onMoveNext in side-peek mode", () => {
-    const onMoveNext = vi.fn();
-    render(<Harness mode="side-peek" onMoveNext={onMoveNext} />);
-    fireEvent.keyDown(window, { key: "j" });
-    expect(onMoveNext).not.toHaveBeenCalled();
-  });
-
-  it("k does NOT call onMovePrevious in bottom-peek mode", () => {
-    const onMovePrevious = vi.fn();
-    render(<Harness mode="bottom-peek" selectedIndex={2} onMovePrevious={onMovePrevious} />);
-    fireEvent.keyDown(window, { key: "k" });
-    expect(onMovePrevious).not.toHaveBeenCalled();
-  });
-
-  it("Escape calls onExitFullPage only in full-page mode", () => {
-    const onExitFullPage = vi.fn();
-    render(<Harness mode="full-page" onExitFullPage={onExitFullPage} />);
+  it("Escape calls onClosePreview when previewOpen is true", () => {
+    const onClosePreview = vi.fn();
+    render(<Harness previewOpen={true} onClosePreview={onClosePreview} />);
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(onExitFullPage).toHaveBeenCalledTimes(1);
+    expect(onClosePreview).toHaveBeenCalledTimes(1);
   });
 
-  it("Escape does NOT call onExitFullPage in side-peek mode", () => {
-    const onExitFullPage = vi.fn();
-    render(<Harness mode="side-peek" onExitFullPage={onExitFullPage} />);
+  it("Escape does NOT call onClosePreview when previewOpen is false", () => {
+    const onClosePreview = vi.fn();
+    render(<Harness previewOpen={false} onClosePreview={onClosePreview} />);
     fireEvent.keyDown(window, { key: "Escape" });
-    expect(onExitFullPage).not.toHaveBeenCalled();
+    expect(onClosePreview).not.toHaveBeenCalled();
+  });
+
+  it("Enter calls onOpenPreview when previewOpen is false", () => {
+    const onOpenPreview = vi.fn();
+    render(<Harness previewOpen={false} onOpenPreview={onOpenPreview} />);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onOpenPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("Enter does NOT call onOpenPreview when previewOpen is true", () => {
+    const onOpenPreview = vi.fn();
+    render(<Harness previewOpen={true} onOpenPreview={onOpenPreview} />);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onOpenPreview).not.toHaveBeenCalled();
   });
 
   it("ignores ArrowDown when target is an input", () => {

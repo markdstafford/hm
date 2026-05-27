@@ -1,25 +1,26 @@
 import { useEffect } from "react";
 import { isFormFieldTarget } from "../../shell/keys";
-import type { PreviewSurface } from "./ViewConfig";
 
 export type UseKeyboardNavigationArgs = {
   enabled: boolean;
-  mode: PreviewSurface;
+  previewOpen: boolean;
   selectedIndex: number;
   total: number;
   onMovePrevious: () => void;
   onMoveNext: () => void;
-  onExitFullPage: () => void;
+  onOpenPreview: () => void;
+  onClosePreview: () => void;
 };
 
 export function useKeyboardNavigation({
   enabled,
-  mode,
+  previewOpen,
   selectedIndex,
   total,
   onMovePrevious,
   onMoveNext,
-  onExitFullPage,
+  onOpenPreview,
+  onClosePreview,
 }: UseKeyboardNavigationArgs): void {
   useEffect(() => {
     if (!enabled || selectedIndex < 0 || total <= 0) return;
@@ -41,19 +42,22 @@ export function useKeyboardNavigation({
       } else if (event.key === "ArrowDown" && canMoveNext) {
         event.preventDefault();
         onMoveNext();
-      } else if (mode === "full-page" && event.key === "k" && canMovePrevious) {
+      } else if (event.key === "k" && canMovePrevious) {
         event.preventDefault();
         onMovePrevious();
-      } else if (mode === "full-page" && event.key === "j" && canMoveNext) {
+      } else if (event.key === "j" && canMoveNext) {
         event.preventDefault();
         onMoveNext();
-      } else if (mode === "full-page" && event.key === "Escape") {
+      } else if (event.key === "Enter" && !previewOpen) {
         event.preventDefault();
-        onExitFullPage();
+        onOpenPreview();
+      } else if (event.key === "Escape" && previewOpen) {
+        event.preventDefault();
+        onClosePreview();
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [enabled, mode, selectedIndex, total, onMovePrevious, onMoveNext, onExitFullPage]);
+  }, [enabled, previewOpen, selectedIndex, total, onMovePrevious, onMoveNext, onOpenPreview, onClosePreview]);
 }
