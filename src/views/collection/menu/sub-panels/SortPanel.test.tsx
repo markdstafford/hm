@@ -156,4 +156,20 @@ describe("SortPanel", () => {
     const { container } = renderPanel(baseConfig({ sort: [{ property: "status", direction: "asc" }] }));
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it("exposes stable sortable row ids and drag handles for each sort level", () => {
+    renderPanel(
+      baseConfig({
+        sort: [
+          { property: "updated_at_source", direction: "desc" },
+          { property: "priority", direction: "asc" },
+        ],
+      }),
+    );
+
+    expect(document.querySelector('[data-sort-level-id="updated_at_source:0"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-sort-level-id="priority:1"]')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reorder sort level 1" })).toHaveAttribute("data-drag-handle", "true");
+    expect(screen.getByRole("button", { name: "Reorder sort level 2" })).toHaveAttribute("data-drag-handle", "true");
+  });
 });
