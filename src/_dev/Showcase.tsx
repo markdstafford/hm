@@ -19,6 +19,7 @@ import { Switch } from "../ui/forms/Switch";
 import { RadioGroup } from "../ui/forms/RadioGroup";
 import { Select } from "../ui/forms/Select";
 import { MultiSelect } from "../ui/forms/MultiSelect";
+import { DatePicker } from "../ui/forms/DatePicker";
 import { Dialog } from "../ui/overlays/Dialog";
 import { AlertDialog } from "../ui/overlays/AlertDialog";
 import { Popover } from "../ui/overlays/Popover";
@@ -92,6 +93,9 @@ function ToastDemo() {
 export function Showcase() {
   const [breakpointOverlay, setBreakpointOverlay] = useState(false);
   const [multi, setMulti] = useState<string[]>([]);
+  const [emptyDate, setEmptyDate] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>("2026-05-27");
+  const [boundedDate, setBoundedDate] = useState<string | null>("2026-05-15");
 
   const initialRef = useRef<null | {
     themeId: string;
@@ -275,6 +279,14 @@ export function Showcase() {
         </Card>
         <Card caption="MultiSelect">
           <MultiSelect aria-label="Projects" value={multi} onChange={setMulti} options={[{ value: "p1", label: "Project 1" }, { value: "p2", label: "Project 2" }]} />
+        </Card>
+        <Card caption="DatePicker">
+          <div className="grid w-full grid-cols-1 gap-2">
+            <DatePicker aria-label="Showcase empty date" value={emptyDate} onChange={setEmptyDate} placeholder="Select date" />
+            <DatePicker aria-label="Showcase selected date" value={selectedDate} onChange={setSelectedDate} />
+            <DatePicker aria-label="Showcase bounded date" value={boundedDate} onChange={setBoundedDate} minDate="2026-05-10" maxDate="2026-05-20" />
+            <DatePicker aria-label="Showcase disabled date" value="2026-05-27" onChange={() => {}} disabled />
+          </div>
         </Card>
       </Section>
 
