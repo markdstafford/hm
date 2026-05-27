@@ -46,6 +46,22 @@ describe("ViewChips", () => {
     expect(onCreate).toHaveBeenCalledTimes(1);
   });
 
+  it("inactive chips have bg-surface class", () => {
+    render(<ViewChips views={views} activeViewId="all" onPick={vi.fn()} onCreate={vi.fn()} />);
+    const inactive = screen.getByRole("button", { name: "Mine" });
+    expect(inactive.className).toContain("bg-surface");
+  });
+
+  it("renderChip wraps each chip", () => {
+    const renderChip = vi.fn((view, chip) => (
+      <div data-testid={`wrapped-${view.id}`}>{chip}</div>
+    ));
+    render(<ViewChips views={views} activeViewId="all" onPick={vi.fn()} onCreate={vi.fn()} renderChip={renderChip} />);
+    expect(screen.getByTestId("wrapped-all")).toBeInTheDocument();
+    expect(screen.getByTestId("wrapped-mine")).toBeInTheDocument();
+    expect(renderChip).toHaveBeenCalledTimes(3);
+  });
+
   it("supports accessible rendering", async () => {
     const { container } = render(<ViewChips views={views} activeViewId="all" onPick={vi.fn()} onCreate={vi.fn()} />);
     expect(await axe(container)).toHaveNoViolations();

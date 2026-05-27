@@ -25,21 +25,18 @@ export function ViewChips({ views, activeViewId, onPick, onCreate, renderChip }:
     <div aria-label="Collection views" className="flex min-w-0 items-center gap-1 overflow-x-auto">
       {orderedViews(views).map((view) => {
         const active = view.id === activeViewId;
-        const chip = (
-          <button
-            key={view.id}
-            type="button"
-            aria-current={active ? "true" : undefined}
-            data-active={active ? "true" : undefined}
-            className={chipClass(active)}
-            onClick={() => {
-              if (!active) onPick(view.id);
-            }}
-          >
-            <span className="truncate">{view.displayName}</span>
-          </button>
-        );
-        return renderChip ? <span key={view.id}>{renderChip(view, chip)}</span> : chip;
+        const buttonProps = {
+          type: "button" as const,
+          "aria-current": active ? ("true" as const) : undefined,
+          "data-active": active ? ("true" as const) : undefined,
+          className: chipClass(active),
+          onClick: () => { if (!active) onPick(view.id); },
+        };
+        if (renderChip) {
+          const chip = <button {...buttonProps}><span className="truncate">{view.displayName}</span></button>;
+          return <span key={view.id}>{renderChip(view, chip)}</span>;
+        }
+        return <button key={view.id} {...buttonProps}><span className="truncate">{view.displayName}</span></button>;
       })}
       <button
         type="button"
