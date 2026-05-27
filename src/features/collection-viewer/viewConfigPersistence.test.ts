@@ -29,4 +29,14 @@ describe("viewConfigPersistence", () => {
     expect(patched).toMatchObject({ id: view.id, displayName: "Mine", entityKind: "jira-issue" });
     expect(patched.config).toEqual(patchedConfig);
   });
+
+  it("preserves filters when building a config patch", () => {
+    const configWithFilters = {
+      ...defaultViewConfig(jiraIssueEntity),
+      filters: [{ id: "f1", property: "status", operator: "is", value: null, active: true }],
+    };
+    const result = buildConfigPatchView(view, configWithFilters);
+    expect(result).toMatchObject({ id: view.id, displayName: "Mine" });
+    expect((result.config as typeof configWithFilters).filters).toEqual(configWithFilters.filters);
+  });
 });
