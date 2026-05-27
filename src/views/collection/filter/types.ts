@@ -39,3 +39,9 @@ export type FilterOperator = {
   valueControl: FilterValueControl;
   requiresValue: boolean;
 };
+
+export type FilterEvaluationContext = {
+  now?: Date;
+  locale?: string;
+  timeZone?: string;
+};
