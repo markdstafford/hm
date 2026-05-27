@@ -21,6 +21,7 @@ export type ViewSettingsMenuProps<TItem = unknown, TProperty extends string = st
   entity: EntityContract<TItem, TProperty>;
   onRenameView: (viewId: string, displayName: string) => void | Promise<void>;
   onPatchConfig: (viewId: string, config: ViewConfig) => void | Promise<void>;
+  onOpenChange?: (open: boolean) => void;
 };
 
 export function ViewSettingsMenu<TItem = unknown, TProperty extends string = string>({
@@ -28,6 +29,7 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
   entity,
   onRenameView,
   onPatchConfig,
+  onOpenChange,
 }: ViewSettingsMenuProps<TItem, TProperty>) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<ViewSettingsPanel>("top");
@@ -35,6 +37,7 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
   const [renameError, setRenameError] = useState<string | null>(null);
 
   function handleOpenChange(newOpen: boolean) {
+    onOpenChange?.(newOpen);
     if (newOpen) {
       setPanel("top");
       setRenameError(null);

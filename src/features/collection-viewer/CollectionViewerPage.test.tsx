@@ -417,6 +417,10 @@ describe("CollectionViewerPage", () => {
       expect.objectContaining({ config: expect.objectContaining({ layout: expect.objectContaining({ preview: "full-page" }) }) })
     ));
 
+    // Dismiss the settings menu so keyboard nav re-enables before pressing Escape
+    fireEvent.click(screen.getByRole("button", { name: "Close view settings" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Layout" })).not.toBeInTheDocument());
+
     // Click first row to open full-page preview
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument());
@@ -529,6 +533,24 @@ describe("CollectionViewerPage", () => {
 
     // Alice (the assignee) should no longer appear in the rows
     await waitFor(() => expect(screen.queryByText("Alice")).not.toBeInTheDocument());
+  });
+
+  it("Arrow keys do not change collection row selection while view settings is open", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Wait for rows to load — no row selected yet
+    await screen.findByRole("button", { name: /open amp-1: first issue/i });
+
+    // Open view settings — keyboard nav should be gated while popover is open
+    fireEvent.click(screen.getByRole("button", { name: /open view settings/i }));
+    expect(await screen.findByRole("heading", { name: "View settings" })).toBeInTheDocument();
+
+    // ArrowDown should not select any row while settings is open
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+
+    // First row must remain unselected (not aria-pressed="true")
+    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).not.toHaveAttribute("aria-pressed", "true");
   });
 
   it("passes active view property visibility to rows so hidden properties disappear", async () => {

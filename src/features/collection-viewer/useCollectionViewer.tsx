@@ -64,6 +64,7 @@ export function useCollectionViewer({
   const [viewsLoading, setViewsLoading] = useState(true);
   const [viewError, setViewError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
 
@@ -115,7 +116,7 @@ export function useCollectionViewer({
   const closePreview = useCallback(() => setPreviewOpen(false), []);
 
   useKeyboardNavigation({
-    enabled: active,
+    enabled: active && !settingsOpen,
     selectedIndex,
     total: displayItems.length,
     previewOpen,
@@ -325,6 +326,7 @@ export function useCollectionViewer({
             entity={jiraIssueEntity}
             onRenameView={handleRename}
             onPatchConfig={handlePatchViewConfig}
+            onOpenChange={setSettingsOpen}
           />
         }
       />
