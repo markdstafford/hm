@@ -497,6 +497,40 @@ describe("CollectionViewerPage", () => {
     });
   });
 
+  it("hiding a property through the panel saves config and updates rows", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Wait for the page to load
+    await screen.findByText("AMP-1");
+
+    // Open view settings
+    fireEvent.click(screen.getByRole("button", { name: /open view settings/i }));
+    // Open Property visibility panel
+    await screen.findByText("Property visibility");
+    fireEvent.click(screen.getByText("Property visibility").closest("button")!);
+
+    // Hide the Assignee property
+    await screen.findByRole("button", { name: "Hide Assignee" });
+    fireEvent.click(screen.getByRole("button", { name: "Hide Assignee" }));
+
+    // collectionViewSave should have been called with assignee hidden
+    await waitFor(() => {
+      expect(commands.collectionViewSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            propertyVisibility: expect.arrayContaining([
+              expect.objectContaining({ property: "assignee", visible: false }),
+            ]),
+          }),
+        }),
+      );
+    });
+
+    // Alice (the assignee) should no longer appear in the rows
+    await waitFor(() => expect(screen.queryByText("Alice")).not.toBeInTheDocument());
+  });
+
   it("passes active view property visibility to rows so hidden properties disappear", async () => {
     const records = [
       {

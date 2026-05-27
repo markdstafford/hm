@@ -260,6 +260,31 @@ describe("ViewSettingsMenu", () => {
     );
   });
 
+  it("top sheet summary reflects property visibility count from active view config", async () => {
+    const user = userEvent.setup();
+    // Create a view where assignee is hidden (4 of 8 visible)
+    const hiddenAssigneeView: CollectionView = {
+      ...activeView,
+      config: {
+        propertyVisibility: [
+          { property: "key",               side: "left",  visible: true  },
+          { property: "title",             side: "left",  visible: true  },
+          { property: "assignee",          side: "right", visible: false },
+          { property: "status",            side: "right", visible: true  },
+          { property: "updated_at_source", side: "right", visible: true  },
+          { property: "priority",          side: "right", visible: false },
+          { property: "labels",            side: "right", visible: false },
+          { property: "project_key",       side: "right", visible: false },
+        ],
+      },
+    };
+
+    renderMenu({ activeView: hiddenAssigneeView });
+    await user.click(screen.getByRole("button", { name: "Open view settings" }));
+
+    expect(screen.getByText("4 of 8")).toBeInTheDocument();
+  });
+
   it("active-view change closes the menu", async () => {
     const user = userEvent.setup();
     const { rerender } = renderMenu();
