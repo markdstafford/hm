@@ -16,6 +16,12 @@ beforeAll(() => {
     window.HTMLElement.prototype.scrollIntoView = () => {};
 });
 
+const sortableIssues: JiraIssueListItem[] = [
+  { work_item_id: "wid-open-old", key: "AMP-1", title: "Open old", status_name: "Open", assignee_display_name: "Alice", updated_at_source: "2024-01-01T10:00:00Z", project_key: "AMP", priority_name: "Low", labels: [] },
+  { work_item_id: "wid-done-new", key: "AMP-2", title: "Done new", status_name: "Done", assignee_display_name: "Bob", updated_at_source: "2024-06-01T10:00:00Z", project_key: "AMP", priority_name: "High", labels: [] },
+  { work_item_id: "wid-open-new", key: "AMP-3", title: "Open new", status_name: "Open", assignee_display_name: "Carol", updated_at_source: "2024-05-01T10:00:00Z", project_key: "AMP", priority_name: "Medium", labels: [] },
+];
+
 const mockIssues: JiraIssueListItem[] = [
   {
     work_item_id: "wid-1",
@@ -555,6 +561,80 @@ describe("CollectionViewerPage", () => {
 
     // First row must remain unselected (not aria-pressed="true")
     expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).not.toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("uses active view multi-sort for row order", async () => {
+    mockViewCommands([
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: {
+          sort: [
+            { property: "status", direction: "asc" },
+            { property: "updated_at_source", direction: "desc" },
+          ],
+        },
+      },
+    ]);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: sortableIssues, loading: false, error: null });
+
+    render(<CollectionViewerPage />);
+
+    const rows = await screen.findAllByRole("button", { name: /open amp-/i });
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Open AMP-2: Done new",
+      "Open AMP-3: Open new",
+      "Open AMP-1: Open old",
+    ]);
+  });
+
+  it("keeps selected row selected after sort changes", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: sortableIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: open old/i }));
+    expect(screen.getByRole("button", { name: /open amp-1: open old/i })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: /open view settings/i }));
+    fireEvent.click(screen.getByText("Sort").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add sort" }));
+
+    await waitFor(() => {
+      expect(commands.collectionViewSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({ sort: [{ property: "key", direction: "asc" }] }),
+        }),
+      );
+    });
+
+    expect(screen.getByRole("button", { name: /open amp-1: open old/i })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keyboard navigation follows the sorted display order", async () => {
+    mockViewCommands([
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: { sort: [{ property: "key", direction: "desc" }] },
+      },
+    ]);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: sortableIssues, loading: false, error: null });
+
+    render(<CollectionViewerPage />);
+
+    // With key desc sort: AMP-3, AMP-2, AMP-1
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-3: open new/i }));
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /open amp-2: done new/i })).toHaveAttribute("aria-pressed", "true");
+    });
   });
 
   it("passes active view property visibility to rows so hidden properties disappear", async () => {

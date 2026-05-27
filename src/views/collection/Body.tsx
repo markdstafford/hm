@@ -1,34 +1,30 @@
 import { EmptyState } from "../../ui/feedback/EmptyState";
 import { Row } from "./Row";
-import type { ViewDensity } from "./ViewConfig";
+import { sortCollectionItems } from "./sort";
+import type { SortLevelConfig, ViewDensity } from "./ViewConfig";
 import type { EntityContract, PropertyConfig } from "./types";
 
 type Props<TItem, TProperty extends string> = {
   items: TItem[];
   entity: EntityContract<TItem, TProperty>;
   properties?: PropertyConfig<TProperty>[];
+  sort?: SortLevelConfig[];
   selectedId: string | null;
   density?: ViewDensity;
   onSelect: (item: TItem) => void;
 };
 
-export function sortCollectionItems<TItem, TProperty extends string>(
-  items: TItem[],
-  entity: EntityContract<TItem, TProperty>,
-): TItem[] {
-  return [...items].sort(entity.defaultSort);
-}
-
 export function Body<TItem, TProperty extends string>({
   items,
   entity,
   properties,
+  sort = [],
   selectedId,
   density = "regular",
   onSelect,
 }: Props<TItem, TProperty>) {
   const resolvedProperties = properties ?? entity.defaultProperties;
-  const sorted = sortCollectionItems(items, entity);
+  const sorted = sortCollectionItems(items, entity, sort);
 
   if (sorted.length === 0) {
     return (
