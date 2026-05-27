@@ -431,7 +431,7 @@ export function useCollectionViewer({
         >
           <div className="flex-1 overflow-y-auto">
             <Body
-              items={issues}
+              items={sortedItems}
               entity={jiraIssueEntity}
               properties={activeConfig.propertyVisibility as PropertyConfig<JiraIssueProperty>[]}
               sort={activeConfig.sort}
