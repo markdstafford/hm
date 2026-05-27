@@ -22,6 +22,9 @@ import {
   seedCollectionViews,
   uniqueUntitledName,
 } from "../../views/collection/views/seed";
+import type { ViewConfig } from "../../views/collection/ViewConfig";
+import { buildConfigPatchView, buildRenameView } from "./viewConfigPersistence";
+import { ViewSettingsMenu } from "../../views/collection/menu/ViewSettingsMenu";
 
 const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -41,6 +44,8 @@ export function CollectionViewerPage() {
 
   const selectedItem: JiraIssueListItem | null =
     issues.find((i) => i.work_item_id === selectedId) ?? null;
+
+  const activeView = views.find((view) => view.id === activeViewId) ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -118,13 +123,28 @@ export function CollectionViewerPage() {
 
   async function handleRename(viewId: string, displayName: string) {
     const existing = views.find((view) => view.id === viewId);
-    if (!existing) return;
+    const trimmed = displayName.trim();
+    if (!existing || !trimmed) return;
     try {
-      const saved = await saveView({ ...existing, displayName });
-      setViews(views.map((view) => (view.id === viewId ? saved : view)));
+      const saved = await saveView(buildRenameView(existing, trimmed, jiraIssueEntity));
+      setViews((current) => current.map((view) => (view.id === viewId ? saved : view)));
     } catch (err) {
       console.warn("[collection-views] rename failed", err);
       setViewError("Could not save collection view");
+      throw err;
+    }
+  }
+
+  async function handlePatchViewConfig(viewId: string, config: ViewConfig) {
+    const existing = views.find((view) => view.id === viewId);
+    if (!existing) return;
+    try {
+      const saved = await saveView(buildConfigPatchView(existing, config));
+      setViews((current) => current.map((view) => (view.id === viewId ? saved : view)));
+    } catch (err) {
+      console.warn("[collection-views] config save failed", err);
+      setViewError("Could not save collection view");
+      throw err;
     }
   }
 
@@ -200,6 +220,14 @@ export function CollectionViewerPage() {
           onRename={handleRename}
           onDuplicate={handleDuplicate}
           onDelete={handleDelete}
+          settingsSlot={
+            <ViewSettingsMenu
+              activeView={activeView}
+              entity={jiraIssueEntity}
+              onRenameView={handleRename}
+              onPatchConfig={handlePatchViewConfig}
+            />
+          }
         />
         {viewError && <div className="border-b border-border/60 px-3 py-1 text-sm text-red">{viewError}</div>}
       </>

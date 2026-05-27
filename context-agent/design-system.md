@@ -585,11 +585,11 @@ The `ViewChips` + `ChipContextMenu` + `CollectionHeader` triad is a reusable hea
 `CollectionHeader` renders a single `h-8` (`32px`) row pinned above the collection body:
 
 ```
-[ All open ] [ Mine ] [ Recently updated ] [ + ]        [ sliders ]
-^--- ViewChips (left, flex-1, min-w-0) ---^              ^--- IconButton ---^
+[ All open ] [ Mine ] [ Recently updated ] [ + ]        [ ⊟ settings ]
+^--- ViewChips (left, flex-1, min-w-0) ---^              ^--- settingsSlot ---^
 ```
 
-The chip strip takes all remaining width (`flex-1`, `min-w-0`); the settings icon is `shrink-0` and right-aligned. Both are vertically centered.
+The chip strip takes all remaining width (`flex-1`, `min-w-0`); the `settingsSlot` is `shrink-0` and right-aligned. Both are vertically centered.
 
 ### Chip states and tokens
 
@@ -624,9 +624,73 @@ When the deleted chip was active, the page selects the **previous neighbor** in 
 
 If all views are deleted, a safe fallback view is created before re-rendering so the strip is never empty.
 
-### Settings placeholder
+### Collection view settings menu
 
-`CollectionHeader` renders an `IconButton` with `SlidersHorizontal` (14px) on the right. It uses `dimmed` + `disabled` semantics with `label="View settings coming next"` until issue #39 wires real behavior. Do not open a half-built settings panel; `aria-disabled` keeps the button focusable and tooltip-eligible.
+`CollectionHeader` accepts an optional `settingsSlot?: ReactNode` prop rendered at the right edge. The canonical implementation is `src/views/collection/menu/ViewSettingsMenu.tsx`, composed by `CollectionViewerPage` and injected via `settingsSlot`. The header itself remains entity-agnostic.
+
+**Trigger:** An icon-only `IconButton` labelled `"Open view settings"` (SlidersHorizontal 14px). Disabled (with tooltip) when `activeView` is null.
+
+**Container:** A Radix-backed popover (`align="end"`, `w-80`, `p-0`) that opens at the **top sheet** every time. Closing resets the internal `panel` state to `"top"`. Click-outside, `Esc`, and the close button all dismiss from any panel.
+
+**Top sheet structure:**
+```
+┌─────────────────────────────────────────────┐
+│  View settings                          [X] │
+├─────────────────────────────────────────────┤
+│  View name                                  │
+│  [ Mine                                   ] │
+├─────────────────────────────────────────────┤
+│  ◫  Layout              Table · Regular  ›  │
+│  ◉  Property visibility       5 of 8     ›  │
+│  ⇅  Sort                         None    ›  │
+│  ▥  Group                        None    ›  │
+│  ⊜  Filter                       None    ›  │
+│  ◐  Conditional color            Soon       │
+└─────────────────────────────────────────────┘
+```
+
+- Title: `"View settings"` (h2 inside a `<section aria-label="View settings">`)
+- **View name textbox:** labelled, controlled, commits on blur or `Enter`, trims whitespace, rejects blank with `"View name cannot be blank"` inline error. Uses `Field` + `TextField` from `src/ui/forms/`.
+- **Category row order (fixed):** Layout → Property visibility → Sort → Group → Filter → Conditional color
+- **Enabled rows** (Layout, Property visibility, Sort, Group, Filter): `<button>` with lucide icon, label, current-value summary (from `summarizeViewConfig`), and `ChevronRight`.
+- **Disabled row** (Conditional color): non-interactive `<div aria-disabled="true">`, shows `"Soon"`, no chevron, no click action.
+
+**Top-sheet summaries** (from `summarizeViewConfig` in `src/views/collection/ViewConfig.ts`):
+| Row | Summary |
+|-----|---------|
+| Layout | `Table · Compact` or `Table · Regular` |
+| Property visibility | `N of M` (visible / total entity properties) |
+| Sort | First sort level label + direction (`↑`/`↓`), or `None` |
+| Group | Group property label, or `None` |
+| Filter | `N active` for active filters, or `None` |
+| Conditional color | Always `Soon` |
+
+**Sub-panels** share `PanelHeader` chrome:
+```
+┌─────────────────────────────────────────────┐
+│  ←  Sort                                [X] │
+├─────────────────────────────────────────────┤
+│  Coming in #42                              │
+└─────────────────────────────────────────────┘
+```
+`PanelHeader` props: `title`, optional `onBack`, `onClose`. Back button label: `"Back to view settings"`. Close button label: `"Close view settings"`.
+
+Issue #39 ships stub bodies only:
+| Panel | Body |
+|-------|------|
+| Layout | `Coming in #40` |
+| Property visibility | `Coming in #41` |
+| Sort | `Coming in #42` |
+| Group | `Coming in #43` |
+| Filter | `Coming in #44` |
+
+**Panel state values:** `"top" | "layout" | "property-visibility" | "sort" | "group" | "filter"` (exported as `ViewSettingsPanel` from `ViewSettingsMenu.tsx`).
+
+**Rename persistence:** `onRenameView(viewId, displayName)` is called on valid commit. The page wires this to `handleRename`, which uses `buildRenameView` from `src/features/collection-viewer/viewConfigPersistence.ts` — this normalizes the config via `normalizeViewConfig` before saving.
+
+**Config patch persistence:** `onPatchConfig(viewId, config: ViewConfig)` is available for future sub-panel controls (#40–#44). The page uses `handlePatchViewConfig` → `buildConfigPatchView` → `collectionViewSave`.
+
+**Typed view config:** `ViewConfig` type and helpers live in `src/views/collection/ViewConfig.ts`. Legacy `{}` configs normalize to typed defaults via `normalizeViewConfig(input, entity)`.
 
 ### Accessibility checklist
 
@@ -635,7 +699,11 @@ If all views are deleted, a safe fallback view is created before re-rendering so
 - `+` chip has `aria-label="Create named view"`.
 - Context menu uses Radix focus management and keyboard navigation.
 - Delete confirmation uses `AlertDialog` with a title naming the view.
-- Settings placeholder has `aria-label` + tooltip via `IconButton`.
+- Settings trigger has `aria-label="Open view settings"` via `IconButton`.
+- Settings menu popover content is wrapped in `<section aria-label="View settings">`.
+- Panel titles use `<h2>`.
+- `Esc` closes from any panel.
+- Back and close buttons have descriptive accessible labels.
 
 ### Reuse contract
 

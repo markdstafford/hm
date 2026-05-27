@@ -9,7 +9,25 @@ const views: CollectionView[] = [
 ];
 
 describe("CollectionHeader", () => {
-  it("places chips and disabled settings placeholder in one row", () => {
+  it("places chips and a live settings slot in one row", () => {
+    render(
+      <CollectionHeader
+        views={views}
+        activeViewId="all"
+        onPick={vi.fn()}
+        onCreate={vi.fn()}
+        onRename={vi.fn()}
+        onDuplicate={vi.fn()}
+        onDelete={vi.fn()}
+        settingsSlot={<button type="button">Open view settings</button>}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "All open" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open view settings/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /view settings coming next/i })).not.toBeInTheDocument();
+  });
+
+  it("renders without settingsSlot when none provided", () => {
     render(
       <CollectionHeader
         views={views}
@@ -22,8 +40,7 @@ describe("CollectionHeader", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "All open" })).toBeInTheDocument();
-    const settings = screen.getByRole("button", { name: /view settings coming next/i });
-    expect(settings).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("button", { name: /view settings/i })).not.toBeInTheDocument();
   });
 
   it("supports accessible rendering", async () => {
@@ -36,6 +53,7 @@ describe("CollectionHeader", () => {
         onRename={vi.fn()}
         onDuplicate={vi.fn()}
         onDelete={vi.fn()}
+        settingsSlot={<button type="button">Open view settings</button>}
       />,
     );
     expect(await axe(container)).toHaveNoViolations();
