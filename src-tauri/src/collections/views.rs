@@ -7,7 +7,7 @@ pub struct CollectionViewRecord {
     pub id: String,
     pub entity_kind: String,
     pub display_name: String,
-    pub position: i64,
+    pub position: i32,
     pub is_default: bool,
     pub config: crate::commands::JsonValue,
 }
@@ -17,7 +17,7 @@ pub struct CollectionViewSaveInput {
     pub id: String,
     pub entity_kind: String,
     pub display_name: String,
-    pub position: i64,
+    pub position: i32,
     pub is_default: bool,
     pub config: crate::commands::JsonValue,
 }
@@ -69,7 +69,7 @@ fn validate_non_empty(value: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_position(position: i64) -> Result<()> {
+fn validate_position(position: i32) -> Result<()> {
     if position < 0 {
         return Err(safe_error("position must be zero or greater"));
     }
@@ -199,7 +199,7 @@ mod tests {
     use super::*;
     use crate::db::open_in_memory;
 
-    fn input(id: &str, entity_kind: &str, display_name: &str, position: i64) -> CollectionViewSaveInput {
+    fn input(id: &str, entity_kind: &str, display_name: &str, position: i32) -> CollectionViewSaveInput {
         CollectionViewSaveInput {
             id: id.to_string(),
             entity_kind: entity_kind.to_string(),

@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::sync::{Arc, Mutex};
 
+use crate::collections::views::{
+    delete_collection_view, list_collection_views, save_collection_view,
+    seed_default_collection_views, CollectionViewRecord, CollectionViewSaveInput,
+    CollectionViewSeedInput,
+};
 use crate::settings::{keys, preferences, secrets::ManagedSecretStore, shared};
 
 // `serde_json::Value` implements `specta::Type` via the `serde_json` feature, but
@@ -659,6 +664,48 @@ pub(crate) fn list_jira_issues_from_conn(
     Ok(out)
 }
 
+#[tauri::command]
+#[specta::specta]
+pub fn collection_views_list(
+    entity_kind: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<Vec<CollectionViewRecord>, String> {
+    let conn = db.lock().map_err(|_| "Could not access database".to_string())?;
+    list_collection_views(&conn, &entity_kind).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn collection_view_save(
+    view: CollectionViewSaveInput,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<CollectionViewRecord, String> {
+    let conn = db.lock().map_err(|_| "Could not access database".to_string())?;
+    save_collection_view(&conn, &view).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn collection_view_delete(
+    id: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|_| "Could not access database".to_string())?;
+    delete_collection_view(&conn, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn collection_views_seed_defaults(
+    input: CollectionViewSeedInput,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<Vec<CollectionViewRecord>, String> {
+    let conn = db.lock().map_err(|_| "Could not access database".to_string())?;
+    seed_default_collection_views(&conn, &input.entity_kind, &input.defaults)
+        .map(|result| result.views)
+        .map_err(|e| e.to_string())
+}
+
 // Ensure specta sees all source config types for TypeScript binding generation.
 // These types are used in the commands above but referenced here explicitly so
 // the specta type registry picks them up even if inference misses a variant.
@@ -681,6 +728,9 @@ const _: () = {
         _assert_specta::<JiraIssueIngestionProgress>();
         _assert_specta::<JiraIssueListFilter>();
         _assert_specta::<JiraIssueListItem>();
+        _assert_specta::<CollectionViewRecord>();
+        _assert_specta::<CollectionViewSaveInput>();
+        _assert_specta::<CollectionViewSeedInput>();
     }
 };
 
