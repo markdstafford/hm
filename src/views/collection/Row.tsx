@@ -44,7 +44,7 @@ export function Row<TItem, TProperty extends string>({
       <button
         type="button"
         className="flex-1 flex items-center min-w-0 text-left gap-2"
-        aria-label={`Open ${itemId}`}
+        aria-label={entity.getRowLabel ? entity.getRowLabel(item) : `Open ${itemId}`}
         aria-pressed={isSelected}
         onClick={() => onSelect(item)}
       >

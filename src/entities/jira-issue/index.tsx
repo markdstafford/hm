@@ -64,6 +64,10 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
   id: "jira-issue",
   label: "Jira issues",
   getId: (item) => item.work_item_id,
+  getRowLabel: (item) => {
+    const key = item.key || "Unknown key";
+    return item.title ? `Open ${key}: ${item.title}` : `Open ${key}`;
+  },
   properties: PROPERTY_DEFINITIONS,
   defaultProperties: DEFAULT_PROPERTIES,
   defaultSort: defaultJiraSort,

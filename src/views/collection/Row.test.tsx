@@ -150,6 +150,38 @@ describe("Row", () => {
     expect(container.firstChild).toHaveClass("bg-surface-1");
   });
 
+  it("uses entity.getRowLabel for the row button accessible name when provided", () => {
+    const onSelect = vi.fn();
+    const entityWithLabel: EntityContract<Item, Prop> = {
+      ...entity,
+      getRowLabel: (i) => `Open ${i.name} (${i.id})`,
+    };
+    render(
+      <Row
+        item={item}
+        entity={entityWithLabel}
+        properties={entity.defaultProperties}
+        selectedId={null}
+        onSelect={onSelect}
+      />
+    );
+    expect(screen.getByRole("button", { name: /open alpha \(item-1\)/i })).toBeInTheDocument();
+  });
+
+  it("falls back to Open {id} for the row button accessible name when getRowLabel is absent", () => {
+    const onSelect = vi.fn();
+    render(
+      <Row
+        item={item}
+        entity={entity}
+        properties={entity.defaultProperties}
+        selectedId={null}
+        onSelect={onSelect}
+      />
+    );
+    expect(screen.getByRole("button", { name: /open item-1/i })).toBeInTheDocument();
+  });
+
   it("does not crash when a property id is not in entity.properties", () => {
     const onSelect = vi.fn();
     const unknownProp = [

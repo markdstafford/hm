@@ -27,6 +27,7 @@ export type EntityContract<TItem, TProperty extends string> = {
   id: string;
   label: string;
   getId: (item: TItem) => string;
+  getRowLabel?: (item: TItem) => string;
   properties: PropertyDefinition<TItem, TProperty>[];
   defaultProperties: PropertyConfig<TProperty>[];
   defaultSort: (a: TItem, b: TItem) => number;

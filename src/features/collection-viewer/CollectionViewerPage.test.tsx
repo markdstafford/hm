@@ -75,14 +75,14 @@ describe("CollectionViewerPage", () => {
   it("opens detail rail when a row is clicked", () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
-    fireEvent.click(screen.getByRole("button", { name: /open wid-1/i }));
+    fireEvent.click(screen.getByRole("button", { name: /open amp-1: first issue/i }));
     expect(screen.getByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
   });
 
   it("hides detail rail when close button is clicked", () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
-    fireEvent.click(screen.getByRole("button", { name: /open wid-1/i }));
+    fireEvent.click(screen.getByRole("button", { name: /open amp-1: first issue/i }));
     expect(screen.getByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /close issue detail/i }));
     expect(screen.queryByRole("button", { name: /close issue detail/i })).not.toBeInTheDocument();
@@ -91,10 +91,10 @@ describe("CollectionViewerPage", () => {
   it("swaps detail content when a second row is clicked", () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
-    fireEvent.click(screen.getByRole("button", { name: /open wid-1/i }));
+    fireEvent.click(screen.getByRole("button", { name: /open amp-1: first issue/i }));
     const details = screen.getAllByText("First issue");
     expect(details.length).toBeGreaterThanOrEqual(1);
-    fireEvent.click(screen.getByRole("button", { name: /open wid-2/i }));
+    fireEvent.click(screen.getByRole("button", { name: /open amp-2: second issue/i }));
     expect(screen.getAllByText("Second issue").length).toBeGreaterThanOrEqual(1);
   });
 
