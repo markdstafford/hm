@@ -49,8 +49,10 @@ export function GroupPanel<TItem = unknown, TProperty extends string = string>({
         )}
 
         <div className="mt-1 flex items-center justify-between rounded px-2 py-1.5">
+          <span className="text-sm text-text">Hide empty groups</span>
           <Switch
             label="Hide empty groups"
+            hideLabelText
             checked={config.group.hideEmptyGroups}
             onCheckedChange={(checked) => patchGroup(setHideEmptyGroups(config.group, checked))}
           />

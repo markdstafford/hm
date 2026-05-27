@@ -35,6 +35,27 @@ describe("GroupPanel", () => {
     expect(screen.queryByRole("button", { name: /remove grouping/i })).not.toBeInTheDocument();
   });
 
+  it("renders exactly one visible 'Hide empty groups' label text in the row", () => {
+    render(
+      <GroupPanel
+        entity={jiraIssueEntity}
+        config={defaultViewConfig(jiraIssueEntity)}
+        onPatchConfig={vi.fn()}
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // getByText finds visible text nodes; sr-only content is still in DOM but
+    // the label in the row and the switch's sr-only span both contain the text.
+    // We verify there is exactly one visible (non-sr-only) instance.
+    const allTextNodes = screen.getAllByText("Hide empty groups");
+    const visibleNodes = allTextNodes.filter(
+      (el) => !el.classList.contains("sr-only"),
+    );
+    expect(visibleNodes).toHaveLength(1);
+  });
+
   it("patches only group.property when choosing a property via the popover", async () => {
     const user = userEvent.setup();
     const config = defaultViewConfig(jiraIssueEntity);
