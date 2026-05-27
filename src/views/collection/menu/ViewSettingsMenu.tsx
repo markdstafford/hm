@@ -136,7 +136,13 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
           />
         )}
         {panel === "group" && (
-          <GroupPanel onBack={() => setPanel("top")} onClose={() => handleOpenChange(false)} />
+          <GroupPanel
+            entity={entity}
+            config={normalizedConfig}
+            onPatchConfig={handlePatchConfig}
+            onBack={() => setPanel("top")}
+            onClose={() => handleOpenChange(false)}
+          />
         )}
         {panel === "filter" && (
           <FilterPanel onBack={() => setPanel("top")} onClose={() => handleOpenChange(false)} />

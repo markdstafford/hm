@@ -43,7 +43,6 @@ test("Jira view settings menu opens, renames, navigates, and dismisses", async (
   // Drill into each remaining sub-panel and verify title + placeholder body, then back
   const panels = [
     { row: "Sort", body: "Coming in #42" },
-    { row: "Group", body: "Coming in #43" },
     { row: "Filter", body: "Coming in #44" },
   ];
 
@@ -54,6 +53,13 @@ test("Jira view settings menu opens, renames, navigates, and dismisses", async (
     await page.getByRole("button", { name: /back to view settings/i }).click();
     await expect(page.getByRole("heading", { name: "View settings" })).toBeVisible();
   }
+
+  // Group panel now has real controls (no placeholder text)
+  await page.getByRole("button", { name: /group/i }).click();
+  await expect(page.getByRole("heading", { name: "Group" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /group by none/i })).toBeVisible();
+  await page.getByRole("button", { name: /back to view settings/i }).click();
+  await expect(page.getByRole("heading", { name: "View settings" })).toBeVisible();
 
   // Close via the close button
   await page.getByRole("button", { name: /close view settings/i }).click();
