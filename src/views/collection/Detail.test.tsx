@@ -14,7 +14,7 @@ type Item = { id: string; name: string };
 type Prop = "name";
 
 const entity: EntityContract<Item, Prop> = {
-  id: "test", label: "Test", getId: (item) => item.id,
+  id: "test", label: "Test", detailLabel: "issue", getId: (item) => item.id,
   properties: [{ id: "name", label: "Name", kind: "text", renderCell: ({ item }) => <span>{item.name}</span>, isStretch: true }],
   defaultProperties: [{ property: "name", side: "left", visible: true }],
   defaultSort: () => 0,
