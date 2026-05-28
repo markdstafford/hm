@@ -110,7 +110,9 @@ impl From<crate::sources::jira_errors::JiraApiError> for IngestionError {
             J::BadRequest
             | J::Server { .. }
             | J::InvalidBaseUrl
-            | J::InvalidRequest { .. } => IngestionErrorCategory::Unknown,
+            | J::InvalidRequest { .. }
+            | J::Conflict
+            | J::UnsafeWriteUnknownOutcome => IngestionErrorCategory::Unknown,
         };
         IngestionError::new(cat, "")
     }
