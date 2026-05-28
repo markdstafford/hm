@@ -278,6 +278,10 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
           to_json TEXT,
           payload_json TEXT NOT NULL,
           ingested_at TEXT NOT NULL,
+          -- Secondary dedup: the primary key (id) is the main uniqueness guarantee via
+          -- deterministic stable_id generation in the ingestion layer. This constraint
+          -- catches cases where the same upstream event is accidentally assigned different ids;
+          -- SQLite treats NULLs as distinct so rows with NULL upstream IDs rely on the PK alone.
           UNIQUE(source_system_id, upstream_event_id, upstream_item_id, issue_id, event_type)
         );
 
@@ -386,6 +390,9 @@ mod tests {
         "jira_issue_field_values",
         "jira_worklogs",
         "jira_remote_links",
+        "issue_events",
+        "issue_snapshots",
+        "issue_snapshot_jobs",
         "indexable_documents",
     ];
 
@@ -429,7 +436,7 @@ mod tests {
     #[test]
     fn creates_core_work_data_tables() {
         let conn = open_in_memory().expect("database should open");
-        assert_eq!(EXPECTED_TABLES.len(), 17, "expected 17 work-data tables");
+        assert_eq!(EXPECTED_TABLES.len(), 20, "expected 20 work-data tables");
         for table in EXPECTED_TABLES {
             assert!(
                 table_exists(&conn, table),
@@ -538,8 +545,8 @@ mod tests {
 
     #[test]
     fn history_tables_and_indexes_are_created() {
-        let conn = crate::db::open_in_memory().unwrap();
-        super::setup_schema(&conn).unwrap();
+        let conn = crate::db::open_in_memory().expect("database should open");
+        super::setup_schema(&conn).expect("schema setup should succeed");
 
         let issue_events_sql: String = conn
             .query_row(
@@ -547,7 +554,7 @@ mod tests {
                 [],
                 |row| row.get(0),
             )
-            .unwrap();
+            .expect("issue_events table should exist");
         assert!(issue_events_sql.contains("upstream_event_id TEXT"));
         assert!(issue_events_sql.contains("payload_json TEXT NOT NULL"));
         assert!(issue_events_sql.contains("UNIQUE(source_system_id, upstream_event_id, upstream_item_id, issue_id, event_type)"));
@@ -558,7 +565,7 @@ mod tests {
                 [],
                 |row| row.get(0),
             )
-            .unwrap();
+            .expect("issue_snapshots table should exist");
         assert!(issue_snapshots_sql.contains("snapshot_date TEXT NOT NULL"));
         assert!(issue_snapshots_sql.contains("labels_json TEXT NOT NULL DEFAULT '[]'"));
         assert!(issue_snapshots_sql.contains("PRIMARY KEY(issue_id, snapshot_date)"));
@@ -569,7 +576,7 @@ mod tests {
                 [],
                 |row| row.get(0),
             )
-            .unwrap();
+            .expect("issue_snapshot_jobs table should exist");
         assert!(jobs_sql.contains("job_kind TEXT NOT NULL"));
         assert!(jobs_sql.contains("progress_json TEXT NOT NULL"));
 
@@ -585,7 +592,7 @@ mod tests {
                     [index_name],
                     |row| row.get(0),
                 )
-                .unwrap();
+                .expect("sqlite_master index query should succeed");
             assert_eq!(exists, 1, "missing index {index_name}");
         }
     }
