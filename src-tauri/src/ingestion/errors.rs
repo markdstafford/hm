@@ -18,6 +18,12 @@ pub enum IngestionErrorCategory {
     Cancelled,
     Partial,
     Storage,
+    InvalidBaseUrl,
+    InvalidRequest,
+    BadRequest,
+    Server,
+    Conflict,
+    UnsafeWriteUnknownOutcome,
     Unknown,
 }
 
@@ -51,6 +57,20 @@ impl IngestionError {
             "partial" => IngestionErrorCategory::Partial,
             "storage" => IngestionErrorCategory::Storage,
             "notfound" | "not_found" => IngestionErrorCategory::NotFound,
+            "invalidbaseurl" | "invalid_base_url" | "invalid jira url" => {
+                IngestionErrorCategory::InvalidBaseUrl
+            }
+            "invalidrequest" | "invalid_request" | "invalid jira request" => {
+                IngestionErrorCategory::InvalidRequest
+            }
+            "badrequest" | "bad_request" | "jira rejected the request" => {
+                IngestionErrorCategory::BadRequest
+            }
+            "server" | "jira server error" => IngestionErrorCategory::Server,
+            "conflict" | "write conflict" => IngestionErrorCategory::Conflict,
+            "unsafewriteunknownoutcome"
+            | "unsafe_write_unknown_outcome"
+            | "write outcome unknown" => IngestionErrorCategory::UnsafeWriteUnknownOutcome,
             _ => IngestionErrorCategory::Unknown,
         };
         IngestionError::new(cat, category_hint)
@@ -78,6 +98,12 @@ impl fmt::Display for IngestionError {
             IngestionErrorCategory::Cancelled => "Cancelled",
             IngestionErrorCategory::Partial => "Partial sync",
             IngestionErrorCategory::Storage => "Storage error",
+            IngestionErrorCategory::InvalidBaseUrl => "Invalid Jira URL",
+            IngestionErrorCategory::InvalidRequest => "Invalid Jira request",
+            IngestionErrorCategory::BadRequest => "Jira rejected the request",
+            IngestionErrorCategory::Server => "Jira server error",
+            IngestionErrorCategory::Conflict => "Write conflict",
+            IngestionErrorCategory::UnsafeWriteUnknownOutcome => "Write outcome unknown",
             IngestionErrorCategory::Unknown => "Unknown error",
         };
         if self.safe_message.is_empty() {
@@ -107,12 +133,12 @@ impl From<crate::sources::jira_errors::JiraApiError> for IngestionError {
             J::RateLimited { .. } => IngestionErrorCategory::RateLimited,
             J::Network => IngestionErrorCategory::Network,
             J::Decode => IngestionErrorCategory::Decode,
-            J::BadRequest
-            | J::Server { .. }
-            | J::InvalidBaseUrl
-            | J::InvalidRequest { .. }
-            | J::Conflict
-            | J::UnsafeWriteUnknownOutcome => IngestionErrorCategory::Unknown,
+            J::BadRequest => IngestionErrorCategory::BadRequest,
+            J::Server { .. } => IngestionErrorCategory::Server,
+            J::InvalidBaseUrl => IngestionErrorCategory::InvalidBaseUrl,
+            J::InvalidRequest { .. } => IngestionErrorCategory::InvalidRequest,
+            J::Conflict => IngestionErrorCategory::Conflict,
+            J::UnsafeWriteUnknownOutcome => IngestionErrorCategory::UnsafeWriteUnknownOutcome,
         };
         IngestionError::new(cat, "")
     }
