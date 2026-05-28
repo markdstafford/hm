@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod audit;
 pub mod collections;
+pub mod mutations;
 pub mod commands;
 pub mod db;
 pub mod ingestion;

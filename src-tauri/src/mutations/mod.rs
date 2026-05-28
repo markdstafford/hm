@@ -1,0 +1,11 @@
+pub mod errors;
+pub mod inputs;
+pub mod jira_add_comment;
+pub mod jira_client;
+pub mod jira_close_issue;
+pub mod jira_link_as_duplicate;
+pub mod jira_reassign;
+pub mod jira_update_labels;
+pub mod jira_update_title;
+pub mod registry;
+pub mod tests;
