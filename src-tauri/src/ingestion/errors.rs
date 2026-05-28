@@ -18,6 +18,12 @@ pub enum IngestionErrorCategory {
     Cancelled,
     Partial,
     Storage,
+    InvalidBaseUrl,
+    InvalidRequest,
+    BadRequest,
+    Server,
+    Conflict,
+    UnsafeWriteUnknownOutcome,
     Unknown,
 }
 
@@ -51,6 +57,20 @@ impl IngestionError {
             "partial" => IngestionErrorCategory::Partial,
             "storage" => IngestionErrorCategory::Storage,
             "notfound" | "not_found" => IngestionErrorCategory::NotFound,
+            "invalidbaseurl" | "invalid_base_url" | "invalid jira url" => {
+                IngestionErrorCategory::InvalidBaseUrl
+            }
+            "invalidrequest" | "invalid_request" | "invalid jira request" => {
+                IngestionErrorCategory::InvalidRequest
+            }
+            "badrequest" | "bad_request" | "jira rejected the request" => {
+                IngestionErrorCategory::BadRequest
+            }
+            "server" | "jira server error" => IngestionErrorCategory::Server,
+            "conflict" | "write conflict" => IngestionErrorCategory::Conflict,
+            "unsafewriteunknownoutcome"
+            | "unsafe_write_unknown_outcome"
+            | "write outcome unknown" => IngestionErrorCategory::UnsafeWriteUnknownOutcome,
             _ => IngestionErrorCategory::Unknown,
         };
         IngestionError::new(cat, category_hint)
@@ -78,6 +98,12 @@ impl fmt::Display for IngestionError {
             IngestionErrorCategory::Cancelled => "Cancelled",
             IngestionErrorCategory::Partial => "Partial sync",
             IngestionErrorCategory::Storage => "Storage error",
+            IngestionErrorCategory::InvalidBaseUrl => "Invalid Jira URL",
+            IngestionErrorCategory::InvalidRequest => "Invalid Jira request",
+            IngestionErrorCategory::BadRequest => "Jira rejected the request",
+            IngestionErrorCategory::Server => "Jira server error",
+            IngestionErrorCategory::Conflict => "Write conflict",
+            IngestionErrorCategory::UnsafeWriteUnknownOutcome => "Write outcome unknown",
             IngestionErrorCategory::Unknown => "Unknown error",
         };
         if self.safe_message.is_empty() {
@@ -107,12 +133,12 @@ impl From<crate::sources::jira_errors::JiraApiError> for IngestionError {
             J::RateLimited { .. } => IngestionErrorCategory::RateLimited,
             J::Network => IngestionErrorCategory::Network,
             J::Decode => IngestionErrorCategory::Decode,
-            J::BadRequest
-            | J::Server { .. }
-            | J::InvalidBaseUrl
-            | J::InvalidRequest { .. }
-            | J::Conflict
-            | J::UnsafeWriteUnknownOutcome => IngestionErrorCategory::Unknown,
+            J::BadRequest => IngestionErrorCategory::BadRequest,
+            J::Server { .. } => IngestionErrorCategory::Server,
+            J::InvalidBaseUrl => IngestionErrorCategory::InvalidBaseUrl,
+            J::InvalidRequest { .. } => IngestionErrorCategory::InvalidRequest,
+            J::Conflict => IngestionErrorCategory::Conflict,
+            J::UnsafeWriteUnknownOutcome => IngestionErrorCategory::UnsafeWriteUnknownOutcome,
         };
         IngestionError::new(cat, "")
     }
@@ -191,37 +217,118 @@ mod tests {
 
     #[test]
     fn jira_api_error_maps_to_category() {
-        let pairs: Vec<(JiraApiError, IngestionErrorCategory)> = vec![
-            (JiraApiError::Unauthorized, IngestionErrorCategory::Authentication),
-            (JiraApiError::Forbidden, IngestionErrorCategory::Forbidden),
-            (JiraApiError::NotFound, IngestionErrorCategory::NotFound),
+        let pairs: Vec<(JiraApiError, IngestionErrorCategory, &str)> = vec![
+            (
+                JiraApiError::Unauthorized,
+                IngestionErrorCategory::Authentication,
+                "Authentication failed",
+            ),
+            (
+                JiraApiError::Forbidden,
+                IngestionErrorCategory::Forbidden,
+                "Access denied",
+            ),
+            (
+                JiraApiError::NotFound,
+                IngestionErrorCategory::NotFound,
+                "Not found",
+            ),
             (
                 JiraApiError::RateLimited {
                     retry_after_seconds: Some(3),
                 },
                 IngestionErrorCategory::RateLimited,
+                "Rate limited",
             ),
-            (JiraApiError::Network, IngestionErrorCategory::Network),
-            (JiraApiError::Decode, IngestionErrorCategory::Decode),
-            (JiraApiError::BadRequest, IngestionErrorCategory::Unknown),
+            (
+                JiraApiError::Network,
+                IngestionErrorCategory::Network,
+                "Network error",
+            ),
+            (
+                JiraApiError::Decode,
+                IngestionErrorCategory::Decode,
+                "Decode error",
+            ),
+            (
+                JiraApiError::BadRequest,
+                IngestionErrorCategory::BadRequest,
+                "Jira rejected the request",
+            ),
             (
                 JiraApiError::Server { status: 503 },
-                IngestionErrorCategory::Unknown,
+                IngestionErrorCategory::Server,
+                "Jira server error",
             ),
-            (JiraApiError::InvalidBaseUrl, IngestionErrorCategory::Unknown),
+            (
+                JiraApiError::InvalidBaseUrl,
+                IngestionErrorCategory::InvalidBaseUrl,
+                "Invalid Jira URL",
+            ),
             (
                 JiraApiError::InvalidRequest {
-                    message: "x".into(),
+                    message: "Authorization: Bearer secret-token raw response body".into(),
                 },
-                IngestionErrorCategory::Unknown,
+                IngestionErrorCategory::InvalidRequest,
+                "Invalid Jira request",
+            ),
+            (
+                JiraApiError::Conflict,
+                IngestionErrorCategory::Conflict,
+                "Write conflict",
+            ),
+            (
+                JiraApiError::UnsafeWriteUnknownOutcome,
+                IngestionErrorCategory::UnsafeWriteUnknownOutcome,
+                "Write outcome unknown",
             ),
         ];
-        for (input, expected) in pairs {
+        for (input, expected_category, expected_label) in pairs {
             let ie: IngestionError = input.into();
-            assert_eq!(ie.category(), expected, "mismatch for category");
-            // And display must never carry a token.
+            assert_eq!(ie.category(), expected_category, "mismatch for category");
             let rendered = format!("{ie}");
-            assert!(!rendered.contains("secret"));
+            assert_eq!(rendered, expected_label);
+            assert!(!rendered.contains("secret-token"), "rendered={rendered}");
+            assert!(
+                !rendered.to_ascii_lowercase().contains("authorization"),
+                "rendered={rendered}"
+            );
+            assert!(
+                !rendered.to_ascii_lowercase().contains("raw response body"),
+                "rendered={rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn safe_category_hint_recognizes_jira_specific_categories() {
+        let cases = vec![
+            ("invalid_base_url", IngestionErrorCategory::InvalidBaseUrl),
+            ("invalid_request", IngestionErrorCategory::InvalidRequest),
+            ("bad_request", IngestionErrorCategory::BadRequest),
+            ("server", IngestionErrorCategory::Server),
+            ("conflict", IngestionErrorCategory::Conflict),
+            (
+                "unsafe_write_unknown_outcome",
+                IngestionErrorCategory::UnsafeWriteUnknownOutcome,
+            ),
+        ];
+
+        for (hint, expected) in cases {
+            let err = IngestionError::safe(
+                hint,
+                "Authorization: Bearer secret-token raw response body",
+            );
+            assert_eq!(err.category(), expected, "hint={hint}");
+            let rendered = format!("{err}");
+            assert!(
+                !rendered.contains("secret-token"),
+                "safe display leaked token for hint {hint}: {rendered}"
+            );
+            assert!(
+                !rendered.to_ascii_lowercase().contains("authorization"),
+                "safe display leaked Authorization for hint {hint}: {rendered}"
+            );
         }
     }
 

@@ -128,6 +128,34 @@ describe("SourcesCategory", () => {
     expect(screen.getByText(/Syncing issues/i)).toBeInTheDocument();
   });
 
+  it("renders backend Jira issue sync error summaries on the source row", async () => {
+    vi.mocked(commands.sourceConfigGet).mockResolvedValue({
+      status: "ok",
+      data: { version: 1, sources: [JIRA_SOURCE] },
+    });
+    vi.mocked(commands.jiraIssueIngestionProgress).mockResolvedValue({
+      status: "ok",
+      data: {
+        run_id: "run_2",
+        status: "partial",
+        phase: "searching",
+        saved_issues: 48,
+        total_issues: 63,
+        current_page: 3,
+        total_pages: 4,
+        message: "Partial sync",
+        last_successful_issue_sync_at: null,
+        error_summary: "Jira server error",
+      },
+    });
+
+    render(<SourcesCategory />);
+
+    expect(await screen.findByText(/Status: Partial sync/i)).toBeInTheDocument();
+    expect(screen.getByText("Error: Jira server error")).toBeInTheDocument();
+    expect(screen.queryByText(/Unknown error/i)).not.toBeInTheDocument();
+  });
+
   it("runs and cancels sync from the source row", async () => {
     vi.mocked(commands.sourceConfigGet).mockResolvedValue({
       status: "ok",
