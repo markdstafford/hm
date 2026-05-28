@@ -56,6 +56,10 @@ export const commands = {
 	collectionViewSave: (view: CollectionViewSaveInput) => typedError<CollectionViewRecord, string>(__TAURI_INVOKE("collection_view_save", { view })),
 	collectionViewDelete: (id: string) => typedError<null, string>(__TAURI_INVOKE("collection_view_delete", { id })),
 	collectionViewsSeedDefaults: (input: CollectionViewSeedInput) => typedError<CollectionViewRecord[], string>(__TAURI_INVOKE("collection_views_seed_defaults", { input })),
+	jiraIssueStatusTimeline: (issueId: string) => typedError<JiraIssueStatusTransition[], string>(__TAURI_INVOKE("jira_issue_status_timeline", { issueId })),
+	issueSnapshotsQuery: (filter: IssueSnapshotQuery) => typedError<IssueSnapshotListItem[], string>(__TAURI_INVOKE("issue_snapshots_query", { filter })),
+	issueHistoryRetentionGet: () => typedError<IssueHistoryRetentionConfig, string>(__TAURI_INVOKE("issue_history_retention_get")),
+	issueHistoryRetentionSave: (config: IssueHistoryRetentionConfig) => typedError<null, string>(__TAURI_INVOKE("issue_history_retention_save", { config })),
 	auditLogList: (filter: AuditLogListFilter) => typedError<AuditLogEntry[], string>(__TAURI_INVOKE("audit_log_list", { filter })),
 	auditLogMarkReverted: (input: AuditLogMarkRevertedInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("audit_log_mark_reverted", { input })),
 	jiraUpdateTitle: (input: JiraUpdateTitleInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_update_title", { input })),
@@ -180,6 +184,40 @@ export type ConnectionTestSummary = {
 
 export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
 
+export type IssueHistoryRetentionConfig = {
+	version: number,
+	daily_days: number,
+	compact_to_weekly_after_days: number,
+	weekly_anchor: string,
+};
+
+export type IssueSnapshotListItem = {
+	issue_id: string,
+	snapshot_date: string,
+	key: string | null,
+	title: string,
+	status_name: string | null,
+	state: string,
+	assignee_display_name: string | null,
+	priority_name: string | null,
+	project_key: string | null,
+};
+
+export type IssueSnapshotQuery = {
+	snapshot_date: string,
+	source_id: string | null,
+	project_key: string | null,
+	status_name: string | null,
+	state: string | null,
+	assignee_person_id: string | null,
+	priority_name: string | null,
+	label: string | null,
+	sprint_name: string | null,
+	product_name: string | null,
+	customer_name: string | null,
+	limit: number | null,
+};
+
 export type JiraAddCommentInput = {
 	common: MutationCommonInput,
 	body: string,
@@ -261,6 +299,16 @@ export type JiraIssueListItem = {
 	project_key: string | null,
 	priority_name: string | null,
 	labels: string[],
+};
+
+export type JiraIssueStatusTransition = {
+	event_id: string,
+	issue_id: string,
+	occurred_at: string,
+	actor_display_name: string | null,
+	from_status: string | null,
+	to_status: string | null,
+	complete: boolean,
 };
 
 export type JiraLinkAsDuplicateInput = {
