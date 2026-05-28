@@ -606,6 +606,189 @@ pub fn replay_missing_snapshots(
     })
 }
 
+// ── Retention compaction ─────────────────────────────────────────────────────
+
+/// Result returned by `compact_snapshot_retention`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RetentionCompactionResult {
+    pub kept_daily_rows: usize,
+    pub compacted_weekly_rows: usize,
+    pub deleted_daily_rows: usize,
+    pub job_id: String,
+}
+
+/// Return true if the ISO date string `"YYYY-MM-DD"` falls on a Monday.
+/// Uses Tomohiko Sakamoto's algorithm: 0=Sunday, 1=Monday, …, 6=Saturday.
+fn is_monday(date: &str) -> bool {
+    let parts: Vec<&str> = date.splitn(3, '-').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    let y: i32 = parts[0].parse().unwrap_or(0);
+    let m: u32 = parts[1].parse().unwrap_or(0);
+    let d: u32 = parts[2].parse().unwrap_or(0);
+    if m == 0 || d == 0 {
+        return false;
+    }
+    let t = [0i32, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let y = if m < 3 { y - 1 } else { y };
+    let dow = (y + y / 4 - y / 100 + y / 400 + t[(m as usize) - 1] + d as i32) % 7;
+    dow == 1 // 1 = Monday
+}
+
+/// Subtract `n` days from a `YYYY-MM-DD` string.
+fn prev_date_n(date: &str, n: u32) -> String {
+    let mut current = date.to_string();
+    for _ in 0..n {
+        current = prev_date(&current);
+    }
+    current
+}
+
+/// Decrement a `YYYY-MM-DD` string by one day.
+fn prev_date(date: &str) -> String {
+    let parts: Vec<&str> = date.split('-').collect();
+    if parts.len() != 3 {
+        return date.to_string();
+    }
+    let Ok(y) = parts[0].parse::<u32>() else {
+        return date.to_string();
+    };
+    let Ok(m) = parts[1].parse::<u32>() else {
+        return date.to_string();
+    };
+    let Ok(d) = parts[2].parse::<u32>() else {
+        return date.to_string();
+    };
+
+    if d > 1 {
+        format!("{y:04}-{m:02}-{:02}", d - 1)
+    } else if m > 1 {
+        let prev_m = m - 1;
+        let prev_d = days_in_month(y, prev_m);
+        format!("{y:04}-{prev_m:02}-{prev_d:02}")
+    } else {
+        let prev_y = y - 1;
+        format!("{prev_y:04}-12-31")
+    }
+}
+
+use crate::issues::history::IssueHistoryRetentionConfig;
+
+/// Compact old snapshot rows for `source_system_id`:
+/// - Keep rows in the recent daily window (last `config.daily_days` days) as-is.
+/// - For older rows: keep Monday rows (updating `snapshot_source` to
+///   `'compacted_weekly'`) and delete all other non-Monday rows.
+/// - Never touches `issue_events`.
+pub fn compact_snapshot_retention(
+    conn: &Connection,
+    source_system_id: &str,
+    current_local_date: &str,
+    config: &IssueHistoryRetentionConfig,
+    now_utc: &str,
+) -> Result<RetentionCompactionResult, IssueHistoryError> {
+    // 1. Create a retention_compaction job row.
+    let job_id = crate::issues::ids::stable_id(
+        "retjob",
+        &[source_system_id, current_local_date, now_utc],
+    );
+    let job_input = crate::issues::history::IssueSnapshotJobStartInput {
+        id: job_id.clone(),
+        source_system_id: Some(source_system_id.to_string()),
+        job_kind: "retention_compaction".to_string(),
+        started_at: now_utc.to_string(),
+        target_start_date: None,
+        target_end_date: Some(current_local_date.to_string()),
+        progress_json: serde_json::json!({ "status": "started" }).to_string(),
+    };
+    crate::issues::history::start_snapshot_job(conn, &job_input)
+        .map_err(IssueHistoryError::Storage)?;
+
+    // 2. Determine the daily cutoff date: current_local_date - daily_days.
+    let cutoff_date = prev_date_n(current_local_date, config.daily_days);
+
+    // 3a. Count rows in the daily window (snapshot_date > cutoff_date).
+    let kept_daily_rows: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM issue_snapshots
+             WHERE source_system_id = ?1 AND snapshot_date > ?2",
+            params![source_system_id, cutoff_date],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(IssueHistoryError::Storage)? as usize;
+
+    // 3b. Collect old snapshot dates (snapshot_date <= cutoff_date).
+    let old_dates: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT snapshot_date FROM issue_snapshots
+                 WHERE source_system_id = ?1 AND snapshot_date <= ?2
+                 ORDER BY snapshot_date ASC",
+            )
+            .map_err(IssueHistoryError::Storage)?;
+        let rows = stmt
+            .query_map(params![source_system_id, cutoff_date], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(IssueHistoryError::Storage)?;
+        rows.collect::<rusqlite::Result<Vec<String>>>()
+            .map_err(IssueHistoryError::Storage)?
+    };
+
+    let mut compacted_weekly_rows: usize = 0;
+    let mut deleted_daily_rows: usize = 0;
+
+    for date in &old_dates {
+        if is_monday(date) {
+            // Keep Monday rows; mark them compacted_weekly.
+            let updated = conn
+                .execute(
+                    "UPDATE issue_snapshots
+                     SET snapshot_source = 'compacted_weekly'
+                     WHERE source_system_id = ?1 AND snapshot_date = ?2
+                       AND snapshot_source != 'compacted_weekly'",
+                    params![source_system_id, date],
+                )
+                .map_err(IssueHistoryError::Storage)?;
+            compacted_weekly_rows += updated as usize;
+        } else {
+            // Delete non-Monday old rows.
+            let deleted = conn
+                .execute(
+                    "DELETE FROM issue_snapshots
+                     WHERE source_system_id = ?1 AND snapshot_date = ?2",
+                    params![source_system_id, date],
+                )
+                .map_err(IssueHistoryError::Storage)?;
+            deleted_daily_rows += deleted as usize;
+        }
+    }
+
+    // 4. Update job with final progress.
+    let final_progress = serde_json::json!({
+        "kept_daily_rows": kept_daily_rows,
+        "compacted_weekly_rows": compacted_weekly_rows,
+        "deleted_daily_rows": deleted_daily_rows,
+    })
+    .to_string();
+    crate::issues::history::finish_snapshot_job(
+        conn,
+        &job_id,
+        "succeeded",
+        now_utc,
+        &final_progress,
+        None,
+    )
+    .map_err(IssueHistoryError::Storage)?;
+
+    Ok(RetentionCompactionResult {
+        kept_daily_rows,
+        compacted_weekly_rows,
+        deleted_daily_rows,
+        job_id,
+    })
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1017,5 +1200,143 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1, "re-generating the same date should upsert, not duplicate");
+    }
+
+    // ── Retention compaction helpers ──────────────────────────────────────────
+
+    /// Seed an in-memory DB with one source system, one work_item, one jira_issue,
+    /// one issue_event, and one `issue_snapshots` row per day from `start_date` to
+    /// `end_date` (inclusive).
+    fn seeded_snapshot_conn_with_many_dates(
+        source_system_id: &str,
+        issue_id: &str,
+        start_date: &str,
+        end_date: &str,
+    ) -> Connection {
+        let conn = crate::db::open_in_memory().unwrap();
+
+        // Source system
+        conn.execute(
+            "INSERT INTO source_systems (id, kind, deployment_kind, display_name, base_url, config_source_id, created_at, updated_at)
+             VALUES (?1, 'jira', 'datacenter', 'Test Jira', 'https://jira.example.com', 'primary', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            rusqlite::params![source_system_id],
+        ).unwrap();
+
+        // Work item
+        conn.execute(
+            "INSERT INTO work_items (id, source_system_id, source_kind, upstream_id, key, title, state, status_name, raw_updated_hash, last_seen_at, created_at, updated_at)
+             VALUES (?1, ?2, 'jira_issue', 'AMP-1043', 'AMP-1043', 'Fix the widget', 'open', 'To Do', 'abc123', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            rusqlite::params![issue_id, source_system_id],
+        ).unwrap();
+
+        // Jira issue
+        conn.execute(
+            "INSERT INTO jira_issues (work_item_id, jira_id, jira_key, raw_fields_json, raw_issue_json, fields_hash, ingested_at)
+             VALUES (?1, '10043', 'AMP-1043', '{}', '{}', 'hash1', '2025-01-01T00:00:00Z')",
+            rusqlite::params![issue_id],
+        ).unwrap();
+
+        // One issue_event
+        let event = IssueEventInput {
+            id: "iev_retention_1".to_string(),
+            source_system_id: source_system_id.to_string(),
+            issue_id: issue_id.to_string(),
+            entity_type: "jira_issue".to_string(),
+            entity_id: issue_id.to_string(),
+            source_kind: "jira".to_string(),
+            event_type: "status_changed".to_string(),
+            upstream_event_id: Some("ev1".to_string()),
+            upstream_item_id: Some("ev1_0".to_string()),
+            field_id: None,
+            field_name: Some("status".to_string()),
+            actor_identity_id: None,
+            actor_display_name: None,
+            occurred_at: format!("{start_date}T10:00:00Z"),
+            from_string: Some("To Do".to_string()),
+            to_string: Some("In Progress".to_string()),
+            from_json: None,
+            to_json: None,
+            payload_json: "{}".to_string(),
+            ingested_at: format!("{start_date}T12:00:00Z"),
+        };
+        upsert_issue_event(&conn, &event).unwrap();
+
+        // Insert one snapshot per day for the full range
+        let dates = dates_in_range(start_date, end_date);
+        for date in &dates {
+            conn.execute(
+                "INSERT OR REPLACE INTO issue_snapshots (
+                    issue_id, snapshot_date, source_system_id, source_kind,
+                    key, title, state, status_name, labels_json, components_json,
+                    fix_versions_json, sprint_names_json, product_names_json,
+                    assigned_team_names_json, snapshot_source, generated_at
+                 ) VALUES (
+                    ?1, ?2, ?3, 'jira_issue',
+                    'AMP-1043', 'Fix the widget', 'open', 'To Do', '[]', '[]',
+                    '[]', '[]', '[]', '[]', 'generated', ?4
+                 )",
+                rusqlite::params![issue_id, date, source_system_id, format!("{date}T12:00:00Z")],
+            ).unwrap();
+        }
+
+        conn
+    }
+
+    #[test]
+    fn retention_keeps_recent_daily_and_compacts_old_rows_to_mondays() {
+        let conn = seeded_snapshot_conn_with_many_dates(
+            "srcsys_jira_1",
+            "wi_amp_1043",
+            "2025-01-01",
+            "2026-05-28",
+        );
+
+        let config = crate::issues::history::IssueHistoryRetentionConfig {
+            version: 1,
+            daily_days: 30,
+            compact_to_weekly_after_days: 365,
+            weekly_anchor: "monday".to_string(),
+        };
+
+        let result = compact_snapshot_retention(
+            &conn,
+            "srcsys_jira_1",
+            "2026-05-28",
+            &config,
+            "2026-05-28T12:00:00Z",
+        )
+        .unwrap();
+
+        // Recent 30 days (2026-04-28..2026-05-28) are kept as-is
+        assert!(result.kept_daily_rows > 0, "should have kept daily rows");
+        // Old rows were compacted (deleted non-Monday rows outside daily window)
+        assert!(result.deleted_daily_rows > 0, "should have deleted old non-Monday rows");
+        // issue_events are untouched
+        let event_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM issue_events", [], |row| row.get(0))
+            .unwrap();
+        assert!(event_count > 0, "issue_events should not be touched");
+    }
+
+    #[test]
+    fn is_monday_identifies_mondays_correctly() {
+        // 2026-05-25 is a Monday
+        assert!(is_monday("2026-05-25"));
+        // 2026-05-26 is a Tuesday
+        assert!(!is_monday("2026-05-26"));
+        // 2026-05-28 is a Thursday
+        assert!(!is_monday("2026-05-28"));
+        // 2025-01-06 is a Monday
+        assert!(is_monday("2025-01-06"));
+    }
+
+    #[test]
+    fn prev_date_n_subtracts_days_correctly() {
+        assert_eq!(prev_date_n("2026-05-28", 0), "2026-05-28");
+        assert_eq!(prev_date_n("2026-05-28", 1), "2026-05-27");
+        assert_eq!(prev_date_n("2026-03-01", 1), "2026-02-28");
+        assert_eq!(prev_date_n("2024-03-01", 1), "2024-02-29"); // leap year
+        assert_eq!(prev_date_n("2026-01-01", 1), "2025-12-31");
+        assert_eq!(prev_date_n("2026-05-28", 30), "2026-04-28");
     }
 }

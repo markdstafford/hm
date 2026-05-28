@@ -2000,6 +2000,25 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             Ok(())
         })?;
 
+        // ── Retention compaction ────────────────────────────────────────
+        db.with_conn(|conn| {
+            let config = crate::issues::history::load_retention_config(conn)
+                .unwrap_or_default();
+            match crate::issues::snapshots::compact_snapshot_retention(
+                conn,
+                &source_system_id_owned,
+                &replay_date,
+                &config,
+                &now_owned,
+            ) {
+                Ok(_result) => {}
+                Err(e) => {
+                    eprintln!("[snapshots] compact_snapshot_retention failed: {e}");
+                }
+            }
+            Ok(())
+        })?;
+
         Ok(JiraIssueIngestionSummary {
             run_id,
             status: status.to_string(),
