@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeBinding, eventMatchesBinding, isFormFieldTarget, formatBinding } from "./keys";
+import { normalizeBinding, eventMatchesBinding, isFormFieldTarget, isButtonTarget, formatBinding } from "./keys";
 
 describe("normalizeBinding", () => {
   it("lowercases and sorts modifiers", () => {
@@ -44,6 +44,32 @@ describe("isFormFieldTarget", () => {
   it("returns false for non-form elements", () => {
     expect(isFormFieldTarget(document.createElement("button"))).toBe(false);
     expect(isFormFieldTarget(null)).toBe(false);
+  });
+});
+
+describe("isButtonTarget", () => {
+  it("returns true for BUTTON elements", () => {
+    expect(isButtonTarget(document.createElement("button"))).toBe(true);
+  });
+  it("returns true for role=checkbox", () => {
+    const el = document.createElement("span");
+    el.setAttribute("role", "checkbox");
+    expect(isButtonTarget(el)).toBe(true);
+  });
+  it("returns true for role=button", () => {
+    const el = document.createElement("div");
+    el.setAttribute("role", "button");
+    expect(isButtonTarget(el)).toBe(true);
+  });
+  it("returns true for role=radio", () => {
+    const el = document.createElement("div");
+    el.setAttribute("role", "radio");
+    expect(isButtonTarget(el)).toBe(true);
+  });
+  it("returns false for non-button elements", () => {
+    expect(isButtonTarget(document.createElement("div"))).toBe(false);
+    expect(isButtonTarget(document.createElement("span"))).toBe(false);
+    expect(isButtonTarget(null)).toBe(false);
   });
 });
 

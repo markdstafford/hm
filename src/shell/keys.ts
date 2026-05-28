@@ -57,6 +57,14 @@ export function isFormFieldTarget(target: EventTarget | null): boolean {
   return false;
 }
 
+/** Returns true when the target is an interactive control that natively activates on Space (buttons, checkboxes, radios). */
+export function isButtonTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.tagName === "BUTTON") return true;
+  const role = target.getAttribute("role");
+  return role === "button" || role === "checkbox" || role === "radio";
+}
+
 const MAC_GLYPHS: Record<Mod, string> = {
   meta: "⌘",
   ctrl: "⌃",

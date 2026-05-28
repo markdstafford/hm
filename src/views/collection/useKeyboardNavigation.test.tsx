@@ -32,6 +32,7 @@ function Harness({
   onMoveNext = vi.fn(),
   onOpenPreview = vi.fn(),
   onClosePreview = vi.fn(),
+  onToggleSelection,
 }: Partial<Parameters<typeof useKeyboardNavigation>[0]>) {
   useKeyboardNavigation({
     enabled,
@@ -44,12 +45,15 @@ function Harness({
     onMoveNext,
     onOpenPreview,
     onClosePreview,
+    onToggleSelection,
   });
   return (
     <div>
       <input data-testid="text-input" />
       <textarea data-testid="textarea-input" />
       <div data-testid="content-editable" contentEditable suppressContentEditableWarning>editable</div>
+      <button type="button" data-testid="row-body-button">Row body</button>
+      <button type="button" role="checkbox" data-testid="row-checkbox" aria-checked="false">Select item</button>
     </div>
   );
 }
@@ -176,6 +180,51 @@ describe("useKeyboardNavigation", () => {
     render(<Harness previewOpen={false} onClosePreview={onClosePreview} />);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClosePreview).not.toHaveBeenCalled();
+  });
+
+  // ── Space ────────────────────────────────────────────────────────────
+  it("Space calls onToggleSelection when a row is selected", () => {
+    const onToggleSelection = vi.fn();
+    render(<Harness selectedIndex={1} onToggleSelection={onToggleSelection} />);
+    fireEvent.keyDown(window, { key: " " });
+    expect(onToggleSelection).toHaveBeenCalledTimes(1);
+  });
+
+  it("Space is a no-op when no row is selected", () => {
+    const onToggleSelection = vi.fn();
+    render(<Harness selectedIndex={-1} onToggleSelection={onToggleSelection} />);
+    fireEvent.keyDown(window, { key: " " });
+    expect(onToggleSelection).not.toHaveBeenCalled();
+  });
+
+  it("Space is a no-op when onToggleSelection is not provided", () => {
+    render(<Harness selectedIndex={1} />);
+    // Should not throw; default scrolling prevention is irrelevant in test env
+    fireEvent.keyDown(window, { key: " " });
+  });
+
+  it("Space is suppressed in form fields", () => {
+    const onToggleSelection = vi.fn();
+    render(<Harness selectedIndex={1} onToggleSelection={onToggleSelection} />);
+    const input = screen.getByTestId("text-input");
+    fireEvent.keyDown(input, { key: " " });
+    expect(onToggleSelection).not.toHaveBeenCalled();
+  });
+
+  it("Space does not call onToggleSelection when focus is on a row body button", () => {
+    const onToggleSelection = vi.fn();
+    render(<Harness selectedIndex={1} onToggleSelection={onToggleSelection} />);
+    const rowBody = screen.getByTestId("row-body-button");
+    fireEvent.keyDown(rowBody, { key: " " });
+    expect(onToggleSelection).not.toHaveBeenCalled();
+  });
+
+  it("Space does not call onToggleSelection when focus is on a row checkbox button", () => {
+    const onToggleSelection = vi.fn();
+    render(<Harness selectedIndex={1} onToggleSelection={onToggleSelection} />);
+    const checkbox = screen.getByTestId("row-checkbox");
+    fireEvent.keyDown(checkbox, { key: " " });
+    expect(onToggleSelection).not.toHaveBeenCalled();
   });
 
   // ── Enabled gate ─────────────────────────────────────────────────────

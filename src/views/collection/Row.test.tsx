@@ -242,6 +242,62 @@ describe("Row", () => {
     expect(container.firstChild).not.toHaveClass("py-2");
     expect(container.firstChild).not.toHaveClass("py-1.5");
   });
+
+  it("renders an interactive checkbox when selection props are supplied", () => {
+    render(
+      <Row
+        item={item}
+        entity={entity}
+        properties={entity.defaultProperties}
+        selectedId={null}
+        selection={{ selected: true, onToggle: vi.fn(), label: "Select Alpha" }}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Select Alpha" });
+    expect(checkbox).toHaveAttribute("data-state", "checked");
+  });
+
+  it("calls selection.onToggle without calling onSelect when the checkbox is clicked", () => {
+    const onToggle = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <Row
+        item={item}
+        entity={entity}
+        properties={entity.defaultProperties}
+        selectedId={null}
+        selection={{ selected: false, onToggle, label: "Select Alpha" }}
+        onSelect={onSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("keeps row-body clicks separate from selection toggles", () => {
+    const onToggle = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <Row
+        item={item}
+        entity={entity}
+        properties={entity.defaultProperties}
+        selectedId={null}
+        selection={{ selected: false, onToggle, label: "Select Alpha" }}
+        onSelect={onSelect}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open item-1/i }));
+
+    expect(onSelect).toHaveBeenCalledWith(item);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
 });
 
 describe("Row property layout", () => {

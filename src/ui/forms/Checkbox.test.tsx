@@ -12,4 +12,11 @@ describe("Checkbox", () => {
     const { container } = render(<Checkbox label="Agree" />);
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it("can visually hide the label while preserving the accessible name", () => {
+    render(<Checkbox label="Select AMP-1" hideLabelText />);
+
+    expect(screen.getByRole("checkbox", { name: "Select AMP-1" })).toBeInTheDocument();
+    expect(screen.getByText("Select AMP-1")).toHaveClass("sr-only");
+  });
 });

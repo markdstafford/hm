@@ -48,6 +48,11 @@ import { InlineCode } from "../ui/text/InlineCode";
 import { CodeBlock } from "../ui/text/CodeBlock";
 import { Markdown } from "../ui/text/Markdown";
 import { Separator } from "../ui/layout/Separator";
+import { BulkActionBar } from "../views/collection/BulkActionBar";
+import { ConfirmActionProvider, useConfirmAction } from "../views/collection/ConfirmAction";
+import { UndoToastProvider, useUndoToast } from "../views/collection/UndoToast";
+import { runCollectionAction } from "../views/collection/actions/runner";
+import type { CollectionActionDefinition } from "../views/collection/actions/types";
 
 function Card({ caption, children }: { caption: string; children: ReactNode }) {
   return (
@@ -79,18 +84,71 @@ function ColorSwatch({ name, varName }: { name: string; varName: string }) {
 function ToastDemo() {
   const [open, setOpen] = useState(false);
   return (
-    <Toast.Provider duration={2500}>
+    <>
       <Button onClick={() => setOpen(true)}>Show toast</Button>
       <Toast.Root open={open} onOpenChange={setOpen}>
         <Toast.Title>Saved</Toast.Title>
         <Toast.Description>Your changes are persisted.</Toast.Description>
       </Toast.Root>
-      <Toast.Viewport />
-    </Toast.Provider>
+    </>
   );
 }
 
+type FakeWriteItem = { id: string; title: string; status: "open" | "approved" };
+
 export function Showcase() {
+  return (
+    <ConfirmActionProvider>
+      <UndoToastProvider>
+        <ShowcaseContent />
+      </UndoToastProvider>
+    </ConfirmActionProvider>
+  );
+}
+
+function ShowcaseContent() {
+  const confirmCollectionAction = useConfirmAction();
+  const undoToast = useUndoToast();
+  const [confirmResult, setConfirmResult] = useState("No confirmation run yet");
+  const [undoStatus, setUndoStatus] = useState("Undo has not been clicked");
+  const [fakeItems, setFakeItems] = useState<FakeWriteItem[]>([
+    { id: "AMP-101", title: "Duplicate auth bug", status: "open" },
+    { id: "AMP-102", title: "Stale settings task", status: "open" },
+    { id: "AMP-103", title: "Thin report enrichment", status: "open" },
+  ]);
+  const [runnerStatus, setRunnerStatus] = useState("Fake action has not run");
+
+  const fakeCollectionAction: CollectionActionDefinition<FakeWriteItem> = {
+    id: "showcase-approve",
+    label: (count) => `Approve ${count}`,
+    slot: "primary",
+    kind: "primary",
+    confirm: ({ count }) => ({
+      title: `Approve ${count} fake items?`,
+      description: "This updates in-memory showcase state only and does not call Jira.",
+      confirmLabel: "Approve",
+      kind: "primary",
+    }),
+    toast: ({ count }) => ({
+      message: `Approved ${count} fake items`,
+      description: "In-memory showcase state changed; no source system was contacted.",
+      reversible: true,
+    }),
+    reversible: true,
+    getBeforeState: (item) => ({ status: item.status }),
+    apply: async ({ itemId }) => {
+      setFakeItems((current) =>
+        current.map((item) => (item.id === itemId ? { ...item, status: "approved" } : item)),
+      );
+    },
+    reverse: async ({ selectedIds }) => {
+      setFakeItems((current) =>
+        current.map((item) => (selectedIds.includes(item.id) ? { ...item, status: "open" } : item)),
+      );
+      setRunnerStatus("Fake action was undone");
+    },
+  };
+
   const [breakpointOverlay, setBreakpointOverlay] = useState(false);
   const [multi, setMulti] = useState<string[]>([]);
   const [emptyDate, setEmptyDate] = useState<string | null>(null);
@@ -414,6 +472,100 @@ export function Showcase() {
       <Section title="Layout">
         <Card caption="Separator"><Separator /></Card>
         <Card caption="Separator (vertical)"><div className="flex items-center gap-2 h-6"><span>A</span><Separator orientation="vertical" /><span>B</span></div></Card>
+      </Section>
+
+      <Section title="Collection write">
+        <Card caption="Bulk action bar">
+          <BulkActionBar
+            count={3}
+            slots={{
+              primary: <Button variant="primary">Approve 3</Button>,
+              conditionalPrimary: <Button>Approve high 2</Button>,
+              destructive: <Button variant="destructive">Reject</Button>,
+            }}
+            onClear={() => setRunnerStatus("Showcase bulk selection cleared")}
+          />
+          <span className="text-sm text-subtext">
+            Floating mock bar uses fixed positioning above the footer.
+          </span>
+        </Card>
+
+        <Card caption="Confirm helper">
+          <Button
+            aria-label="Open collection confirm"
+            onClick={async () => {
+              const confirmed = await confirmCollectionAction({
+                title: "Approve 2 fake items?",
+                description: "This demonstrates the promise-based AlertDialog helper.",
+                confirmLabel: "Approve",
+                kind: "primary",
+              });
+              setConfirmResult(confirmed ? "Confirmation accepted" : "Confirmation cancelled");
+            }}
+          >
+            Open collection confirm
+          </Button>
+          <span className="text-sm text-subtext">{confirmResult}</span>
+        </Card>
+
+        <Card caption="Undo toast">
+          <Button
+            aria-label="Show reversible undo toast"
+            onClick={() =>
+              undoToast.show({
+                message: "Approved 1 fake item",
+                description: "Click Undo within 8 seconds to update showcase state.",
+                reversible: true,
+                undo: () => setUndoStatus("Undo clicked"),
+              })
+            }
+          >
+            Show reversible undo toast
+          </Button>
+          <Button
+            onClick={() =>
+              undoToast.show({
+                message: "Non-reversible fake action",
+                description: "This toast intentionally omits Undo.",
+                reversible: false,
+              })
+            }
+          >
+            Show non-reversible toast
+          </Button>
+          <span className="text-sm text-subtext">{undoStatus}</span>
+        </Card>
+
+        <Card caption="Action runner">
+          <Button
+            aria-label="Run fake collection action"
+            variant="primary"
+            onClick={async () => {
+              const result = await runCollectionAction({
+                selectedIds: new Set(["AMP-101", "AMP-102"]),
+                items: fakeItems,
+                getItemId: (item) => item.id,
+                action: fakeCollectionAction,
+                confirm: confirmCollectionAction,
+                toast: undoToast.show,
+                clearSelection: () => setRunnerStatus("Fake selection cleared after success"),
+                sourceFeature: "showcase-collection-write",
+                createBatchId: () => "showcase-batch",
+              });
+              if (result.status === "applied") setRunnerStatus(`Applied ${result.count} fake items in ${result.batchId}`);
+              if (result.status === "cancelled") setRunnerStatus("Fake action cancelled");
+              if (result.status === "error") setRunnerStatus(result.error);
+            }}
+          >
+            Run fake collection action
+          </Button>
+          <div className="flex flex-col gap-1 text-sm text-subtext">
+            <span>{runnerStatus}</span>
+            {fakeItems.map((item) => (
+              <span key={item.id}>{item.id}: {item.status}</span>
+            ))}
+          </div>
+        </Card>
       </Section>
     </div>
   );

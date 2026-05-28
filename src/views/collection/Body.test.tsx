@@ -268,4 +268,64 @@ describe("Body", () => {
     expect(screen.getByRole("button", { name: /open b/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /collapse/i })).not.toBeInTheDocument();
   });
+
+  it("threads selection props to flat rows", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+
+    render(
+      <Body
+        items={[{ id: "a", name: "Alpha", rank: 2 }]}
+        entity={entity}
+        selectedId={null}
+        selection={{
+          selectedIds: new Set(["a"]),
+          onToggle,
+          getLabel: (item) => `Select ${item.name}`,
+        }}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Select Alpha" });
+    expect(checkbox).toHaveAttribute("data-state", "checked");
+
+    await user.click(checkbox);
+
+    expect(onToggle).toHaveBeenCalledWith({ id: "a", name: "Alpha", rank: 2 });
+  });
+
+  it("threads selection props to grouped rows", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    const groupedEntity = {
+      ...entity,
+      groupableProperties: [
+        {
+          property: "name" as Prop,
+          bucketKeyFor: () => "a",
+          bucketOrder: () => [{ key: "a", label: "A names" }],
+        },
+      ],
+    };
+
+    render(
+      <Body
+        items={[{ id: "a", name: "Alpha", rank: 2 }]}
+        entity={groupedEntity}
+        group={{ property: "name", hideEmptyGroups: true }}
+        selectedId={null}
+        selection={{
+          selectedIds: new Set<string>(),
+          onToggle,
+          getLabel: (item) => `Select ${item.name}`,
+        }}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+
+    expect(onToggle).toHaveBeenCalledWith({ id: "a", name: "Alpha", rank: 2 });
+  });
 });

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { isFormFieldTarget } from "../../shell/keys";
+import { isFormFieldTarget, isButtonTarget } from "../../shell/keys";
 
 export type UseKeyboardNavigationArgs = {
   /** False when the collection viewer is not the focused surface (settings open, etc.). */
@@ -13,6 +13,8 @@ export type UseKeyboardNavigationArgs = {
   onMoveNext: () => void;
   onOpenPreview: () => void;
   onClosePreview: () => void;
+  /** Called when Space is pressed on a selected row. Omit to disable Space-to-toggle. */
+  onToggleSelection?: () => void;
 };
 
 /**
@@ -38,6 +40,7 @@ export function useKeyboardNavigation({
   onMoveNext,
   onOpenPreview,
   onClosePreview,
+  onToggleSelection,
 }: UseKeyboardNavigationArgs): void {
   useEffect(() => {
     if (!enabled || total <= 0) return;
@@ -87,6 +90,14 @@ export function useKeyboardNavigation({
         onClosePreview();
         return;
       }
+      if (k === " ") {
+        if (selectedIndex < 0 || !onToggleSelection) return;
+        // Let buttons and checkbox/radio controls handle Space natively.
+        if (isButtonTarget(event.target)) return;
+        event.preventDefault();
+        onToggleSelection();
+        return;
+      }
     }
 
     window.addEventListener("keydown", onKeyDown);
@@ -102,5 +113,6 @@ export function useKeyboardNavigation({
     onMoveNext,
     onOpenPreview,
     onClosePreview,
+    onToggleSelection,
   ]);
 }

@@ -164,7 +164,7 @@ For any interactive component with accessibility requirements (focus management,
 | `Select` | `@radix-ui/react-select` | Single-select dropdown. |
 | `MultiSelect` | `Popover` + checkbox list | Multi-value selection. |
 | `DatePicker` | `Popover` + native buttons | Controlled absolute date input. Accepts and emits date-only ISO strings (`YYYY-MM-DD`) or `null`; renders a TextField-like button trigger and an owned token-styled month calendar. |
-| `Checkbox` | `@radix-ui/react-checkbox` | Boolean toggle in lists. |
+| `Checkbox` | `@radix-ui/react-checkbox` | Boolean toggle in lists. Accepts `hideLabelText?: boolean` — set `true` to visually hide the label while keeping it accessible to screen readers (`sr-only`). Use for collection row selection checkboxes where the row itself already provides visual identity. |
 | `Switch` | `@radix-ui/react-switch` | Inline boolean toggle. Accepts `hideLabelText?: boolean` — set `true` to visually hide the label while keeping it accessible to screen readers (`sr-only`). Use when the surrounding layout (e.g. a settings row) already provides a visible label and a duplicate visible label would be redundant. |
 | `RadioGroup` | `@radix-ui/react-radio-group` | Single-choice from a small set. Compound: `RadioGroup` + `RadioGroup.Item` (each item carries its own label). |
 | `SettingRow` | layout | Label + optional description on the left, control on the right, hairline below. Used by settings categories (General, Appearance). |
