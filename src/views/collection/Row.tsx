@@ -1,6 +1,13 @@
 import { Square } from "lucide-react";
+import { Checkbox } from "../../ui/forms/Checkbox";
 import type { ViewDensity } from "./ViewConfig";
 import type { EntityContract, PropertyConfig } from "./types";
+
+type RowSelection = {
+  selected: boolean;
+  onToggle: () => void;
+  label: string;
+};
 
 type Props<TItem, TProperty extends string> = {
   item: TItem;
@@ -9,6 +16,7 @@ type Props<TItem, TProperty extends string> = {
   selectedId: string | null;
   density?: ViewDensity;
   groupedPropertyId?: string | null;
+  selection?: RowSelection;
   onSelect: (item: TItem) => void;
 };
 
@@ -19,6 +27,7 @@ export function Row<TItem, TProperty extends string>({
   selectedId,
   density = "regular",
   groupedPropertyId = null,
+  selection,
   onSelect,
 }: Props<TItem, TProperty>) {
   const itemId = entity.getId(item);
@@ -40,15 +49,30 @@ export function Row<TItem, TProperty extends string>({
         isSelected ? "bg-surface-1" : "hover:bg-surface"
       }`}
     >
-      <button
-        type="button"
-        aria-label="Select issue (coming soon)"
-        aria-disabled="true"
-        className="flex flex-none items-center justify-center p-0.5 text-subtext/50 cursor-default"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <Square size={11} aria-hidden />
-      </button>
+      {selection ? (
+        <span
+          className="flex flex-none items-center justify-center"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <Checkbox
+            label={selection.label}
+            hideLabelText
+            checked={selection.selected}
+            onCheckedChange={() => selection.onToggle()}
+          />
+        </span>
+      ) : (
+        <button
+          type="button"
+          aria-label="Select issue (coming soon)"
+          aria-disabled="true"
+          className="flex flex-none items-center justify-center p-0.5 text-subtext/50 cursor-default"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Square size={11} aria-hidden />
+        </button>
+      )}
 
       <button
         type="button"

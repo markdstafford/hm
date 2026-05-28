@@ -9,9 +9,10 @@ type Props = {
   onCheckedChange?: (v: boolean | "indeterminate") => void;
   disabled?: boolean;
   id?: string;
+  hideLabelText?: boolean;
 };
 
-export function Checkbox({ label, id, ...rest }: Props) {
+export function Checkbox({ label, id, hideLabelText = false, ...rest }: Props) {
   const auto = useId();
   const fieldId = id ?? auto;
   return (
@@ -28,7 +29,7 @@ export function Checkbox({ label, id, ...rest }: Props) {
           <Check size={11} aria-hidden />
         </RC.Indicator>
       </RC.Root>
-      <span>{label}</span>
+      <span className={hideLabelText ? "sr-only" : undefined}>{label}</span>
     </label>
   );
 }

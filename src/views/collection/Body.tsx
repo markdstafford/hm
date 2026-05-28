@@ -6,6 +6,12 @@ import { SectionHeader } from "./SectionHeader";
 import type { GroupConfig, ViewDensity } from "./ViewConfig";
 import type { EntityContract, PropertyConfig } from "./types";
 
+type BodySelection<TItem> = {
+  selectedIds: ReadonlySet<string>;
+  onToggle: (item: TItem) => void;
+  getLabel?: (item: TItem) => string;
+};
+
 type Props<TItem, TProperty extends string> = {
   items: TItem[];
   unfilteredCount?: number;
@@ -16,6 +22,7 @@ type Props<TItem, TProperty extends string> = {
   onToggleGroupCollapsed?: (bucketKey: string) => void;
   selectedId: string | null;
   density?: ViewDensity;
+  selection?: BodySelection<TItem>;
   onSelect: (item: TItem) => void;
 };
 
@@ -29,6 +36,7 @@ export function Body<TItem, TProperty extends string>({
   onToggleGroupCollapsed,
   selectedId,
   density = "regular",
+  selection,
   onSelect,
 }: Props<TItem, TProperty>) {
   const resolvedProperties = properties ?? entity.defaultProperties;
@@ -102,6 +110,15 @@ export function Body<TItem, TProperty extends string>({
                   selectedId={selectedId}
                   density={density}
                   groupedPropertyId={group.property}
+                  selection={
+                    selection
+                      ? {
+                          selected: selection.selectedIds.has(entity.getId(item)),
+                          onToggle: () => selection.onToggle(item),
+                          label: selection.getLabel?.(item) ?? `Select ${entity.getId(item)}`,
+                        }
+                      : undefined
+                  }
                   onSelect={onSelect}
                 />
               ))}
@@ -121,6 +138,15 @@ export function Body<TItem, TProperty extends string>({
           properties={resolvedProperties}
           selectedId={selectedId}
           density={density}
+          selection={
+            selection
+              ? {
+                  selected: selection.selectedIds.has(entity.getId(item)),
+                  onToggle: () => selection.onToggle(item),
+                  label: selection.getLabel?.(item) ?? `Select ${entity.getId(item)}`,
+                }
+              : undefined
+          }
           onSelect={onSelect}
         />
       ))}
