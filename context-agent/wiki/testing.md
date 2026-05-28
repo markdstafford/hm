@@ -338,3 +338,38 @@ For a manual mock-Jira smoke, start a local HTTP server that implements:
 - `DELETE /rest/api/2/issueLink/<id>`
 
 Configure a Jira source to `http://127.0.0.1:<port>`, save a fake PAT through the source credential flow, call one generated command such as `commands.jiraUpdateTitle(...)`, then call `commands.auditLogList({ target_ref: "jira:AMP-1043" })` and confirm the returned entry has the expected `batch_id`, `before_state`, `after_state`, and `reversible` flag.
+
+---
+
+## Jira issue history tests (added 2026-05-28, issue #11)
+
+### Targeted Rust commands
+
+```bash
+cd src-tauri && cargo test --lib history -- --nocapture
+cd src-tauri && cargo test --lib snapshots -- --nocapture
+cd src-tauri && cargo test --lib jira_history -- --nocapture
+cd src-tauri && cargo test --lib changelog -- --nocapture
+cd src-tauri && cargo test --lib status_timeline -- --nocapture
+cd src-tauri && cargo test --lib snapshot_query -- --nocapture
+```
+
+### Targeted frontend commands
+
+```bash
+npm test -- src/entities/jira-issue/history.test.ts src/entities/jira-issue/detail.test.tsx
+```
+
+### Binding regeneration (after command changes)
+
+```bash
+cd src-tauri && cargo test generate_typescript_bindings -- --exact --nocapture
+```
+
+### Key gotchas
+
+- **Snapshot cursor key uses dots, not colons:** `project.{KEY}.snapshots` — `shared_settings` `validate_key` rejects colons. Do not use `project:AMP:snapshots`.
+- **`coarse_state` is shared from `issues::history`** — both `jira_ingestion.rs` and `snapshots.rs` import it. Do not duplicate or diverge this function.
+- **Changelog ingestion is opt-in via `JiraIngestionOptions.fetch_changelog`** (default `true`). Tests that don't want changelog behavior can set `fetch_changelog: false`.
+- **`jiraIssueStatusTimeline` returns `typedError<JiraIssueStatusTransition[], string>`** — unwrap with `result.status === "error"` check before accessing `result.data`.
+- **Mock pattern for history tests:** `vi.mock("./history", () => ({ loadJiraIssueStatusHistory: vi.fn() }))` in detail.test.tsx.
