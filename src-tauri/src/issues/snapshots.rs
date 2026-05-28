@@ -87,7 +87,7 @@ fn apply_event(state: &mut SnapshotState, event: &IssueEventRow) {
         }
         "resolution_changed" => {
             let new_res = event.to_string.clone();
-            if new_res.as_deref().map_or(false, |s| !s.is_empty()) {
+            if new_res.as_deref().is_some_and(|s| !s.is_empty()) {
                 state.state = "done".to_string();
             }
             state.resolution_name = new_res;
@@ -287,7 +287,7 @@ fn next_date(date: &str) -> String {
 }
 
 fn is_leap_year(y: u32) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 fn days_in_month(y: u32, m: u32) -> u32 {
@@ -527,7 +527,7 @@ pub fn replay_missing_snapshots(
             Ok(None) => None,
             Err(e) => {
                 return Err(IssueHistoryError::Storage(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+                    Box::new(std::io::Error::other(e.to_string())),
                 )));
             }
         };
@@ -594,7 +594,7 @@ pub fn replay_missing_snapshots(
     crate::settings::shared::shared_settings_set(conn, &cursor_key, &cursor_value).map_err(
         |e| {
             IssueHistoryError::Storage(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                std::io::Error::other(e.to_string()),
             )))
         },
     )?;
@@ -748,7 +748,7 @@ pub fn compact_snapshot_retention(
                     params![source_system_id, date],
                 )
                 .map_err(IssueHistoryError::Storage)?;
-            compacted_weekly_rows += updated as usize;
+            compacted_weekly_rows += updated;
         } else {
             // Delete non-Monday old rows.
             let deleted = conn
@@ -758,7 +758,7 @@ pub fn compact_snapshot_retention(
                     params![source_system_id, date],
                 )
                 .map_err(IssueHistoryError::Storage)?;
-            deleted_daily_rows += deleted as usize;
+            deleted_daily_rows += deleted;
         }
     }
 

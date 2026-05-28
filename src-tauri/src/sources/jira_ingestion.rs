@@ -1795,7 +1795,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                     Err(e) => {
                                         let ie = IngestionError::new(
                                             IngestionErrorCategory::Decode,
-                                            &e.to_string(),
+                                            e.to_string(),
                                         );
                                         tail_errors.push(format!(
                                             "changelog {}: {}",
@@ -1813,7 +1813,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                             .map_err(|e| {
                                                 IngestionError::new(
                                                     IngestionErrorCategory::Storage,
-                                                    &e.to_string(),
+                                                    e.to_string(),
                                                 )
                                             })?;
                                     }
