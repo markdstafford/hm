@@ -14,6 +14,12 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
+// jsdom does not implement PointerEvent.hasPointerCapture; Radix Toast uses it
+// to detect swipe-to-dismiss gestures. Provide a no-op stub.
+if (typeof Element.prototype.hasPointerCapture === "undefined") {
+  Element.prototype.hasPointerCapture = () => false;
+}
+
 // jsdom does not implement window.matchMedia; provide a minimal stub
 Object.defineProperty(window, "matchMedia", {
   writable: true,
