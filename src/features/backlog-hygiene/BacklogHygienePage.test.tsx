@@ -116,4 +116,40 @@ describe("BacklogHygienePage", () => {
     expect(await screen.findByText("AMP-1043")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("The duplicate-detection engine is unavailable. Showing available suggestions.");
   });
+
+  it("High confidence view filters to confidence >= 85", async () => {
+    vi.mocked(commands.collectionViewsSeedDefaults).mockResolvedValue({
+      status: "ok",
+      data: [
+        { id: "hygiene-suggestion-all", entity_kind: "hygiene-suggestion", display_name: "All", position: 0, is_default: true, config: {} },
+        { id: "hygiene-suggestion-by-action", entity_kind: "hygiene-suggestion", display_name: "By action", position: 1, is_default: true, config: {} },
+        { id: "hygiene-suggestion-high-confidence", entity_kind: "hygiene-suggestion", display_name: "High confidence", position: 2, is_default: true,
+          config: { filters: [{ id: "hygiene-confidence-gte-85", property: "confidence", operator: "gte", value: "85", active: true }] } },
+      ],
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "High confidence" }));
+    await waitFor(() => expect(screen.getByText("AMP-1149 → AMP-1102")).toBeInTheDocument());
+    expect(screen.getByText("AMP-1043")).toBeInTheDocument();
+    expect(screen.queryByText("AMP-1068")).not.toBeInTheDocument();
+    expect(screen.queryByText("AMP-1180")).not.toBeInTheDocument();
+  });
+
+  it("By action view groups suggestions by proposed action", async () => {
+    vi.mocked(commands.collectionViewsSeedDefaults).mockResolvedValue({
+      status: "ok",
+      data: [
+        { id: "hygiene-suggestion-all", entity_kind: "hygiene-suggestion", display_name: "All", position: 0, is_default: true, config: {} },
+        { id: "hygiene-suggestion-by-action", entity_kind: "hygiene-suggestion", display_name: "By action", position: 1, is_default: true,
+          config: { group: { property: "action", hideEmptyGroups: true } } },
+        { id: "hygiene-suggestion-high-confidence", entity_kind: "hygiene-suggestion", display_name: "High confidence", position: 2, is_default: true, config: {} },
+      ],
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "By action" }));
+    expect(await screen.findByText("Merge as duplicate")).toBeInTheDocument();
+    expect(screen.getByText("Close as resolved")).toBeInTheDocument();
+    expect(screen.getByText("Ping for context")).toBeInTheDocument();
+    expect(screen.getAllByText("Enrich title + body").length).toBeGreaterThan(0);
+  });
 });

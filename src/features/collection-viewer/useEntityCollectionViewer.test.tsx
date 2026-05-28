@@ -76,4 +76,15 @@ describe("useEntityCollectionViewer", () => {
     await waitFor(() => expect(commands.collectionViewsSeedDefaults).toHaveBeenCalledWith(expect.objectContaining({ entity_kind: "test-entity" })));
     expect(loadPreferences).toHaveBeenCalled();
   });
+
+  it("stores active view preferences under the active entity id", async () => {
+    vi.mocked(loadPreferences).mockResolvedValue({});
+    render(<Harness />);
+    await screen.findByRole("button", { name: "All" });
+    await waitFor(() =>
+      expect(savePreferences).toHaveBeenCalledWith(expect.any(Object), {
+        collections: { activeViewId: { "test-entity": "test-all" } },
+      }),
+    );
+  });
 });
