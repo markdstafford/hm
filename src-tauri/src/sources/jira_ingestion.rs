@@ -1993,6 +1993,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                     );
                 }
                 Err(e) => {
+                    eprintln!("[snapshots] replay_missing_snapshots failed for {project_key_owned}: {e}");
                     tail_errors.push(format!("snapshot_replay: {e}"));
                 }
             }

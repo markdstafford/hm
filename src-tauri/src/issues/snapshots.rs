@@ -536,6 +536,10 @@ pub fn replay_missing_snapshots(
     let start_date: String = match cursor_opt.as_deref() {
         Some(cursor) if cursor >= current_local_date => {
             // Already up-to-date — nothing to do.
+            // `job_id` is intentionally empty here: no job was created, so
+            // there is no ID to return.  Callers should check `generated_dates`
+            // is empty (or `snapshots_written == 0`) to detect this fast-path
+            // rather than relying on `job_id`.
             return Ok(SnapshotReplayResult {
                 generated_dates: vec![],
                 snapshots_written: 0,
