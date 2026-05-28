@@ -3,10 +3,12 @@
 //! This module is pure (no DB writes). The caller is responsible for resolving
 //! actor identities and persisting the returned events.
 
+use rusqlite::Connection;
 use serde_json::json;
 
 use crate::issues::history::{IssueEventInput, IssueHistoryError};
 use crate::issues::ids::stable_id;
+use crate::issues::people::{upsert_source_identity, SourceIdentityInput};
 use crate::sources::jira_types::JiraChangelogEntry;
 
 // ── Field → event type mapping ────────────────────────────────────────────────
@@ -78,6 +80,50 @@ pub fn normalize_jira_datetime(created: &str) -> String {
         format!("{}Z", &without_ms[..without_ms.len() - 6])
     } else {
         without_ms
+    }
+}
+
+// ── Actor identity resolution ──────────────────────────────────────────────────
+
+/// Resolve the actor identity for a changelog entry.
+///
+/// Returns `Some(source_identity_id)` if author data is present and persisted
+/// successfully. Returns `None` if no author data exists or the upsert fails —
+/// identity link failures are best-effort and must not fail event ingestion.
+pub(crate) fn resolve_actor_identity(
+    conn: &Connection,
+    source_system_id: &str,
+    entry: &JiraChangelogEntry,
+    now: &str,
+) -> Option<String> {
+    let author = entry.author.as_ref()?;
+    // Skip if no stable key is available.
+    if author.account_id.is_none()
+        && author.name.is_none()
+        && author.key.is_none()
+        && author.display_name.is_none()
+    {
+        return None;
+    }
+    let result = upsert_source_identity(
+        conn,
+        now,
+        &SourceIdentityInput {
+            source_system_id,
+            source_kind: "jira",
+            upstream_account_id: author.account_id.as_deref(),
+            upstream_name: author.name.as_deref(),
+            upstream_key: author.key.as_deref(),
+            username: author.name.as_deref(),
+            email: author.email_address.as_deref(),
+            display_name: author.display_name.as_deref(),
+            avatar_url: None,
+            raw_json: None, // omit raw_json — changelog author could carry PII
+        },
+    );
+    match result {
+        Ok(id) => Some(id.source_identity_id),
+        Err(_) => None, // best-effort: identity link failure does not fail event ingestion
     }
 }
 

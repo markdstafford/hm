@@ -1237,7 +1237,7 @@ use crate::ingestion::runs::{
 static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 use crate::sources::jira_client::{JiraApiClient, JiraSearchRequest};
 use crate::sources::jira_errors::JiraApiError;
-use crate::sources::jira_types::{JiraPagedComments, JiraPagedWorklogs, JiraSearchPage};
+use crate::sources::jira_types::{JiraChangelogPage, JiraPagedComments, JiraPagedWorklogs, JiraSearchPage};
 
 /// Trait seam that abstracts over `JiraApiClient::search_issues_page` so
 /// `JiraIssueIngestionService` can be exercised against an in-memory stub.
@@ -1265,6 +1265,13 @@ pub trait JiraIssueClient {
         &self,
         issue_id_or_key: &str,
     ) -> Result<Vec<JiraRemoteLink>, JiraApiError>;
+
+    fn get_issue_changelog_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraChangelogPage, JiraApiError>;
 }
 
 impl JiraIssueClient for JiraApiClient {
@@ -1298,6 +1305,15 @@ impl JiraIssueClient for JiraApiClient {
         issue_id_or_key: &str,
     ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
         JiraApiClient::get_issue_remote_links(self, issue_id_or_key)
+    }
+
+    fn get_issue_changelog_page(
+        &self,
+        issue_id_or_key: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<JiraChangelogPage, JiraApiError> {
+        JiraApiClient::get_issue_changelog_page(self, issue_id_or_key, start_at, max_results)
     }
 }
 
@@ -1725,6 +1741,85 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                 tail_errors.push(format!("remotelinks {}: {}", issue.key, ie));
                                 remote_links_had_error = true;
                             }
+                        }
+                    }
+
+                    if cancellation.is_cancelled() {
+                        break;
+                    }
+
+                    // Changelog history tail: fetch all pages for this issue and
+                    // persist each entry as idempotent issue_events rows.
+                    // HTTP is done OUTSIDE the lock; only the write enters with_conn.
+                    {
+                        let mut cl_start_at: u32 = 0;
+                        let cl_page_size: u32 = self.page_size;
+                        loop {
+                            if cancellation.is_cancelled() {
+                                break;
+                            }
+                            // HTTP (no lock held).
+                            let cl_page = match self.client.get_issue_changelog_page(
+                                &issue.key,
+                                cl_start_at,
+                                cl_page_size,
+                            ) {
+                                Ok(p) => p,
+                                Err(err) => {
+                                    let ie: IngestionError = err.into();
+                                    tail_errors
+                                        .push(format!("changelog {}: {}", issue.key, ie));
+                                    break;
+                                }
+                            };
+                            let cl_returned = cl_page.histories.len() as u32;
+                            // Write (inside lock). Each upsert_issue_event uses ON
+                            // CONFLICT so a partial flush is safe to retry.
+                            db.with_conn(|conn| {
+                                for entry in &cl_page.histories {
+                                    let actor_id =
+                                        crate::sources::jira_history::resolve_actor_identity(
+                                            conn,
+                                            source_system_id,
+                                            entry,
+                                            now_utc,
+                                        );
+                                    let events =
+                                        crate::sources::jira_history::project_changelog_entry(
+                                            source_system_id,
+                                            &work_item_id_for_tail,
+                                            &issue.key,
+                                            entry,
+                                            now_utc,
+                                            actor_id.as_deref(),
+                                        )
+                                        .map_err(|e| {
+                                            IngestionError::new(
+                                                IngestionErrorCategory::Decode,
+                                                &e.to_string(),
+                                            )
+                                        })?;
+                                    for event in events {
+                                        crate::issues::history::upsert_issue_event(conn, &event)
+                                            .map_err(|e| {
+                                                IngestionError::new(
+                                                    IngestionErrorCategory::Storage,
+                                                    &e.to_string(),
+                                                )
+                                            })?;
+                                    }
+                                }
+                                Ok(())
+                            })?;
+                            let next_cl = cl_start_at.saturating_add(cl_returned);
+                            let cl_done = cl_page
+                                .total
+                                .map(|t| next_cl >= t)
+                                .unwrap_or(cl_returned < cl_page_size);
+                            if cl_returned == 0 || cl_done || next_cl <= cl_start_at {
+                                break;
+                            }
+                            cl_start_at = next_cl;
                         }
                     }
                 }
@@ -2404,6 +2499,9 @@ mod tests {
         remote_links: Mutex<HashMap<String, Vec<JiraRemoteLink>>>,
         remote_link_calls: Mutex<Vec<String>>,
         next_remote_links_error: Mutex<Option<JiraApiError>>,
+        changelog_pages: Mutex<HashMap<String, Vec<JiraChangelogPage>>>,
+        changelog_calls: Mutex<Vec<(String, u32, u32)>>,
+        next_changelog_error: Mutex<Option<JiraApiError>>,
     }
 
     impl FakeJiraClient {
@@ -2422,6 +2520,9 @@ mod tests {
                 remote_links: Mutex::new(HashMap::new()),
                 remote_link_calls: Mutex::new(Vec::new()),
                 next_remote_links_error: Mutex::new(None),
+                changelog_pages: Mutex::new(HashMap::new()),
+                changelog_calls: Mutex::new(Vec::new()),
+                next_changelog_error: Mutex::new(None),
             }
         }
 
@@ -2474,6 +2575,17 @@ mod tests {
         /// (1-indexed). Used by the cancellation test.
         fn trip_cancel_after(&self, n: usize, flag: Arc<CancellationFlag>) {
             *self.cancel_after_call.lock().unwrap() = Some((n, flag));
+        }
+
+        fn stub_changelog_pages(&self, key: &str, pages: Vec<JiraChangelogPage>) {
+            self.changelog_pages
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), pages);
+        }
+
+        fn changelog_calls(&self) -> Vec<(String, u32, u32)> {
+            self.changelog_calls.lock().unwrap().clone()
         }
     }
 
@@ -2589,6 +2701,30 @@ mod tests {
             }
             let map = self.remote_links.lock().unwrap();
             Ok(map.get(issue_id_or_key).cloned().unwrap_or_default())
+        }
+
+        fn get_issue_changelog_page(
+            &self,
+            issue_id_or_key: &str,
+            start_at: u32,
+            max_results: u32,
+        ) -> Result<JiraChangelogPage, JiraApiError> {
+            self.changelog_calls
+                .lock()
+                .unwrap()
+                .push((issue_id_or_key.to_string(), start_at, max_results));
+            if let Some(err) = self.next_changelog_error.lock().unwrap().take() {
+                return Err(err);
+            }
+            let pages = self.changelog_pages.lock().unwrap();
+            let issue_pages = pages.get(issue_id_or_key).cloned().unwrap_or_default();
+            let page_idx = (start_at / max_results.max(1)) as usize;
+            Ok(issue_pages.into_iter().nth(page_idx).unwrap_or(JiraChangelogPage {
+                start_at,
+                max_results,
+                total: Some(0),
+                histories: vec![],
+            }))
         }
     }
 
@@ -3358,6 +3494,73 @@ mod tests {
         assert_eq!(count, 2, "both runs should be persisted with distinct ids");
     }
 
+    // -- Changelog history tests ------------------------------------------
+
+    #[test]
+    fn ingestion_writes_changelog_events_after_issue_projection() {
+        use crate::sources::jira_types::{JiraChangelogEntry, JiraChangelogItem};
+
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        let (_, page1) = load_amp_fixture();
+        let client = FakeJiraClient::with_pages(vec![page1]);
+
+        // Stub a changelog page for AMP-1 (the first issue in the fixture).
+        let changelog = JiraChangelogPage {
+            start_at: 0,
+            max_results: 50,
+            total: Some(1),
+            histories: vec![JiraChangelogEntry {
+                id: "cl_001".to_string(),
+                author: None,
+                created: "2026-05-27T14:18:00.000+0000".to_string(),
+                items: vec![JiraChangelogItem {
+                    field: "status".to_string(),
+                    fieldtype: Some("jira".to_string()),
+                    from: Some("1".to_string()),
+                    from_string: Some("To Do".to_string()),
+                    to: Some("2".to_string()),
+                    to_string: Some("In Progress".to_string()),
+                }],
+            }],
+        };
+        client.stub_changelog_pages("AMP-1", vec![changelog]);
+
+        let mutex_conn = std::sync::Mutex::new(conn);
+        let db = MutexDbAccess(&mutex_conn);
+        let service = JiraIssueIngestionService::new(&client);
+        let cancellation = CancellationFlag::new();
+        let summary = service
+            .ingest_project(&db, "srcsys_1", "AMP", Some("AMP Project"), NOW, &cancellation)
+            .expect("ingest");
+        assert_eq!(summary.status, "succeeded");
+
+        let event_count: i64 = db
+            .with_conn(|conn| {
+                Ok(conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM issue_events WHERE event_type = 'status_changed'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap())
+            })
+            .unwrap();
+        assert!(
+            event_count >= 1,
+            "expected at least one status_changed event, got {event_count}"
+        );
+
+        // Verify the changelog endpoint was called for each issue.
+        let cl_calls = client.changelog_calls();
+        let amp1_cl_calls: Vec<_> = cl_calls.iter().filter(|(k, _, _)| k == "AMP-1").collect();
+        assert!(
+            !amp1_cl_calls.is_empty(),
+            "expected at least one changelog call for AMP-1"
+        );
+    }
+
     // -- Redaction tests --------------------------------------------------
     //
     // These tests lock down the guarantee that PATs, Authorization headers,
@@ -3692,6 +3895,20 @@ mod tests {
                 _issue_id_or_key: &str,
             ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
                 Ok(vec![])
+            }
+
+            fn get_issue_changelog_page(
+                &self,
+                _issue_id_or_key: &str,
+                start_at: u32,
+                max_results: u32,
+            ) -> Result<JiraChangelogPage, JiraApiError> {
+                Ok(JiraChangelogPage {
+                    start_at,
+                    max_results,
+                    total: Some(0),
+                    histories: vec![],
+                })
             }
         }
 
