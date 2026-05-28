@@ -312,9 +312,9 @@ Run this after touching any `#[tauri::command] #[specta::specta]` function so `s
 Backend-only smoke path:
 
 ```bash
-cd src-tauri && cargo test mutations -- --nocapture
-cd src-tauri && cargo test sources::jira_client -- --nocapture
-cd src-tauri && cargo test generate_typescript_bindings -- --nocapture
+(cd src-tauri && cargo test mutations -- --nocapture)
+(cd src-tauri && cargo test sources::jira_client -- --nocapture)
+(cd src-tauri && cargo test generate_typescript_bindings -- --nocapture)
 npm run lint
 ```
 
@@ -328,4 +328,4 @@ For a manual mock-Jira smoke, start a local HTTP server that implements:
 - `POST /rest/api/2/issueLink`
 - `DELETE /rest/api/2/issueLink/<id>`
 
-Configure a Jira source to `http://127.0.0.1:<port>`, save a fake PAT through the source credential flow, call one generated command such as `commands.jiraUpdateTitle(...)`, then call `commands.auditLogList({ targetRef: "jira:AMP-1043" })` and confirm the returned entry has the expected `batchId`, `beforeState`, `afterState`, and `reversible` flag.
+Configure a Jira source to `http://127.0.0.1:<port>`, save a fake PAT through the source credential flow, call one generated command such as `commands.jiraUpdateTitle(...)`, then call `commands.auditLogList({ target_ref: "jira:AMP-1043" })` and confirm the returned entry has the expected `batch_id`, `before_state`, `after_state`, and `reversible` flag.

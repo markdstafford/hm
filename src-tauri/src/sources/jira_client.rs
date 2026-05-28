@@ -662,13 +662,12 @@ impl JiraApiClient {
         encode_path_segment(source_key)?;
         encode_path_segment(target_key)?;
         let request = JiraCreateIssueLinkRequest::new(link_type, source_key, target_key);
-        Ok(
-            self.send_json_once("POST", "/rest/api/2/issueLink", Some(&request))?
-                .unwrap_or(JiraCreatedIssueLink {
-                    id: None,
-                    self_url: None,
-                }),
-        )
+        match self.send_json_once("POST", "/rest/api/2/issueLink", Some(&request)) {
+            Ok(opt) => Ok(opt.unwrap_or(JiraCreatedIssueLink { id: None, self_url: None })),
+            // Jira DC returns 201 with empty body; link was created but no id is available
+            Err(JiraApiError::Decode) => Ok(JiraCreatedIssueLink { id: None, self_url: None }),
+            Err(e) => Err(e),
+        }
     }
 
     /// Delete a link between two issues by link ID.
@@ -1796,6 +1795,28 @@ mod tests {
             .create_issue_link("AMP-1043", "AMP-997", "Duplicates")
             .unwrap();
         assert_eq!(link.id.as_deref(), Some("20001"));
+    }
+
+    #[test]
+    fn create_issue_link_handles_201_empty_body() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Post);
+            assert_eq!(request.url(), "/rest/api/2/issueLink");
+            let response = Response::new(
+                StatusCode(201),
+                vec![],
+                std::io::Cursor::new(Vec::new()),
+                Some(0),
+                None,
+            );
+            request.respond(response).unwrap();
+        });
+        let link = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .create_issue_link("AMP-1043", "AMP-997", "Duplicates")
+            .unwrap();
+        assert_eq!(link.id, None);
+        assert_eq!(link.self_url, None);
     }
 
     #[test]

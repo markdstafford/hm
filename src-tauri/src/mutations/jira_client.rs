@@ -32,12 +32,111 @@ impl JiraMutationClient for crate::sources::jira_client::JiraApiClient {
     }
 }
 
-/// Resolve the real Jira client for a given source_id.
-/// TODO (Task 11): wire up proper settings/keychain lookup.
+/// Resolve a Jira client using an injected secret store. Testable without a Tauri AppHandle.
+pub fn resolve_client_with_store(
+    conn: &rusqlite::Connection,
+    source_id: &str,
+    store: &dyn crate::settings::secrets::SecretStore,
+) -> Result<Box<dyn JiraMutationClient>, MutationError> {
+    use crate::sources::config::{JiraAuthConfig, SourceConfig, load_sources_config};
+    use crate::sources::credentials::load_source_credential_secret;
+    use crate::sources::jira_client::{JiraApiClient, JiraApiClientConfig, RateLimitPolicy, RetryPolicy};
+
+    let sources_config = load_sources_config(conn)
+        .map_err(|_| MutationError::SourceNotFound(source_id.to_string()))?;
+
+    let jira_source = sources_config
+        .sources
+        .into_iter()
+        .find_map(|s| match s {
+            SourceConfig::Jira(j) if j.id == source_id => Some(j),
+            _ => None,
+        })
+        .ok_or_else(|| MutationError::SourceNotFound(source_id.to_string()))?;
+
+    let credential_ref = match &jira_source.auth {
+        JiraAuthConfig::Pat { credential_ref } => credential_ref.clone(),
+    };
+
+    let pat = load_source_credential_secret(&credential_ref, store)
+        .map_err(|_| MutationError::CredentialMissing(source_id.to_string()))?
+        .expose_for_jira_client()
+        .to_string();
+
+    let client = JiraApiClient::new(JiraApiClientConfig {
+        base_url: jira_source.server_url,
+        pat,
+        user_agent: format!("hm/{}", env!("CARGO_PKG_VERSION")),
+        retry_policy: RetryPolicy::default(),
+        rate_limit_policy: RateLimitPolicy::default(),
+    })
+    .map_err(|e| MutationError::InvalidInput(e.to_string()))?;
+
+    Ok(Box::new(client))
+}
+
+/// Resolve the real Jira client for a given source_id using the app's managed secret store.
 pub fn resolve_real_client(
-    _conn: &rusqlite::Connection,
-    _app: &tauri::AppHandle,
+    conn: &rusqlite::Connection,
+    app: &tauri::AppHandle,
     source_id: &str,
 ) -> Result<Box<dyn JiraMutationClient>, MutationError> {
-    Err(MutationError::SourceNotFound(source_id.to_string()))
+    use tauri::Manager;
+    let store = app.state::<crate::settings::secrets::ManagedSecretStore>();
+    resolve_client_with_store(conn, source_id, &*store.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_in_memory;
+    use crate::settings::secrets::InMemorySecretStore;
+    use crate::sources::config::{
+        JiraAuthConfig, JiraSourceConfig, SourceConfig, SourcesConfig, save_sources_config,
+    };
+
+    fn make_jira_source(id: &str) -> JiraSourceConfig {
+        JiraSourceConfig {
+            id: id.to_string(),
+            name: "Test Jira".into(),
+            enabled: true,
+            server_url: "https://jira.example.invalid".into(),
+            auth: JiraAuthConfig::Pat {
+                credential_ref: format!("source.jira.{id}.pat"),
+            },
+            projects: vec![],
+            last_connection_test: None,
+            created_at: "2024-01-01T00:00:00Z".into(),
+            updated_at: "2024-01-01T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn resolve_client_source_not_found() {
+        let conn = open_in_memory().expect("open in-memory db");
+        let store = InMemorySecretStore::new();
+        let result = resolve_client_with_store(&conn, "missing_id", &store);
+        assert!(
+            matches!(result, Err(MutationError::SourceNotFound(_))),
+            "expected SourceNotFound"
+        );
+    }
+
+    #[test]
+    fn resolve_client_credential_missing() {
+        let conn = open_in_memory().expect("open in-memory db");
+        let store = InMemorySecretStore::new();
+
+        let config = SourcesConfig {
+            version: 1,
+            sources: vec![SourceConfig::Jira(make_jira_source("src_test"))],
+        };
+        save_sources_config(&conn, &config).expect("save sources config");
+
+        let result = resolve_client_with_store(&conn, "src_test", &store);
+        assert!(
+            matches!(result, Err(MutationError::CredentialMissing(_))),
+            "expected CredentialMissing"
+        );
+    }
 }

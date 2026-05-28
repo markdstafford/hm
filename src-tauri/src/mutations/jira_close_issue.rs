@@ -23,10 +23,15 @@ pub fn execute_jira_close_issue<C: JiraMutationClient + ?Sized>(
         return Err(MutationError::InvalidInput("transition_id is required".into()));
     }
 
-    // Validate that the requested transition exists
-    client
+    let transitions = client
         .list_transitions(&issue_key)
         .map_err(|e| MutationError::Jira(e.to_string()))?;
+    if !transitions.transitions.iter().any(|t| t.id == input.transition_id) {
+        return Err(MutationError::InvalidInput(format!(
+            "transition not available: {}",
+            input.transition_id
+        )));
+    }
 
     client
         .transition_issue(&issue_key, &input.transition_id, input.comment.as_deref())
@@ -207,6 +212,19 @@ mod tests {
         assert_eq!(entry.after_state.value()["status"], "Done");
         assert_eq!(entry.after_state.value()["transition_id"], "31");
         assert_eq!(entry.after_state.value()["inverse_transition_id"], "11");
+    }
+
+    #[test]
+    fn close_issue_rejects_unavailable_transition() {
+        let conn = open_in_memory().unwrap();
+        let client = RecordingJiraClient::default();
+        // RecordingJiraClient returns transitions "31" and "11"; "99" is not in the list
+        let err = execute_jira_close_issue(
+            &conn, &client,
+            make_input("AMP-1043", "99", None, None),
+        ).unwrap_err();
+        assert!(matches!(err, MutationError::InvalidInput(_)));
+        assert!(format!("{err}").contains("transition not available"));
     }
 
     #[test]
