@@ -123,7 +123,7 @@ describe("runCollectionAction", () => {
       createBatchId: () => "batch-1",
     });
 
-    expect(undo).toBeTypeOf("function");
+    expect(typeof undo).toBe("function");
     await undo?.();
 
     expect(reverse).toHaveBeenCalledTimes(1);
