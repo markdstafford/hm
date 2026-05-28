@@ -83,7 +83,7 @@ export function JiraIssueDetail({ item }: Props) {
         {history.phase === "ok" && history.transitions.length > 0 && (
           <>
             {history.partial && (
-              <p className="text-xs text-text-subtle">
+              <p className="text-xs text-subtext">
                 Showing captured history. Some older changelog pages have not synced yet.
               </p>
             )}
@@ -91,13 +91,14 @@ export function JiraIssueDetail({ item }: Props) {
               {history.transitions.map((t) => (
                 <li
                   key={t.event_id}
+                  className="flex items-center gap-2 text-sm"
                   aria-label={`${t.from_status ?? "Unknown"} to ${t.to_status ?? "Unknown"}, changed ${formatLocalDateTime(t.occurred_at)} by ${t.actor_display_name ?? "Unknown actor"}`}
                 >
                   <span>{t.from_status ?? "—"}</span>
                   <span>→</span>
                   <Badge>{t.to_status ?? "Unknown"}</Badge>
-                  <span className="text-xs text-text-subtle">{formatLocalDateTime(t.occurred_at)}</span>
-                  <span className="text-xs text-text-subtle">{t.actor_display_name ?? "Unknown actor"}</span>
+                  <span className="text-xs text-subtext">{formatLocalDateTime(t.occurred_at)}</span>
+                  <span className="text-xs text-subtext">{t.actor_display_name ?? "Unknown actor"}</span>
                 </li>
               ))}
             </ol>
