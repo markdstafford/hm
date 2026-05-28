@@ -11,7 +11,11 @@ export async function loadJiraIssueStatusHistory(
     return { status: "ok", transitions: [], partial: false };
   }
   try {
-    const transitions = await commands.jiraIssueStatusTimeline(issueId);
+    const result = await commands.jiraIssueStatusTimeline(issueId);
+    if (result.status === "error") {
+      return { status: "error", transitions: [], partial: false };
+    }
+    const transitions = result.data;
     return {
       status: "ok",
       transitions,

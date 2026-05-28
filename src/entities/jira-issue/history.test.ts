@@ -27,7 +27,7 @@ describe("loadJiraIssueStatusHistory", () => {
 
   it("returns command data in desktop/Tauri", async () => {
     (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
-    vi.mocked(commands.jiraIssueStatusTimeline).mockResolvedValue([statusTransition()]);
+    vi.mocked(commands.jiraIssueStatusTimeline).mockResolvedValue({ status: "ok", data: [statusTransition()] });
     const result = await loadJiraIssueStatusHistory("wi_amp_1043");
     expect(result).toMatchObject({ status: "ok", partial: false });
     expect((result as { transitions: unknown[] }).transitions).toHaveLength(1);
@@ -42,7 +42,7 @@ describe("loadJiraIssueStatusHistory", () => {
 
   it("maps command failures to an error state", async () => {
     (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
-    vi.mocked(commands.jiraIssueStatusTimeline).mockRejectedValue(new Error("safe test failure"));
+    vi.mocked(commands.jiraIssueStatusTimeline).mockResolvedValue({ status: "error", error: "safe test failure" });
     const result = await loadJiraIssueStatusHistory("wi_amp_1043");
     expect(result).toEqual({ status: "error", transitions: [], partial: false });
   });
