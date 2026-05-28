@@ -14,6 +14,8 @@ pub struct RecordingJiraClient {
     pub calls: Mutex<Vec<String>>,
     pub comment_id: String,
     pub link_id: String,
+    /// When true, create_issue_link returns id=None (simulates Jira DC 201 empty-body)
+    pub null_link_id: bool,
 }
 
 impl Default for RecordingJiraClient {
@@ -22,6 +24,7 @@ impl Default for RecordingJiraClient {
             calls: Mutex::new(Vec::new()),
             comment_id: "comment_1".to_string(),
             link_id: "link_1".to_string(),
+            null_link_id: false,
         }
     }
 }
@@ -108,8 +111,9 @@ impl JiraMutationClient for RecordingJiraClient {
             "link:{}:{}:{}",
             source_key, target_key, link_type
         ));
+        let id = if self.null_link_id { None } else { Some(self.link_id.clone()) };
         Ok(JiraCreatedIssueLink {
-            id: Some(self.link_id.clone()),
+            id,
             self_url: None,
         })
     }

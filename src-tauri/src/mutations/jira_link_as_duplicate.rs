@@ -22,6 +22,20 @@ pub fn execute_jira_link_as_duplicate<C: JiraMutationClient + ?Sized>(
         return Err(MutationError::InvalidInput("issue_key is required".into()));
     }
 
+    // Validate close transition before any remote write so a bad transition id
+    // does not leave a created link without an audit row.
+    if let Some(close_tid) = &input.close_transition_id {
+        let transitions = client
+            .list_transitions(&issue_key)
+            .map_err(|e| MutationError::Jira(e.to_string()))?;
+        let available = transitions.transitions.iter().any(|t| &t.id == close_tid);
+        if !available {
+            return Err(MutationError::InvalidInput(format!(
+                "transition '{close_tid}' is not available for issue '{issue_key}'"
+            )));
+        }
+    }
+
     let created_link = client
         .create_issue_link(&issue_key, &input.target_issue_key, &input.link_type)
         .map_err(|e| MutationError::Jira(e.to_string()))?;
@@ -52,6 +66,9 @@ pub fn execute_jira_link_as_duplicate<C: JiraMutationClient + ?Sized>(
         "inverse_transition_id": input.inverse_transition_id
     });
 
+    // Reversal requires a link_id; mark non-reversible when the provider did not return one.
+    let reversible = created_link.id.is_some() && meta.reversible;
+
     repository::append_entry(
         conn,
         AuditLogAppendInput {
@@ -61,7 +78,7 @@ pub fn execute_jira_link_as_duplicate<C: JiraMutationClient + ?Sized>(
             target_ref: target_ref(&issue_key),
             before_state: audit_state(before_state_value),
             after_state: audit_state(after_state_value),
-            reversible: meta.reversible,
+            reversible,
             created_at: None,
             source_feature: source_feature_or_manual(input.common.source_feature),
         },
@@ -210,13 +227,15 @@ mod tests {
     }
 
     #[test]
-    fn link_plus_close_calls_link_then_transition() {
+    fn link_plus_close_validates_transition_then_calls_link_and_transition() {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
         execute_jira_link_as_duplicate(&conn, &client, make_input(Some("31"), Some("11"))).unwrap();
         let calls = client.calls.lock().unwrap().clone();
-        assert_eq!(calls[0], "link:AMP-1043:AMP-997:Duplicates");
-        assert_eq!(calls[1], "transition:AMP-1043:31:");
+        // list_transitions is called first for validation, then link, then transition
+        assert_eq!(calls[0], "list_transitions:AMP-1043");
+        assert_eq!(calls[1], "link:AMP-1043:AMP-997:Duplicates");
+        assert_eq!(calls[2], "transition:AMP-1043:31:");
     }
 
     #[test]
@@ -233,10 +252,43 @@ mod tests {
             },
         }).unwrap();
         let calls = client.calls.lock().unwrap().clone();
-        assert_eq!(calls[2], "delete_link:link_1");
-        assert_eq!(calls[3], "transition:AMP-1043:11:");
+        // Forward: [0] list_transitions, [1] link, [2] transition; reverse: [3] delete_link, [4] transition back
+        assert_eq!(calls[3], "delete_link:link_1");
+        assert_eq!(calls[4], "transition:AMP-1043:11:");
         let updated = repository::get_entry(&conn, &original.id).unwrap();
         assert!(updated.reverted_at.is_some());
+    }
+
+    #[test]
+    fn unavailable_close_transition_returns_invalid_input_before_any_remote_write() {
+        let conn = open_in_memory().unwrap();
+        let client = RecordingJiraClient::default(); // available transitions: "31" and "11"
+        // Request transition "999" which is not in the mock's available list
+        let err = execute_jira_link_as_duplicate(
+            &conn,
+            &client,
+            make_input(Some("999"), Some("11")),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, MutationError::InvalidInput(_)),
+            "expected InvalidInput, got: {err:?}"
+        );
+        let calls = client.calls.lock().unwrap().clone();
+        // Only list_transitions should have been called; no link or transition calls
+        assert_eq!(calls.len(), 1, "expected exactly one call (list_transitions), got: {calls:?}");
+        assert!(calls[0].starts_with("list_transitions:"), "expected list_transitions call, got: {}", calls[0]);
+    }
+
+    #[test]
+    fn null_link_id_marks_entry_non_reversible() {
+        let conn = open_in_memory().unwrap();
+        let mut client = RecordingJiraClient::default();
+        client.null_link_id = true;
+        // link-only (no close transition) with a provider that returns no link id
+        let entry = execute_jira_link_as_duplicate(&conn, &client, make_input(None, None)).unwrap();
+        assert!(!entry.reversible, "expected reversible=false when link_id is None");
+        assert!(entry.after_state.value()["link_id"].is_null(), "link_id should be null in after_state");
     }
 
     #[test]
