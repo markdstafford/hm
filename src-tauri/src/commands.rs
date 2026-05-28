@@ -717,6 +717,107 @@ pub fn collection_views_seed_defaults(
         .map_err(|e| e.to_string())
 }
 
+// ── Jira issue history commands ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct JiraIssueStatusTransition {
+    pub event_id: String,
+    pub issue_id: String,
+    pub occurred_at: String,
+    pub actor_display_name: Option<String>,
+    pub from_status: Option<String>,
+    pub to_status: Option<String>,
+    pub complete: bool,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn jira_issue_status_timeline(
+    issue_id: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<Vec<JiraIssueStatusTransition>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    jira_issue_status_timeline_from_conn(&conn, &issue_id)
+}
+
+pub(crate) fn jira_issue_status_timeline_from_conn(
+    conn: &Connection,
+    issue_id: &str,
+) -> Result<Vec<JiraIssueStatusTransition>, String> {
+    let rows = crate::issues::history::list_issue_events_by_type(conn, issue_id, "status_changed", 500)
+        .map_err(|e| {
+            use crate::issues::history::IssueHistoryError;
+            IssueHistoryError::Storage(e).to_string()
+        })?;
+    let mut transitions: Vec<JiraIssueStatusTransition> = rows
+        .into_iter()
+        .map(|row| JiraIssueStatusTransition {
+            event_id: row.id,
+            issue_id: row.issue_id,
+            occurred_at: row.occurred_at,
+            actor_display_name: row.actor_display_name,
+            from_status: row.from_string,
+            to_status: row.to_string,
+            complete: true,
+        })
+        .collect();
+    // list_issue_events_by_type already returns DESC order; ensure it here for clarity
+    transitions.sort_by(|a, b| b.occurred_at.cmp(&a.occurred_at));
+    Ok(transitions)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn issue_snapshots_query(
+    filter: crate::issues::history::IssueSnapshotQuery,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<Vec<crate::issues::history::IssueSnapshotListItem>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    issue_snapshots_query_from_conn(&conn, &filter)
+}
+
+pub(crate) fn issue_snapshots_query_from_conn(
+    conn: &Connection,
+    filter: &crate::issues::history::IssueSnapshotQuery,
+) -> Result<Vec<crate::issues::history::IssueSnapshotListItem>, String> {
+    crate::issues::history::query_issue_snapshots(conn, filter).map_err(|e| {
+        use crate::issues::history::IssueHistoryError;
+        IssueHistoryError::Storage(e).to_string()
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn issue_history_retention_get(
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<crate::issues::history::IssueHistoryRetentionConfig, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    issue_history_retention_get_from_conn(&conn)
+}
+
+pub(crate) fn issue_history_retention_get_from_conn(
+    conn: &Connection,
+) -> Result<crate::issues::history::IssueHistoryRetentionConfig, String> {
+    crate::issues::history::load_retention_config(conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn issue_history_retention_save(
+    config: crate::issues::history::IssueHistoryRetentionConfig,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    issue_history_retention_save_to_conn(&conn, &config)
+}
+
+pub(crate) fn issue_history_retention_save_to_conn(
+    conn: &Connection,
+    config: &crate::issues::history::IssueHistoryRetentionConfig,
+) -> Result<(), String> {
+    crate::issues::history::save_retention_config(conn, config).map_err(|e| e.to_string())
+}
+
 // Ensure specta sees all source config types for TypeScript binding generation.
 // These types are used in the commands above but referenced here explicitly so
 // the specta type registry picks them up even if inference misses a variant.
@@ -742,6 +843,10 @@ const _: () = {
         _assert_specta::<CollectionViewRecord>();
         _assert_specta::<CollectionViewSaveInput>();
         _assert_specta::<CollectionViewSeedInput>();
+        _assert_specta::<JiraIssueStatusTransition>();
+        _assert_specta::<crate::issues::history::IssueSnapshotQuery>();
+        _assert_specta::<crate::issues::history::IssueSnapshotListItem>();
+        _assert_specta::<crate::issues::history::IssueHistoryRetentionConfig>();
     }
 };
 
@@ -1047,6 +1152,172 @@ mod tests {
         .into_iter()
         .collect();
         assert_eq!(keys, expected);
+    }
+
+    // ── History command tests ─────────────────────────────────────────────────
+
+    use crate::issues::history::{
+        upsert_issue_event, upsert_issue_snapshot, IssueEventInput, IssueHistoryRetentionConfig,
+        IssueSnapshotInput, IssueSnapshotQuery,
+    };
+
+    fn seeded_history_command_conn() -> Connection {
+        let conn = open_in_memory().expect("db");
+        // Insert source system
+        conn.execute(
+            "INSERT INTO source_systems (id, kind, deployment_kind, display_name, base_url, config_source_id, created_at, updated_at)
+             VALUES ('srcsys_jira_1', 'jira', 'datacenter', 'Test Jira', 'https://jira.example.com', 'primary', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).expect("seed source_system");
+        // Insert work item
+        conn.execute(
+            "INSERT INTO work_items (id, source_system_id, source_kind, upstream_id, key, title, state, raw_updated_hash, last_seen_at, created_at, updated_at)
+             VALUES ('wi_amp_1043', 'srcsys_jira_1', 'jira_issue', 'AMP-1043', 'AMP-1043', 'Fix the widget', 'open', 'abc123', '2026-05-28T00:00:00Z', '2026-05-28T00:00:00Z', '2026-05-28T00:00:00Z')",
+            [],
+        ).expect("seed work_item");
+        // Insert two status_changed events with different occurred_at timestamps
+        let event1 = IssueEventInput {
+            id: "iev_s1".to_string(),
+            source_system_id: "srcsys_jira_1".to_string(),
+            issue_id: "wi_amp_1043".to_string(),
+            entity_type: "jira_issue".to_string(),
+            entity_id: "wi_amp_1043".to_string(),
+            source_kind: "jira".to_string(),
+            event_type: "status_changed".to_string(),
+            upstream_event_id: None,
+            upstream_item_id: None,
+            field_id: None,
+            field_name: Some("status".to_string()),
+            actor_identity_id: None,
+            actor_display_name: Some("Alice".to_string()),
+            occurred_at: "2026-05-26T10:00:00Z".to_string(),
+            from_string: Some("To Do".to_string()),
+            to_string: Some("In Progress".to_string()),
+            from_json: None,
+            to_json: None,
+            payload_json: "{}".to_string(),
+            ingested_at: "2026-05-28T00:00:00Z".to_string(),
+        };
+        let event2 = IssueEventInput {
+            id: "iev_s2".to_string(),
+            occurred_at: "2026-05-27T14:00:00Z".to_string(),
+            from_string: Some("In Progress".to_string()),
+            to_string: Some("Done".to_string()),
+            ..event1.clone()
+        };
+        upsert_issue_event(&conn, &event1).expect("seed event1");
+        upsert_issue_event(&conn, &event2).expect("seed event2");
+        conn
+    }
+
+    fn seeded_history_command_conn_with_many_snapshots(n: u32) -> Connection {
+        let conn = open_in_memory().expect("db");
+        conn.execute(
+            "INSERT INTO source_systems (id, kind, deployment_kind, display_name, base_url, config_source_id, created_at, updated_at)
+             VALUES ('srcsys_jira_1', 'jira', 'datacenter', 'Test Jira', 'https://jira.example.com', 'primary', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).expect("seed source_system");
+        for i in 0..n {
+            let issue_id = format!("wi_issue_{i}");
+            conn.execute(
+                &format!(
+                    "INSERT INTO work_items (id, source_system_id, source_kind, upstream_id, key, title, state, raw_updated_hash, last_seen_at, created_at, updated_at)
+                     VALUES ('{issue_id}', 'srcsys_jira_1', 'jira_issue', 'ISSUE-{i}', 'ISSUE-{i}', 'Issue {i}', 'open', 'h{i}', '2026-05-28T00:00:00Z', '2026-05-28T00:00:00Z', '2026-05-28T00:00:00Z')"
+                ),
+                [],
+            ).expect("seed work_item");
+            let snap = IssueSnapshotInput {
+                issue_id: issue_id.clone(),
+                snapshot_date: "2026-05-28".to_string(),
+                source_system_id: "srcsys_jira_1".to_string(),
+                source_kind: "jira_issue".to_string(),
+                key: Some(format!("ISSUE-{i}")),
+                title: format!("Issue {i}"),
+                body_hash: None,
+                state: "open".to_string(),
+                status_name: Some("To Do".to_string()),
+                status_id: None,
+                resolution_name: None,
+                resolution_id: None,
+                priority_name: None,
+                priority_id: None,
+                item_type: None,
+                project_key: Some("ISSUE".to_string()),
+                project_name: None,
+                assignee_person_id: None,
+                reporter_person_id: None,
+                labels_json: "[]".to_string(),
+                components_json: "[]".to_string(),
+                fix_versions_json: "[]".to_string(),
+                sprint_names_json: "[]".to_string(),
+                product_names_json: "[]".to_string(),
+                assigned_team_names_json: "[]".to_string(),
+                customer_name: None,
+                parent_link: None,
+                epic_link: None,
+                epic_name: None,
+                epic_status: None,
+                created_at_source: None,
+                updated_at_source: None,
+                resolved_at_source: None,
+                due_at_source: None,
+                snapshot_source: "generated".to_string(),
+                generated_at: "2026-05-28T12:00:00Z".to_string(),
+            };
+            upsert_issue_snapshot(&conn, &snap).expect("seed snapshot");
+        }
+        conn
+    }
+
+    #[test]
+    fn status_timeline_returns_newest_first_status_events() {
+        let conn = seeded_history_command_conn();
+        let rows = jira_issue_status_timeline_from_conn(&conn, "wi_amp_1043").unwrap();
+        assert!(!rows.is_empty());
+        // newest first
+        for w in rows.windows(2) {
+            assert!(w[0].occurred_at >= w[1].occurred_at);
+        }
+        // event_id is always a non-empty string
+        assert!(!rows[0].event_id.is_empty());
+        // complete is always true
+        assert!(rows[0].complete);
+    }
+
+    #[test]
+    fn issue_snapshot_query_filters_and_limits() {
+        let conn = seeded_history_command_conn_with_many_snapshots(600);
+        let query = IssueSnapshotQuery {
+            snapshot_date: "2026-05-28".to_string(),
+            source_id: None,
+            project_key: None,
+            status_name: None,
+            state: None,
+            assignee_person_id: None,
+            priority_name: None,
+            label: None,
+            sprint_name: None,
+            product_name: None,
+            customer_name: None,
+            limit: Some(9999), // over the 500 cap
+        };
+        let rows = issue_snapshots_query_from_conn(&conn, &query).unwrap();
+        assert_eq!(rows.len(), 500);
+    }
+
+    #[test]
+    fn retention_commands_validate_config() {
+        let conn = seeded_history_command_conn();
+        // save and get round-trip
+        let config = IssueHistoryRetentionConfig {
+            version: 1,
+            daily_days: 90,
+            compact_to_weekly_after_days: 365,
+            weekly_anchor: "monday".to_string(),
+        };
+        issue_history_retention_save_to_conn(&conn, &config).unwrap();
+        let loaded = issue_history_retention_get_from_conn(&conn).unwrap();
+        assert_eq!(loaded.daily_days, 90);
     }
 
     #[test]
