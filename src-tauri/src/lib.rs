@@ -49,6 +49,17 @@ pub fn run() {
         commands::collection_views_seed_defaults,
         audit::commands::audit_log_list,
         audit::commands::audit_log_mark_reverted,
+        mutations::jira_update_title::jira_update_title,
+        mutations::jira_update_title::jira_update_title_reverse,
+        mutations::jira_update_labels::jira_update_labels,
+        mutations::jira_update_labels::jira_update_labels_reverse,
+        mutations::jira_reassign::jira_reassign,
+        mutations::jira_reassign::jira_reassign_reverse,
+        mutations::jira_close_issue::jira_close_issue,
+        mutations::jira_close_issue::jira_close_issue_reverse,
+        mutations::jira_link_as_duplicate::jira_link_as_duplicate,
+        mutations::jira_link_as_duplicate::jira_link_as_duplicate_reverse,
+        mutations::jira_add_comment::jira_add_comment,
     ]);
 
     #[cfg(debug_assertions)]
@@ -132,6 +143,17 @@ mod tests {
                     commands::collection_views_seed_defaults,
                     crate::audit::commands::audit_log_list,
                     crate::audit::commands::audit_log_mark_reverted,
+                    crate::mutations::jira_update_title::jira_update_title,
+                    crate::mutations::jira_update_title::jira_update_title_reverse,
+                    crate::mutations::jira_update_labels::jira_update_labels,
+                    crate::mutations::jira_update_labels::jira_update_labels_reverse,
+                    crate::mutations::jira_reassign::jira_reassign,
+                    crate::mutations::jira_reassign::jira_reassign_reverse,
+                    crate::mutations::jira_close_issue::jira_close_issue,
+                    crate::mutations::jira_close_issue::jira_close_issue_reverse,
+                    crate::mutations::jira_link_as_duplicate::jira_link_as_duplicate,
+                    crate::mutations::jira_link_as_duplicate::jira_link_as_duplicate_reverse,
+                    crate::mutations::jira_add_comment::jira_add_comment,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)
