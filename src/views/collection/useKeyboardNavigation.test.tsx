@@ -52,6 +52,8 @@ function Harness({
       <input data-testid="text-input" />
       <textarea data-testid="textarea-input" />
       <div data-testid="content-editable" contentEditable suppressContentEditableWarning>editable</div>
+      <button type="button" data-testid="row-body-button">Row body</button>
+      <button type="button" role="checkbox" data-testid="row-checkbox" aria-checked="false">Select item</button>
     </div>
   );
 }
@@ -206,6 +208,22 @@ describe("useKeyboardNavigation", () => {
     render(<Harness selectedIndex={1} onToggleSelection={onToggleSelection} />);
     const input = screen.getByTestId("text-input");
     fireEvent.keyDown(input, { key: " " });
+    expect(onToggleSelection).not.toHaveBeenCalled();
+  });
+
+  it("Space does not call onToggleSelection when focus is on a row body button", () => {
+    const onToggleSelection = vi.fn();
+    render(<Harness selectedIndex={1} onToggleSelection={onToggleSelection} />);
+    const rowBody = screen.getByTestId("row-body-button");
+    fireEvent.keyDown(rowBody, { key: " " });
+    expect(onToggleSelection).not.toHaveBeenCalled();
+  });
+
+  it("Space does not call onToggleSelection when focus is on a row checkbox button", () => {
+    const onToggleSelection = vi.fn();
+    render(<Harness selectedIndex={1} onToggleSelection={onToggleSelection} />);
+    const checkbox = screen.getByTestId("row-checkbox");
+    fireEvent.keyDown(checkbox, { key: " " });
     expect(onToggleSelection).not.toHaveBeenCalled();
   });
 
