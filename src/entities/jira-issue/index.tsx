@@ -134,6 +134,7 @@ const GROUPABLE_PROPERTIES: GroupableProperty<JiraIssueListItem, JiraIssueProper
 export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssueProperty> = {
   id: "jira-issue",
   label: "Jira issues",
+  detailLabel: "issue",
   getId: (item) => item.work_item_id,
   getRowLabel: (item) => {
     const key = item.key || "Unknown key";

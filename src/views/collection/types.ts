@@ -69,6 +69,8 @@ export type FilterableProperty<TItem, TProperty extends string> = {
 export type EntityContract<TItem, TProperty extends string> = {
   id: string;
   label: string;
+  /** Singular noun used in accessible labels (e.g. "issue", "suggestion"). Defaults to entity id. */
+  detailLabel?: string;
   getId: (item: TItem) => string;
   getRowLabel?: (item: TItem) => string;
   properties: PropertyDefinition<TItem, TProperty>[];
