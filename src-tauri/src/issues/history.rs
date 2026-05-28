@@ -166,6 +166,37 @@ impl From<rusqlite::Error> for IssueHistoryError {
     }
 }
 
+// ── Shared helpers ───────────────────────────────────────────────────────────
+
+/// Derive the coarse `state` bucket from a status name.
+/// Resolved/closed states take priority over in-progress so that a status
+/// like `"Closed (Done)"` lands on the `closed` bucket.
+pub(crate) fn coarse_state(status_name: Option<&str>) -> &'static str {
+    let Some(raw) = status_name else {
+        return "unknown";
+    };
+    let lower = raw.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return "unknown";
+    }
+    if lower.contains("closed") {
+        return "closed";
+    }
+    if lower.contains("done") || lower.contains("resolved") {
+        return "done";
+    }
+    if lower.contains("cancelled") || lower.contains("won't do") || lower.contains("wont do") {
+        return "cancelled";
+    }
+    if lower.contains("in progress") || lower.contains("review") {
+        return "in_progress";
+    }
+    match lower.as_str() {
+        "open" | "to do" | "new" | "backlog" => "open",
+        _ => "unknown",
+    }
+}
+
 // ── Repository functions ─────────────────────────────────────────────────────
 
 /// INSERT with ON CONFLICT DO UPDATE on the `id` primary key.

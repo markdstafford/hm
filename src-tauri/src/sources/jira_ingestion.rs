@@ -22,6 +22,7 @@
 use rusqlite::{params, Connection};
 use serde_json::Value;
 
+use crate::issues::history::coarse_state;
 use crate::issues::ids::{content_hash, stable_id};
 use crate::issues::people::{upsert_source_identity, SourceIdentityInput, UpsertedIdentity};
 use crate::issues::repository::{
@@ -226,30 +227,6 @@ pub struct ProjectedJiraIssue {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-/// Coarse status grouping used for `work_items.state`. Resolved/closed states
-/// take priority over the in-progress check so a status like
-/// `"Closed (Done)"` lands on the closed bucket.
-fn coarse_state(status_name: Option<&str>) -> &'static str {
-    let Some(raw) = status_name else { return "unknown" };
-    let lower = raw.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return "unknown";
-    }
-    if lower.contains("closed") {
-        return "closed";
-    }
-    if lower.contains("done") || lower.contains("resolved") {
-        return "done";
-    }
-    if lower.contains("in progress") || lower.contains("review") {
-        return "in_progress";
-    }
-    match lower.as_str() {
-        "open" | "to do" | "new" | "backlog" => "open",
-        _ => "unknown",
-    }
-}
 
 /// Extract a string value from a JSON node, treating non-strings/nulls as None.
 fn as_string(v: Option<&Value>) -> Option<String> {

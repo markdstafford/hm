@@ -11,8 +11,8 @@ use rusqlite::{params, Connection};
 use serde_json;
 
 use crate::issues::history::{
-    query_issue_events_for_issue, upsert_issue_snapshot, IssueEventRow, IssueHistoryError,
-    IssueSnapshotInput,
+    coarse_state, query_issue_events_for_issue, upsert_issue_snapshot, IssueEventRow,
+    IssueHistoryError, IssueSnapshotInput,
 };
 
 // ── Working state type ────────────────────────────────────────────────────────
@@ -55,37 +55,6 @@ pub struct SnapshotState {
     pub resolved_at_source: Option<String>,
     pub due_at_source: Option<String>,
     pub body_hash: Option<String>,
-}
-
-// ── Coarse state helper ───────────────────────────────────────────────────────
-
-/// Derive the coarse `state` bucket from a status name.
-/// Mirrors `coarse_state` in `jira_ingestion.rs` but is kept local to avoid
-/// a cross-module dependency on a private function.
-fn coarse_state(status_name: Option<&str>) -> &'static str {
-    let Some(raw) = status_name else {
-        return "unknown";
-    };
-    let lower = raw.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return "unknown";
-    }
-    if lower.contains("closed") {
-        return "closed";
-    }
-    if lower.contains("done") || lower.contains("resolved") {
-        return "done";
-    }
-    if lower.contains("cancelled") || lower.contains("won't do") || lower.contains("wont do") {
-        return "cancelled";
-    }
-    if lower.contains("in progress") || lower.contains("review") {
-        return "in_progress";
-    }
-    match lower.as_str() {
-        "open" | "to do" | "new" | "backlog" => "open",
-        _ => "unknown",
-    }
 }
 
 /// Parse a comma-separated string into a sorted, trimmed, deduplicated vec.
