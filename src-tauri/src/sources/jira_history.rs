@@ -326,14 +326,18 @@ mod tests {
 
     #[test]
     fn deleted_author_uses_display_name_without_identity_when_no_stable_key_exists() {
-        let event = project_deleted_author_fixture().unwrap().remove(0);
+        let mut events = project_deleted_author_fixture().unwrap();
+        assert!(!events.is_empty(), "fixture should produce at least one event");
+        let event = events.remove(0);
         assert_eq!(event.actor_display_name.as_deref(), Some("Deleted User"));
         assert_eq!(event.actor_identity_id, None);
     }
 
     #[test]
-    fn unknown_custom_fields_are_persisted_as_field_changed_rows() {
-        let event = project_unknown_custom_field_fixture().unwrap().remove(0);
+    fn unknown_custom_fields_project_as_field_changed_events() {
+        let mut events = project_unknown_custom_field_fixture().unwrap();
+        assert!(!events.is_empty(), "fixture should contain customfield_99999 event");
+        let event = events.remove(0);
         assert_eq!(event.event_type, "field_changed");
         assert_eq!(event.field_id.as_deref(), Some("customfield_99999"));
     }
