@@ -109,16 +109,20 @@ export function compareHygieneByConfidence(a: HygieneSuggestion, b: HygieneSugge
   return a.confidence - b.confidence;
 }
 
+export function rawStatus(item: HygieneSuggestion): string | null {
+  return item.target.status?.trim() || null;
+}
+
+export function rawAssignee(item: HygieneSuggestion): string | null {
+  return item.target.assignee?.trim() || null;
+}
+
 export function compareHygieneByStatus(a: HygieneSuggestion, b: HygieneSuggestion): number {
-  return compareStringsNullLast(derivedStatus(a), derivedStatus(b));
+  return compareStringsNullLast(rawStatus(a), rawStatus(b));
 }
 
 export function compareHygieneByAssignee(a: HygieneSuggestion, b: HygieneSuggestion): number {
-  return compareStringsNullLast(itemAssigneeForSort(a), itemAssigneeForSort(b));
-}
-
-function itemAssigneeForSort(item: HygieneSuggestion): string | null {
-  return item.target.assignee?.trim() || null;
+  return compareStringsNullLast(rawAssignee(a), rawAssignee(b));
 }
 
 export function compareHygieneByKey(a: HygieneSuggestion, b: HygieneSuggestion): number {
@@ -131,9 +135,14 @@ export function compareHygieneByTitle(a: HygieneSuggestion, b: HygieneSuggestion
 
 function optionsFromItems(
   items: HygieneSuggestion[],
-  getValue: (item: HygieneSuggestion) => string,
+  getValue: (item: HygieneSuggestion) => string | null,
 ): FilterOption[] {
-  return [...new Set(items.map(getValue))]
+  const seen = new Set<string>();
+  for (const item of items) {
+    const value = getValue(item);
+    if (value !== null && value !== "") seen.add(value);
+  }
+  return [...seen]
     .sort((a, b) => a.localeCompare(b))
     .map((value) => ({ id: value, label: value }));
 }
@@ -147,11 +156,11 @@ function categoryOptions(): FilterOption[] {
 }
 
 function statusOptions(context: FilterOptionContext<HygieneSuggestion>): FilterOption[] {
-  return optionsFromItems(context.items as HygieneSuggestion[], derivedStatus);
+  return optionsFromItems(context.items as HygieneSuggestion[], rawStatus);
 }
 
 function assigneeOptions(context: FilterOptionContext<HygieneSuggestion>): FilterOption[] {
-  return optionsFromItems(context.items as HygieneSuggestion[], derivedAssignee);
+  return optionsFromItems(context.items as HygieneSuggestion[], rawAssignee);
 }
 
 export const hygieneFilterableProperties: FilterableProperty<
@@ -163,7 +172,7 @@ export const hygieneFilterableProperties: FilterableProperty<
   { property: "title", kind: "text", getValue: derivedTitle },
   { property: "confidence", kind: "number", getValue: (item) => item.confidence },
   { property: "category", kind: "select", getValue: (item) => item.category, options: categoryOptions },
-  { property: "status", kind: "select", getValue: derivedStatus, options: statusOptions },
-  { property: "assignee", kind: "person", getValue: derivedAssignee, options: assigneeOptions },
+  { property: "status", kind: "select", getValue: rawStatus, options: statusOptions },
+  { property: "assignee", kind: "person", getValue: rawAssignee, options: assigneeOptions },
   { property: "rationale", kind: "text", getValue: (item) => item.rationale },
 ];

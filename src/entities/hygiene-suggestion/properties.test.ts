@@ -15,6 +15,8 @@ import {
 } from "./properties";
 import { HYGIENE_SUGGESTION_DEFAULT_VIEWS, DEFAULT_PROPERTIES } from "./defaults";
 import { hygieneSuggestionEntity } from ".";
+import { sortCollectionItems } from "../../views/collection/sort";
+import { filterMatchesItem } from "../../views/collection/filter/predicates";
 
 const base: HygieneSuggestion = {
   id: "sug-1",
@@ -93,6 +95,72 @@ describe("hygiene suggestion defaults and entity", () => {
     expect(highConfView.filters).toEqual([
       { id: "hygiene-confidence-gte-85", property: "confidence", operator: "gte", value: "85", active: true },
     ]);
+  });
+
+  it("sorts missing status last for both ascending and descending order", () => {
+    const open = { ...base, id: "open", target: { ...base.target, status: "Open" } };
+    const closed = { ...base, id: "closed", target: { ...base.target, status: "Closed" } };
+    const noStatus = { ...base, id: "no-status", target: { ...base.target, status: null } };
+    const blankStatus = { ...base, id: "blank-status", target: { ...base.target, status: "   " } };
+
+    const ascending = sortCollectionItems(
+      [noStatus, open, blankStatus, closed],
+      hygieneSuggestionEntity,
+      [{ property: "status", direction: "asc" }],
+    );
+    expect(ascending.map((item) => item.id).slice(0, 2)).toEqual(["closed", "open"]);
+    expect(new Set(ascending.map((item) => item.id).slice(2))).toEqual(new Set(["no-status", "blank-status"]));
+
+    const descending = sortCollectionItems(
+      [noStatus, open, blankStatus, closed],
+      hygieneSuggestionEntity,
+      [{ property: "status", direction: "desc" }],
+    );
+    expect(descending.map((item) => item.id).slice(0, 2)).toEqual(["open", "closed"]);
+    expect(new Set(descending.map((item) => item.id).slice(2))).toEqual(new Set(["no-status", "blank-status"]));
+  });
+
+  it("treats missing status and assignee as empty for filter predicates", () => {
+    const missing = { ...base, id: "missing", target: { ...base.target, status: null, assignee: null } };
+    const present = { ...base, id: "present", target: { ...base.target, status: "Open", assignee: "Priya Naidu" } };
+
+    const statusEmpty = { id: "f1", property: "status", operator: "empty", value: "", active: true };
+    expect(filterMatchesItem({ row: statusEmpty, item: missing, entity: hygieneSuggestionEntity })).toBe(true);
+    expect(filterMatchesItem({ row: statusEmpty, item: present, entity: hygieneSuggestionEntity })).toBe(false);
+
+    const statusNotEmpty = { id: "f2", property: "status", operator: "not-empty", value: "", active: true };
+    expect(filterMatchesItem({ row: statusNotEmpty, item: missing, entity: hygieneSuggestionEntity })).toBe(false);
+    expect(filterMatchesItem({ row: statusNotEmpty, item: present, entity: hygieneSuggestionEntity })).toBe(true);
+
+    const assigneeEmpty = { id: "f3", property: "assignee", operator: "empty", value: "", active: true };
+    expect(filterMatchesItem({ row: assigneeEmpty, item: missing, entity: hygieneSuggestionEntity })).toBe(true);
+    expect(filterMatchesItem({ row: assigneeEmpty, item: present, entity: hygieneSuggestionEntity })).toBe(false);
+
+    const assigneeNotEmpty = { id: "f4", property: "assignee", operator: "not-empty", value: "", active: true };
+    expect(filterMatchesItem({ row: assigneeNotEmpty, item: missing, entity: hygieneSuggestionEntity })).toBe(false);
+    expect(filterMatchesItem({ row: assigneeNotEmpty, item: present, entity: hygieneSuggestionEntity })).toBe(true);
+
+    const statusIsOpen = { id: "f5", property: "status", operator: "is", value: "Open", active: true };
+    expect(filterMatchesItem({ row: statusIsOpen, item: missing, entity: hygieneSuggestionEntity })).toBe(false);
+    expect(filterMatchesItem({ row: statusIsOpen, item: present, entity: hygieneSuggestionEntity })).toBe(true);
+  });
+
+  it("does not surface display fallbacks (No status, Unassigned) as filter options", () => {
+    const missing = { ...base, id: "missing", target: { ...base.target, status: null, assignee: null } };
+    const present = { ...base, id: "present", target: { ...base.target, status: "Open", assignee: "Priya Naidu" } };
+    const items = [missing, present];
+
+    const statusFilter = hygieneFilterableProperties.find((row) => row.property === "status");
+    const assigneeFilter = hygieneFilterableProperties.find((row) => row.property === "assignee");
+    const statusOptions = typeof statusFilter?.options === "function"
+      ? statusFilter.options({ items, optionsByProperty: undefined })
+      : [];
+    const assigneeOptions = typeof assigneeFilter?.options === "function"
+      ? assigneeFilter.options({ items, optionsByProperty: undefined })
+      : [];
+
+    expect(statusOptions.map((opt) => opt.label)).toEqual(["Open"]);
+    expect(assigneeOptions.map((opt) => opt.label)).toEqual(["Priya Naidu"]);
   });
 
   it("assembles an entity contract with accessible row labels", () => {

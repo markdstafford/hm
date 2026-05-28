@@ -92,7 +92,7 @@ export const hygieneSuggestionEntity: EntityContract<HygieneSuggestion, HygieneS
     { property: "action", compare: compareHygieneByAction },
     { property: "category", compare: compareHygieneByCategory },
     { property: "confidence", compare: compareHygieneByConfidence, defaultDirection: "desc" },
-    { property: "status", compare: compareHygieneByStatus },
+    { property: "status", compare: compareHygieneByStatus, isNull: (item) => !item.target.status?.trim() },
     { property: "assignee", compare: compareHygieneByAssignee, isNull: (item) => !item.target.assignee?.trim() },
     { property: "key", compare: compareHygieneByKey },
     { property: "title", compare: compareHygieneByTitle },
