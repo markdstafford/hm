@@ -166,6 +166,10 @@ export function useCollectionViewer({
   const openPreview = useCallback(() => setPreviewOpen(true), []);
   const closePreview = useCallback(() => setPreviewOpen(false), []);
 
+  const toggleSelectedRowSelection = useCallback(() => {
+    if (selectedId) rowSelection.toggle(selectedId);
+  }, [selectedId, rowSelection]);
+
   useKeyboardNavigation({
     enabled: active && !settingsOpen,
     selectedIndex,
@@ -177,6 +181,7 @@ export function useCollectionViewer({
     onMoveNext: moveNext,
     onOpenPreview: openPreview,
     onClosePreview: closePreview,
+    onToggleSelection: toggleSelectedRowSelection,
   });
 
   useEffect(() => {
