@@ -334,7 +334,7 @@ Persistent ~28px row at the very bottom (`--height-footer`). Three zones:
 
 ### Composer
 
-`<AppShell>` at `src/shell/AppShell.tsx` composes the layout. The API is **flat slot props** — one prop per zone: `sidebarTitleBar`, `sidebarHeader`, `sidebarContent`, `mainTitleBarStart` (page identity), `mainTitleBarEnd` (page-level actions), `mainHeader`, `mainContent`, `footerLeft`, `footerCenter`, `footerRight`, plus an optional `scrollCollapse` prop (default `"none"`) reserved for the user-configurable behavior below. The shell renders a `data-tauri-drag-region` spacer between `mainTitleBarStart` and `mainTitleBarEnd` so consumers do not have to thread drag-region attributes through their own slot content. The shell internally owns sidebar visibility, breakpoint detection (`useViewportBreakpoint`), the overlay drawer at narrow widths, and drag-region wiring on the title-bar spacers.
+`<AppShell>` at `src/shell/AppShell.tsx` composes the layout. The API is **flat slot props** — one prop per zone: `sidebarTitleBar`, `sidebarHeader`, `sidebarContent`, `mainTitleBarStart` (page identity), `mainTitleBarEnd` (page-level actions), `mainHeader`, `mainContent`, `footerLeft`, `footerCenter`, `footerRight`, plus an optional `scrollCollapse` prop (default `"none"`) reserved for the user-configurable behavior below. The shell renders a `data-tauri-drag-region` spacer between `mainTitleBarStart` and `mainTitleBarEnd` and wires that spacer to Tauri's native `startDragging()` API, so consumers do not have to thread drag-region attributes or window-drag handlers through their own slot content. The shell internally owns sidebar visibility, breakpoint detection (`useViewportBreakpoint`), the overlay drawer at narrow widths, and drag-region wiring on the title-bar spacers.
 
 **Wide and narrow visibility are tracked separately.** Wide mode mounts with the sidebar visible in its column. Narrow mode auto-collapses on mount and never opens automatically — the overlay drawer appears only after the user presses `[` or clicks the footer toggle. Switching breakpoints does not bleed state between modes: hiding the wide-mode column does not preset the narrow-mode overlay, and dismissing the overlay does not hide the wide-mode column on a subsequent resize.
 
@@ -349,8 +349,10 @@ The top stripe of the window (the title bar row at minimum; extending through th
 **Rules:**
 
 1. `data-tauri-drag-region` is set **directly on each drag-active element** (the mantle background to the right of the stoplight spacer in the sidebar's title-bar zone, the `flex-1` spacer between breadcrumb and action buttons in the main pane's title-bar zone, the `flex-1` spacer in the main pane's header-bar zone when applicable). Do **not** rely on inheritance through nested flex children — `-webkit-app-region` is not reliably inherited.
-2. A 72px (`--width-traffic-light`) `.titlebar-no-drag` spacer sits at the very left of the title bar row so macOS stoplights remain clickable.
-3. `index.html` injects the CSS that maps `[data-tauri-drag-region]` and `.titlebar-no-drag` to `-webkit-app-region: drag` / `no-drag` (Tailwind v4 / Lightning CSS strips non-standard CSS properties). Keep that `<style>` block intact.
+2. Each direct drag-active title-bar spacer in `AppShell.tsx` also calls `startWindowDragFromPointerEvent` from `src/shell/windowDrag.ts` on `pointerdown`. This explicit Tauri-native bridge is required for reliable macOS dragging when `src-tauri/tauri.conf.json` uses `titleBarStyle: "Overlay"` and `hiddenTitle: true`.
+3. A 72px (`--width-traffic-light`) `.titlebar-no-drag` spacer sits at the very left of the title bar row so macOS stoplights remain clickable.
+4. Interactive elements in or near the title-bar drag stripe, including collection dnd-kit drag handles, carry or are wrapped by `.titlebar-no-drag` so they do not start a window drag.
+5. `index.html` injects the CSS that maps `[data-tauri-drag-region]` and `.titlebar-no-drag` to `-webkit-app-region: drag` / `no-drag` (Tailwind v4 / Lightning CSS strips non-standard CSS properties). Keep that `<style>` block intact as a fallback and as documentation for WebView hit testing.
 
 ### Stoplight clearance
 
@@ -468,7 +470,7 @@ Labels in `text-subtext`; counts in `text-text` with `tabular-nums`; separator d
 
 ### Drag-region islands
 
-Inside the drag stripe, every interactive element is wrapped in a `.titlebar-no-drag` container, and the empty space between them carries `data-tauri-drag-region` directly. The pattern:
+Inside the drag stripe, every interactive element is wrapped in a `.titlebar-no-drag` container, and the empty space between them carries `data-tauri-drag-region` plus `onPointerDown={startWindowDragFromPointerEvent}` directly. The pattern:
 
 ```tsx
 <div className={`flex h-[var(--height-title-bar)]`}>
@@ -482,7 +484,7 @@ Inside the drag stripe, every interactive element is wrapped in a `.titlebar-no-
     <span className="titlebar-no-drag flex items-center gap-2">
       {/* breadcrumb */}
     </span>
-    <div data-tauri-drag-region className="flex-1" />
+    <div data-tauri-drag-region onPointerDown={startWindowDragFromPointerEvent} className="flex-1" />
     <span className="titlebar-no-drag flex items-center gap-2">
       {/* action buttons */}
     </span>
