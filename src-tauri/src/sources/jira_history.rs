@@ -52,6 +52,11 @@ pub fn issue_changelog_cursor_key(issue_key: &str) -> String {
 /// Non-UTC offsets are left as-is (they will be stored verbatim). If the
 /// string cannot be parsed at all, the original is returned unchanged so we
 /// never silently lose data.
+///
+/// Limitations:
+/// - Does not handle the `-0000` UTC representation; such values are stored verbatim.
+/// - Non-UTC offsets (e.g. `+0530`) are preserved but remain in non-colon-separated
+///   form and are therefore not strictly RFC 3339 compliant.
 pub fn normalize_jira_datetime(created: &str) -> String {
     // Strip fractional seconds: "...T11:00:00.000+0000" → "...T11:00:00+0000"
     let without_ms = if let Some(dot_pos) = created.find('.') {
@@ -143,12 +148,12 @@ pub fn project_changelog_entry(
             issue_id: issue_id.to_string(),
             entity_type: "jira_issue".to_string(),
             entity_id: issue_id.to_string(),
-            source_kind: "jira".to_string(),
+            source_kind: "jira".to_string(), // source system kind (not entity kind — entity_type holds "jira_issue")
             event_type: event_type.to_string(),
             upstream_event_id: Some(entry.id.clone()),
             upstream_item_id: Some(format!("{}_{}", entry.id, idx)),
             field_id: Some(item.field.clone()),
-            field_name: Some(item.field.clone()),
+            field_name: Some(item.field.clone()), // raw Jira field key; display label lookup deferred to future work
             actor_identity_id: actor_identity_id.map(str::to_string),
             actor_display_name: actor_display_name.clone(),
             occurred_at: occurred_at.clone(),
