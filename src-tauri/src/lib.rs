@@ -46,6 +46,8 @@ pub fn run() {
         commands::collection_view_save,
         commands::collection_view_delete,
         commands::collection_views_seed_defaults,
+        audit::commands::audit_log_list,
+        audit::commands::audit_log_mark_reverted,
     ]);
 
     #[cfg(debug_assertions)]
@@ -127,6 +129,8 @@ mod tests {
                     commands::collection_view_save,
                     commands::collection_view_delete,
                     commands::collection_views_seed_defaults,
+                    crate::audit::commands::audit_log_list,
+                    crate::audit::commands::audit_log_mark_reverted,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)
