@@ -1,3 +1,4 @@
+use crate::mutations::errors::MutationError;
 use crate::sources::jira_errors::JiraApiError;
 use crate::sources::jira_types::{JiraCreatedComment, JiraCreatedIssueLink, JiraTransitionsResponse};
 
@@ -29,4 +30,14 @@ impl JiraMutationClient for crate::sources::jira_client::JiraApiClient {
     fn delete_issue_link(&self, link_id: &str) -> Result<(), JiraApiError> {
         self.delete_issue_link(link_id)
     }
+}
+
+/// Resolve the real Jira client for a given source_id.
+/// TODO (Task 11): wire up proper settings/keychain lookup.
+pub fn resolve_real_client(
+    _conn: &rusqlite::Connection,
+    _app: &tauri::AppHandle,
+    source_id: &str,
+) -> Result<Box<dyn JiraMutationClient>, MutationError> {
+    Err(MutationError::SourceNotFound(source_id.to_string()))
 }
