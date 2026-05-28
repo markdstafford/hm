@@ -12,7 +12,7 @@ use serde_json;
 
 use crate::issues::history::{
     coarse_state, query_issue_events_for_issue, upsert_issue_snapshot, IssueEventRow,
-    IssueHistoryError, IssueSnapshotInput,
+    IssueHistoryError, IssueHistoryRetentionConfig, IssueSnapshotInput,
 };
 
 // ── Working state type ────────────────────────────────────────────────────────
@@ -673,8 +673,6 @@ fn prev_date(date: &str) -> String {
     }
 }
 
-use crate::issues::history::IssueHistoryRetentionConfig;
-
 /// Compact old snapshot rows for `source_system_id`:
 /// - Keep rows in the recent daily window (last `config.daily_days` days) as-is.
 /// - For older rows: keep Monday rows (updating `snapshot_source` to
@@ -1311,6 +1309,7 @@ mod tests {
         assert!(result.kept_daily_rows > 0, "should have kept daily rows");
         // Old rows were compacted (deleted non-Monday rows outside daily window)
         assert!(result.deleted_daily_rows > 0, "should have deleted old non-Monday rows");
+        assert!(result.compacted_weekly_rows > 0, "expected some Monday rows to be compacted to weekly");
         // issue_events are untouched
         let event_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM issue_events", [], |row| row.get(0))
