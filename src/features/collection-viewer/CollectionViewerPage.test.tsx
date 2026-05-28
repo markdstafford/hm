@@ -737,6 +737,32 @@ describe("CollectionViewerPage", () => {
     expect(screen.getByText(/try changing or clearing filters/i)).toBeInTheDocument();
   });
 
+  it("lets row checkbox selection stay independent from detail preview", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Wait for rows to render
+    await screen.findByRole("button", { name: /open amp-1: first issue/i });
+
+    // Find the checkbox for the first issue row (label is "Select wid-1")
+    const checkbox = screen.getByRole("checkbox", { name: /select wid-1/i });
+
+    // Initially unchecked
+    expect(checkbox).toHaveAttribute("data-state", "unchecked");
+
+    // Click the checkbox — detail panel must NOT open
+    fireEvent.click(checkbox);
+    expect(checkbox).toHaveAttribute("data-state", "checked");
+    expect(screen.queryByRole("button", { name: /close issue detail/i })).not.toBeInTheDocument();
+
+    // Click the row body — detail panel DOES open
+    fireEvent.click(screen.getByRole("button", { name: /open amp-1: first issue/i }));
+    expect(await screen.findByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
+
+    // Checkbox remains checked after row body click
+    expect(screen.getByRole("checkbox", { name: /select wid-1/i })).toHaveAttribute("data-state", "checked");
+  });
+
   it("passes active view property visibility to rows so hidden properties disappear", async () => {
     const records = [
       {

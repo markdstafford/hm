@@ -36,6 +36,7 @@ import type { ViewConfig } from "../../views/collection/ViewConfig";
 import { buildConfigPatchView, buildRenameView } from "./viewConfigPersistence";
 import { ViewSettingsMenu } from "../../views/collection/menu/ViewSettingsMenu";
 import { useKeyboardNavigation } from "../../views/collection/useKeyboardNavigation";
+import { useSelection } from "../../views/collection/selection/useSelection";
 
 const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -60,6 +61,7 @@ export function useCollectionViewer({
   active,
 }: UseCollectionViewerArgs): UseCollectionViewerResult {
   const { issues, loading, error } = useJiraIssues();
+  const rowSelection = useSelection();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
   const [views, setViews] = useState<CollectionView[]>([]);
@@ -448,6 +450,11 @@ export function useCollectionViewer({
               onToggleGroupCollapsed={toggleGroupCollapsed}
               selectedId={selectedId}
               density={activeConfig.layout.density}
+              selection={{
+                selectedIds: rowSelection.selectedIds,
+                onToggle: (item) => rowSelection.toggle(jiraIssueEntity.getId(item)),
+                getLabel: (item) => `Select ${jiraIssueEntity.getId(item)}`,
+              }}
               onSelect={handleSelect}
             />
           </div>
