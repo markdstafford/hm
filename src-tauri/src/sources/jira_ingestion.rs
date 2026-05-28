@@ -1456,7 +1456,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             .as_deref()
             .and_then(|ts| subtract_seconds_rfc3339(ts, self.overlap_seconds));
 
-        let jql = match overlap_adjusted.as_deref() {
+        let jql = match overlap_adjusted.as_deref().and_then(jql_datetime) {
             Some(filter_ts) => format!(
                 "project = \"{}\" AND updated >= \"{}\" ORDER BY updated ASC, key ASC",
                 project_key, filter_ts
@@ -1895,6 +1895,18 @@ fn should_stop_paginate(
         return start_at.saturating_add(returned) >= total;
     }
     returned < requested
+}
+
+/// Convert an RFC 3339 timestamp to Jira JQL datetime format `"YYYY-MM-DD HH:mm"`.
+/// Jira Server / Data Center rejects ISO 8601 (`T` separator, `Z` suffix) in JQL.
+/// Returns `None` if the input doesn't start with a parseable date+time prefix.
+fn jql_datetime(rfc3339: &str) -> Option<String> {
+    let date = rfc3339.get(..10)?; // "YYYY-MM-DD"
+    if rfc3339.as_bytes().get(10) != Some(&b'T') {
+        return None;
+    }
+    let time = rfc3339.get(11..16)?; // "HH:mm"
+    Some(format!("{date} {time}"))
 }
 
 /// Best-effort RFC 3339 timestamp shift: subtract `seconds` from `ts` and
@@ -2595,6 +2607,21 @@ mod tests {
     }
 
     #[test]
+    fn jql_datetime_converts_rfc3339_to_jira_format() {
+        assert_eq!(
+            jql_datetime("2026-05-24T23:59:00Z").as_deref(),
+            Some("2026-05-24 23:59")
+        );
+        // Jira returns timestamps with milliseconds and numeric offset
+        assert_eq!(
+            jql_datetime("2026-05-25T16:33:31.000+0000").as_deref(),
+            Some("2026-05-25 16:33")
+        );
+        assert_eq!(jql_datetime("not-a-timestamp"), None);
+        assert_eq!(jql_datetime("2026-05-25"), None); // no T separator
+    }
+
+    #[test]
     fn ingests_multi_page_search_and_records_progress_total() {
         let conn = open_in_memory().expect("db");
         seed_amp_source(&conn, "srcsys_1");
@@ -2750,7 +2777,7 @@ mod tests {
             "jql missing project filter: {first_jql}"
         );
         assert!(
-            first_jql.contains("updated >= \"2026-05-24T23:59:00Z\""),
+            first_jql.contains("updated >= \"2026-05-24 23:59\""),
             "jql missing overlap-adjusted updated filter: {first_jql}"
         );
 
