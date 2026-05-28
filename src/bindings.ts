@@ -56,6 +56,19 @@ export const commands = {
 	collectionViewSave: (view: CollectionViewSaveInput) => typedError<CollectionViewRecord, string>(__TAURI_INVOKE("collection_view_save", { view })),
 	collectionViewDelete: (id: string) => typedError<null, string>(__TAURI_INVOKE("collection_view_delete", { id })),
 	collectionViewsSeedDefaults: (input: CollectionViewSeedInput) => typedError<CollectionViewRecord[], string>(__TAURI_INVOKE("collection_views_seed_defaults", { input })),
+	auditLogList: (filter: AuditLogListFilter) => typedError<AuditLogEntry[], string>(__TAURI_INVOKE("audit_log_list", { filter })),
+	auditLogMarkReverted: (input: AuditLogMarkRevertedInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("audit_log_mark_reverted", { input })),
+	jiraUpdateTitle: (input: JiraUpdateTitleInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_update_title", { input })),
+	jiraUpdateTitleReverse: (input: JiraReverseMutationInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_update_title_reverse", { input })),
+	jiraUpdateLabels: (input: JiraUpdateLabelsInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_update_labels", { input })),
+	jiraUpdateLabelsReverse: (input: JiraReverseMutationInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_update_labels_reverse", { input })),
+	jiraReassign: (input: JiraReassignInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_reassign", { input })),
+	jiraReassignReverse: (input: JiraReverseMutationInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_reassign_reverse", { input })),
+	jiraCloseIssue: (input: JiraCloseIssueInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_close_issue", { input })),
+	jiraCloseIssueReverse: (input: JiraReverseMutationInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_close_issue_reverse", { input })),
+	jiraLinkAsDuplicate: (input: JiraLinkAsDuplicateInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_link_as_duplicate", { input })),
+	jiraLinkAsDuplicateReverse: (input: JiraReverseMutationInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_link_as_duplicate_reverse", { input })),
+	jiraAddComment: (input: JiraAddCommentInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_add_comment", { input })),
 };
 
 /* Types */
@@ -102,6 +115,38 @@ export type AppStatus = {
 	ready: boolean,
 };
 
+export type AuditLogEntry = {
+	id: string,
+	batch_id: string,
+	action_id: string,
+	target_ref: string,
+	before_state: AuditState,
+	after_state: AuditState,
+	reversible: boolean,
+	reverted_at: string | null,
+	reverted_by_action_id: string | null,
+	created_at: string,
+	source_feature: string,
+};
+
+export type AuditLogListFilter = {
+	batch_id: string | null,
+	target_ref: string | null,
+	reversible: boolean | null,
+	created_from: string | null,
+	created_to: string | null,
+	newest_first: boolean | null,
+	limit: number | null,
+};
+
+export type AuditLogMarkRevertedInput = {
+	id: string,
+	reverted_by_action_id: string,
+	reverted_at: string | null,
+};
+
+export type AuditState = unknown;
+
 export type CollectionViewRecord = {
 	id: string,
 	entity_kind: string,
@@ -135,7 +180,21 @@ export type ConnectionTestSummary = {
 
 export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
 
+export type JiraAddCommentInput = {
+	common: MutationCommonInput,
+	body: string,
+};
+
 export type JiraAuthConfig = { type: "Pat"; credential_ref: string };
+
+export type JiraCloseIssueInput = {
+	common: MutationCommonInput,
+	transition_id: string,
+	inverse_transition_id: string | null,
+	before_status: string,
+	after_status: string,
+	comment: string | null,
+};
 
 export type JiraConnectionErrorCategory = "InvalidUrl" | "AuthFailed" | "Forbidden" | "Network" | "RateLimited" | "Server" | "Unsupported" | "Unavailable" | "MissingCredential";
 
@@ -204,10 +263,30 @@ export type JiraIssueListItem = {
 	labels: string[],
 };
 
+export type JiraLinkAsDuplicateInput = {
+	common: MutationCommonInput,
+	target_issue_key: string,
+	link_type: string,
+	close_transition_id: string | null,
+	inverse_transition_id: string | null,
+	before_status: string | null,
+	after_status: string | null,
+};
+
 export type JiraProjectFilter = {
 	key: string,
 	name: string | null,
 	id: string | null,
+};
+
+export type JiraReassignInput = {
+	common: MutationCommonInput,
+	before_assignee_account_id: string | null,
+	after_assignee_account_id: string | null,
+};
+
+export type JiraReverseMutationInput = {
+	common: ReverseCommonInput,
 };
 
 export type JiraSourceConfig = {
@@ -220,6 +299,32 @@ export type JiraSourceConfig = {
 	last_connection_test: ConnectionTestSummary | null,
 	created_at: string,
 	updated_at: string,
+};
+
+export type JiraUpdateLabelsInput = {
+	common: MutationCommonInput,
+	before_labels: string[],
+	after_labels: string[],
+};
+
+export type JiraUpdateTitleInput = {
+	common: MutationCommonInput,
+	before_title: string,
+	after_title: string,
+};
+
+export type MutationCommonInput = {
+	source_id: string,
+	issue_key: string,
+	source_feature: string | null,
+	batch_id: string | null,
+};
+
+export type ReverseCommonInput = {
+	source_id: string,
+	audit_entry_id: string,
+	source_feature: string | null,
+	batch_id: string | null,
 };
 
 export type SmokeTestResult = {

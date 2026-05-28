@@ -180,6 +180,7 @@ fn map_api_error_to_client_error(
         JiraApiError::Network => JiraClientError::Network,
         JiraApiError::Decode => JiraClientError::Decode,
         JiraApiError::NotFound | JiraApiError::BadRequest => JiraClientError::Server,
+        JiraApiError::Conflict | JiraApiError::UnsafeWriteUnknownOutcome => JiraClientError::Server,
     }
 }
 

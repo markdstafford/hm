@@ -21,6 +21,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     )?;
     crate::collections::views::setup_schema(conn)?;
     crate::issues::schema::setup_schema(conn)?;
+    crate::audit::repository::setup_schema(conn)?;
     Ok(())
 }
 
@@ -128,6 +129,24 @@ mod tests {
             count, 1,
             "collection_view_seed_state table must exist after schema setup"
         );
+    }
+
+    #[test]
+    fn schema_creates_audit_log_table_and_indexes() {
+        let conn = open_in_memory().expect("database should open");
+        for (kind, name) in [
+            ("table", "audit_log"),
+            ("index", "idx_audit_log_created_at"),
+            ("index", "idx_audit_log_batch_id"),
+            ("index", "idx_audit_log_target_ref"),
+        ] {
+            let count: i64 = conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type=?1 AND name=?2",
+                [kind, name],
+                |row| row.get(0),
+            ).expect("query should succeed");
+            assert_eq!(count, 1, "{kind} {name} must exist after schema setup");
+        }
     }
 
     #[test]

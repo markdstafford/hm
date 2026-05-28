@@ -13,6 +13,8 @@ pub enum JiraApiError {
     Server { status: u16 },
     Network,
     Decode,
+    Conflict,
+    UnsafeWriteUnknownOutcome,
 }
 
 impl JiraApiError {
@@ -22,6 +24,7 @@ impl JiraApiError {
             401 => JiraApiError::Unauthorized,
             403 => JiraApiError::Forbidden,
             404 => JiraApiError::NotFound,
+            409 => JiraApiError::Conflict,
             429 => JiraApiError::RateLimited { retry_after_seconds },
             _ => JiraApiError::Server { status },
         }
@@ -69,6 +72,8 @@ impl fmt::Display for JiraApiError {
             }
             JiraApiError::Network => f.write_str("network error connecting to Jira"),
             JiraApiError::Decode => f.write_str("could not decode Jira response"),
+            JiraApiError::Conflict => f.write_str("Jira rejected the write because the resource changed"),
+            JiraApiError::UnsafeWriteUnknownOutcome => f.write_str("Jira write outcome is unknown; not retrying to avoid duplicate changes"),
         }
     }
 }
@@ -101,6 +106,8 @@ impl fmt::Debug for JiraApiError {
             }
             JiraApiError::Network => write!(f, "Network"),
             JiraApiError::Decode => write!(f, "Decode"),
+            JiraApiError::Conflict => write!(f, "Conflict"),
+            JiraApiError::UnsafeWriteUnknownOutcome => write!(f, "UnsafeWriteUnknownOutcome"),
         }
     }
 }
@@ -126,6 +133,8 @@ mod tests {
             JiraApiError::Server { status: 503 },
             JiraApiError::Network,
             JiraApiError::Decode,
+            JiraApiError::Conflict,
+            JiraApiError::UnsafeWriteUnknownOutcome,
         ];
         for err in errors {
             let rendered = format!("{err}");
@@ -156,6 +165,8 @@ mod tests {
             JiraApiError::Server { status: 503 },
             JiraApiError::Network,
             JiraApiError::Decode,
+            JiraApiError::Conflict,
+            JiraApiError::UnsafeWriteUnknownOutcome,
         ];
         for err in &errors {
             let debug_str = format!("{err:?}");
@@ -217,5 +228,15 @@ mod tests {
         assert!(JiraApiError::Server { status: 503 }.is_retryable());
         assert!(JiraApiError::Network.is_retryable());
         assert!(!JiraApiError::Decode.is_retryable());
+    }
+
+    #[test]
+    fn safe_write_error_variants_are_correct() {
+        assert_eq!(JiraApiError::from_status(409, None), JiraApiError::Conflict);
+        let unsafe_error = JiraApiError::UnsafeWriteUnknownOutcome;
+        assert_eq!(format!("{unsafe_error}"), "Jira write outcome is unknown; not retrying to avoid duplicate changes");
+        assert!(!format!("{unsafe_error:?}").to_ascii_lowercase().contains("authorization"));
+        assert!(!JiraApiError::Conflict.is_retryable());
+        assert!(!JiraApiError::UnsafeWriteUnknownOutcome.is_retryable());
     }
 }

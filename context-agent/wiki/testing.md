@@ -306,3 +306,26 @@ Run this after touching any `#[tauri::command] #[specta::specta]` function so `s
 - AI provider e2e (`e2e/ai-providers.spec.ts`) covers tab navigation and empty-state rendering only.
 - Full credential/profile creation flow requires Tauri IPC — see `tauri-driver` upstream docs if deeper e2e is needed.
 - Run `npm run test:e2e` only when `npm run dev` (Vite) is running in a separate terminal.
+
+## Collection write data layer smoke (issue #45)
+
+Backend-only smoke path:
+
+```bash
+(cd src-tauri && cargo test mutations -- --nocapture)
+(cd src-tauri && cargo test sources::jira_client -- --nocapture)
+(cd src-tauri && cargo test generate_typescript_bindings -- --nocapture)
+npm run lint
+```
+
+The mutation tests use an in-memory SQLite database and a recording Jira client. The Jira HTTP client tests use `tiny_http` bound to `127.0.0.1`; no real Jira credentials or network access are required.
+
+For a manual mock-Jira smoke, start a local HTTP server that implements:
+- `GET /rest/api/2/issue/AMP-1043/transitions`
+- `POST /rest/api/2/issue/AMP-1043/transitions`
+- `PUT /rest/api/2/issue/AMP-1043`
+- `POST /rest/api/2/issue/AMP-1043/comment`
+- `POST /rest/api/2/issueLink`
+- `DELETE /rest/api/2/issueLink/<id>`
+
+Configure a Jira source to `http://127.0.0.1:<port>`, save a fake PAT through the source credential flow, call one generated command such as `commands.jiraUpdateTitle(...)`, then call `commands.auditLogList({ target_ref: "jira:AMP-1043" })` and confirm the returned entry has the expected `batch_id`, `before_state`, `after_state`, and `reversible` flag.

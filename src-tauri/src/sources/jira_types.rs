@@ -340,6 +340,130 @@ pub struct JiraNamedValue {
     pub name: Option<String>,
 }
 
+// ── Jira write request / response types ───────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraTransitionsResponse {
+    #[serde(default)]
+    pub transitions: Vec<JiraTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraTransition {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub to: Option<JiraNamedValue>,
+    #[serde(rename = "hasScreen", default)]
+    pub has_screen: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraTransitionIssueRequest {
+    pub transition: JiraTransitionRef,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update: Option<JiraTransitionUpdate>,
+}
+
+impl JiraTransitionIssueRequest {
+    pub fn new(transition_id: impl Into<String>, comment: Option<String>) -> Self {
+        Self {
+            transition: JiraTransitionRef { id: transition_id.into() },
+            update: comment.map(|body| JiraTransitionUpdate {
+                comment: vec![JiraCommentUpdateOperation { add: JiraCommentBody { body } }],
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraTransitionRef {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraTransitionUpdate {
+    pub comment: Vec<JiraCommentUpdateOperation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraCommentUpdateOperation {
+    pub add: JiraCommentBody,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraCommentBody {
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraIssueFieldsUpdateRequest {
+    pub fields: serde_json::Value,
+}
+
+impl JiraIssueFieldsUpdateRequest {
+    pub fn new(fields: serde_json::Value) -> Result<Self, &'static str> {
+        if !fields.is_object() {
+            return Err("fields payload must be a JSON object");
+        }
+        Ok(Self { fields })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraCreateCommentRequest {
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraCreatedComment {
+    pub id: String,
+    #[serde(rename = "self", default)]
+    pub self_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraCreateIssueLinkRequest {
+    #[serde(rename = "type")]
+    pub type_: JiraIssueLinkTypeName,
+    #[serde(rename = "inwardIssue")]
+    pub inward_issue: JiraIssueKeyRef,
+    #[serde(rename = "outwardIssue")]
+    pub outward_issue: JiraIssueKeyRef,
+}
+
+impl JiraCreateIssueLinkRequest {
+    pub fn new(
+        link_type: impl Into<String>,
+        source_key: impl Into<String>,
+        target_key: impl Into<String>,
+    ) -> Self {
+        Self {
+            type_: JiraIssueLinkTypeName { name: link_type.into() },
+            inward_issue: JiraIssueKeyRef { key: source_key.into() },
+            outward_issue: JiraIssueKeyRef { key: target_key.into() },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraIssueLinkTypeName {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraIssueKeyRef {
+    pub key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JiraCreatedIssueLink {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(rename = "self", default)]
+    pub self_url: Option<String>,
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -511,5 +635,50 @@ mod tests {
         assert!(issue.fields.summary.is_none());
         assert!(issue.fields.assignee.is_none());
         assert!(issue.changelog.is_none());
+    }
+
+    mod write_type_tests {
+        use super::*;
+        use serde_json::json;
+
+        #[test]
+        fn transitions_response_ignores_unknown_fields() {
+            let parsed: JiraTransitionsResponse = serde_json::from_value(json!({
+                "transitions": [
+                    {"id": "31", "name": "Done", "to": {"id": "10003", "name": "Done"}, "hasScreen": false, "extra": "ignored"}
+                ],
+                "expand": "transitions"
+            })).expect("transitions should deserialize");
+            assert_eq!(parsed.transitions[0].id, "31");
+            assert_eq!(parsed.transitions[0].to.as_ref().unwrap().name.as_deref(), Some("Done"));
+        }
+
+        #[test]
+        fn transition_request_serializes_optional_comment_as_update_block() {
+            let request = JiraTransitionIssueRequest::new("31", Some("Closing as stale".to_string()));
+            let value = serde_json::to_value(request).expect("request should serialize");
+            assert_eq!(value["transition"]["id"], "31");
+            assert_eq!(value["update"]["comment"][0]["add"]["body"], "Closing as stale");
+        }
+
+        #[test]
+        fn field_update_payload_preserves_explicit_null_assignee() {
+            let request = JiraIssueFieldsUpdateRequest::new(json!({
+                "summary": "New title",
+                "labels": ["triaged", "stale"],
+                "assignee": null
+            })).expect("object fields payload should be accepted");
+            let value = serde_json::to_value(request).expect("request should serialize");
+            assert!(value["fields"]["assignee"].is_null());
+        }
+
+        #[test]
+        fn issue_link_request_serializes_jira_data_center_shape() {
+            let request = JiraCreateIssueLinkRequest::new("Duplicates", "AMP-1043", "AMP-997");
+            let value = serde_json::to_value(request).expect("request should serialize");
+            assert_eq!(value["type"]["name"], "Duplicates");
+            assert_eq!(value["inwardIssue"]["key"], "AMP-1043");
+            assert_eq!(value["outwardIssue"]["key"], "AMP-997");
+        }
     }
 }

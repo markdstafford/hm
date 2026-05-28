@@ -3,8 +3,10 @@ use std::sync::Arc;
 
 use crate::sources::jira_errors::JiraApiError;
 use crate::sources::jira_types::{
-    JiraChangelogEntry, JiraChangelogPage, JiraIssue, JiraPagedComments, JiraPagedProjects,
-    JiraPagedWorklogs, JiraProject, JiraRemoteLink, JiraSearchPage,
+    JiraChangelogEntry, JiraChangelogPage, JiraCreateCommentRequest, JiraCreateIssueLinkRequest,
+    JiraCreatedComment, JiraCreatedIssueLink, JiraIssue, JiraIssueFieldsUpdateRequest,
+    JiraPagedComments, JiraPagedProjects, JiraPagedWorklogs, JiraProject, JiraRemoteLink,
+    JiraSearchPage, JiraTransitionIssueRequest, JiraTransitionsResponse,
 };
 
 // ── Secret string ─────────────────────────────────────────────────────────────
@@ -521,6 +523,182 @@ impl JiraApiClient {
     ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
         let issue = encode_path_segment(issue_id_or_key)?;
         self.get_json(&format!("/rest/api/2/issue/{issue}/remotelink"))
+    }
+
+    /// Make a single authenticated write request (POST, PUT, DELETE). No retry.
+    ///
+    /// Returns `Ok(None)` for 204/205 responses (no content).
+    /// Returns `Err(JiraApiError::UnsafeWriteUnknownOutcome)` on transport failure,
+    /// since the server state is unknown and retrying could cause duplicate changes.
+    fn send_json_once<T: serde::Serialize, R: serde::de::DeserializeOwned>(
+        &self,
+        method: &str,
+        path_and_query: &str,
+        payload: Option<&T>,
+    ) -> Result<Option<R>, JiraApiError> {
+        let url = join_api_path(&self.base_url, path_and_query);
+        let mut request = match method {
+            "POST" => self.http.post(&url),
+            "PUT" => self.http.put(&url),
+            "DELETE" => self.http.delete(&url),
+            _ => {
+                return Err(JiraApiError::InvalidRequest {
+                    message: "unsupported HTTP method".into(),
+                })
+            }
+        };
+        request = request
+            .set("Authorization", &format!("Bearer {}", self.pat.expose()))
+            .set("Accept", "application/json")
+            .set("User-Agent", &self.user_agent);
+
+        if payload.is_some() {
+            request = request.set("Content-Type", "application/json");
+        }
+
+        let response = match payload {
+            Some(body) => request.send_json(body),
+            None => request.call(),
+        };
+
+        match response {
+            Ok(resp) => {
+                let status = resp.status();
+                let rate_limit = parse_rate_limit_headers(&resp);
+                if rate_limit.near_limit == Some(true) || rate_limit.remaining == Some(0) {
+                    self.sleeper.sleep_ms(self.rate_limit_policy.fallback_delay_ms);
+                }
+                if status == 204 || status == 205 {
+                    return Ok(None);
+                }
+                Ok(Some(
+                    resp.into_json::<R>().map_err(|_| JiraApiError::Decode)?,
+                ))
+            }
+            Err(ureq::Error::Status(status, resp)) => {
+                let retry_after =
+                    parse_retry_after_header(resp.header("Retry-After")).or_else(|| {
+                        if status == 429 {
+                            resp.header("X-RateLimit-Reset")
+                                .and_then(|v| v.trim().parse::<u64>().ok())
+                        } else {
+                            None
+                        }
+                    });
+                Err(JiraApiError::from_status(status, retry_after))
+            }
+            Err(ureq::Error::Transport(_)) => Err(JiraApiError::UnsafeWriteUnknownOutcome),
+        }
+    }
+
+    /// List available transitions for an issue.
+    pub fn list_transitions(
+        &self,
+        issue_key: &str,
+    ) -> Result<JiraTransitionsResponse, JiraApiError> {
+        let issue = encode_path_segment(issue_key)?;
+        self.get_json(&format!("/rest/api/2/issue/{issue}/transitions"))
+    }
+
+    /// Transition an issue to a new state, optionally appending a comment.
+    pub fn transition_issue(
+        &self,
+        issue_key: &str,
+        transition_id: &str,
+        comment: Option<&str>,
+    ) -> Result<(), JiraApiError> {
+        let issue = encode_path_segment(issue_key)?;
+        let request =
+            JiraTransitionIssueRequest::new(transition_id, comment.map(str::to_string));
+        let _: Option<serde_json::Value> = self.send_json_once(
+            "POST",
+            &format!("/rest/api/2/issue/{issue}/transitions"),
+            Some(&request),
+        )?;
+        Ok(())
+    }
+
+    /// Update one or more fields on an issue.
+    pub fn update_issue_fields(
+        &self,
+        issue_key: &str,
+        fields_payload: serde_json::Value,
+    ) -> Result<(), JiraApiError> {
+        let issue = encode_path_segment(issue_key)?;
+        let request = JiraIssueFieldsUpdateRequest::new(fields_payload)
+            .map_err(|message| JiraApiError::InvalidRequest {
+                message: message.into(),
+            })?;
+        let _: Option<serde_json::Value> =
+            self.send_json_once("PUT", &format!("/rest/api/2/issue/{issue}"), Some(&request))?;
+        Ok(())
+    }
+
+    /// Add a comment to an issue and return the created comment metadata.
+    pub fn create_comment(
+        &self,
+        issue_key: &str,
+        body: &str,
+    ) -> Result<JiraCreatedComment, JiraApiError> {
+        let issue = encode_path_segment(issue_key)?;
+        let request = JiraCreateCommentRequest {
+            body: body.to_string(),
+        };
+        self.send_json_once(
+            "POST",
+            &format!("/rest/api/2/issue/{issue}/comment"),
+            Some(&request),
+        )?
+        .ok_or(JiraApiError::Decode)
+    }
+
+    /// Create a link between two issues and return the created link metadata.
+    pub fn create_issue_link(
+        &self,
+        source_key: &str,
+        target_key: &str,
+        link_type: &str,
+    ) -> Result<JiraCreatedIssueLink, JiraApiError> {
+        encode_path_segment(source_key)?;
+        encode_path_segment(target_key)?;
+        let request = JiraCreateIssueLinkRequest::new(link_type, source_key, target_key);
+        match self.send_json_once("POST", "/rest/api/2/issueLink", Some(&request)) {
+            Ok(opt) => Ok(opt.unwrap_or(JiraCreatedIssueLink { id: None, self_url: None })),
+            // Jira DC returns 201 with empty body; link was created but no id is available
+            Err(JiraApiError::Decode) => Ok(JiraCreatedIssueLink { id: None, self_url: None }),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Delete a link between two issues by link ID.
+    pub fn delete_issue_link(&self, link_id: &str) -> Result<(), JiraApiError> {
+        let link = encode_path_segment(link_id)?;
+        let _: Option<serde_json::Value> = self.send_json_once::<
+            serde_json::Value,
+            serde_json::Value,
+        >(
+            "DELETE", &format!("/rest/api/2/issueLink/{link}"), None
+        )?;
+        Ok(())
+    }
+
+    /// Delete a comment on an issue by comment ID.
+    pub fn delete_comment(
+        &self,
+        issue_key: &str,
+        comment_id: &str,
+    ) -> Result<(), JiraApiError> {
+        let issue = encode_path_segment(issue_key)?;
+        let comment = encode_path_segment(comment_id)?;
+        let _: Option<serde_json::Value> = self.send_json_once::<
+            serde_json::Value,
+            serde_json::Value,
+        >(
+            "DELETE",
+            &format!("/rest/api/2/issue/{issue}/comment/{comment}"),
+            None,
+        )?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -1501,5 +1679,170 @@ mod tests {
             .unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].key, "AMP");
+    }
+
+    #[test]
+    fn list_transitions_gets_expected_endpoint() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Get);
+            assert_eq!(request.url(), "/rest/api/2/issue/AMP-1043/transitions");
+            request
+                .respond(json_response(
+                    200,
+                    r#"{"transitions":[{"id":"31","name":"Done","to":{"id":"10003","name":"Done"}}]}"#,
+                ))
+                .unwrap();
+        });
+        let transitions = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .list_transitions("AMP-1043")
+            .unwrap();
+        assert_eq!(transitions.transitions[0].id, "31");
+    }
+
+    #[test]
+    fn transition_issue_posts_transition_and_comment() {
+        use std::io::Read;
+        let base_url = spawn_json_server(|mut request| {
+            assert_eq!(request.method(), &Method::Post);
+            assert_eq!(
+                request.url(),
+                "/rest/api/2/issue/AMP-1043/transitions"
+            );
+            let has_content_type = request.headers().iter().any(|h| {
+                h.field.as_str().to_ascii_lowercase() == "content-type"
+                    && h.value.as_str() == "application/json"
+            });
+            assert!(has_content_type);
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(value["transition"]["id"], "31");
+            assert_eq!(
+                value["update"]["comment"][0]["add"]["body"],
+                "Closing as stale"
+            );
+            request.respond(json_response(204, "{}")).unwrap();
+        });
+        JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .transition_issue("AMP-1043", "31", Some("Closing as stale"))
+            .unwrap();
+    }
+
+    #[test]
+    fn update_issue_fields_puts_fields_object() {
+        use std::io::Read;
+        let base_url = spawn_json_server(|mut request| {
+            assert_eq!(request.method(), &Method::Put);
+            assert_eq!(request.url(), "/rest/api/2/issue/AMP-1043");
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(value["fields"]["summary"], "Better title");
+            request.respond(json_response(204, "{}")).unwrap();
+        });
+        JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .update_issue_fields("AMP-1043", serde_json::json!({"summary": "Better title"}))
+            .unwrap();
+    }
+
+    #[test]
+    fn create_comment_returns_comment_id() {
+        use std::io::Read;
+        let base_url = spawn_json_server(|mut request| {
+            assert_eq!(request.method(), &Method::Post);
+            assert_eq!(request.url(), "/rest/api/2/issue/AMP-1043/comment");
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&body).unwrap()["body"],
+                "Please add context"
+            );
+            request
+                .respond(json_response(
+                    201,
+                    r#"{"id":"10001","self":"https://jira.example.invalid/rest/api/2/issue/AMP-1043/comment/10001"}"#,
+                ))
+                .unwrap();
+        });
+        let comment = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .create_comment("AMP-1043", "Please add context")
+            .unwrap();
+        assert_eq!(comment.id, "10001");
+    }
+
+    #[test]
+    fn create_issue_link_posts_duplicate_link() {
+        use std::io::Read;
+        let base_url = spawn_json_server(|mut request| {
+            assert_eq!(request.method(), &Method::Post);
+            assert_eq!(request.url(), "/rest/api/2/issueLink");
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(value["type"]["name"], "Duplicates");
+            assert_eq!(value["inwardIssue"]["key"], "AMP-1043");
+            assert_eq!(value["outwardIssue"]["key"], "AMP-997");
+            request
+                .respond(json_response(201, r#"{"id":"20001"}"#))
+                .unwrap();
+        });
+        let link = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .create_issue_link("AMP-1043", "AMP-997", "Duplicates")
+            .unwrap();
+        assert_eq!(link.id.as_deref(), Some("20001"));
+    }
+
+    #[test]
+    fn create_issue_link_handles_201_empty_body() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Post);
+            assert_eq!(request.url(), "/rest/api/2/issueLink");
+            let response = Response::new(
+                StatusCode(201),
+                vec![],
+                std::io::Cursor::new(Vec::new()),
+                Some(0),
+                None,
+            );
+            request.respond(response).unwrap();
+        });
+        let link = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .create_issue_link("AMP-1043", "AMP-997", "Duplicates")
+            .unwrap();
+        assert_eq!(link.id, None);
+        assert_eq!(link.self_url, None);
+    }
+
+    #[test]
+    fn delete_issue_link_deletes_link_id() {
+        let base_url = spawn_json_server(|request| {
+            assert_eq!(request.method(), &Method::Delete);
+            assert_eq!(request.url(), "/rest/api/2/issueLink/20001");
+            request.respond(json_response(204, "{}")).unwrap();
+        });
+        JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .delete_issue_link("20001")
+            .unwrap();
+    }
+
+    #[test]
+    fn write_transport_failure_returns_unknown_outcome_without_retry_sleep() {
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let err = JiraApiClient::new_with_sleeper(
+            config("http://127.0.0.1:9", "secret-jira-pat-123"),
+            Arc::new(sleeper),
+        )
+        .unwrap()
+        .create_comment("AMP-1043", "comment body")
+        .unwrap_err();
+        assert_eq!(err, JiraApiError::UnsafeWriteUnknownOutcome);
+        assert!(recorded_sleeps.lock().unwrap().is_empty());
     }
 }
