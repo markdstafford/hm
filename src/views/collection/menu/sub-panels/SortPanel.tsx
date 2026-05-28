@@ -76,7 +76,7 @@ function SortLevelRow({
         type="button"
         data-drag-handle="true"
         aria-label={`Reorder sort level ${position}`}
-        className="inline-flex h-control-sm w-control-sm items-center justify-center rounded text-subtext hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className="titlebar-no-drag inline-flex h-control-sm w-control-sm items-center justify-center rounded text-subtext hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         {...attributes}
         {...listeners}
       >

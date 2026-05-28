@@ -1,8 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { axe } from "jest-axe";
 import { AppShell } from "./AppShell";
+
+const startDraggingMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: vi.fn(() => ({ startDragging: startDraggingMock })),
+}));
 
 function harness(extra: Partial<React.ComponentProps<typeof AppShell>> = {}) {
   return render(
@@ -22,6 +28,10 @@ function harness(extra: Partial<React.ComponentProps<typeof AppShell>> = {}) {
 }
 
 describe("AppShell", () => {
+  beforeEach(() => {
+    startDraggingMock.mockClear();
+  });
+
   it("renders all zones", () => {
     harness();
     expect(screen.getByText("SH")).toBeInTheDocument();
@@ -61,6 +71,53 @@ describe("AppShell", () => {
       return afterStart && beforeEnd;
     });
     expect(between).toBe(true);
+  });
+
+  it("starts native Tauri dragging from the main title-bar spacer", async () => {
+    const { container } = harness({
+      mainTitleBarStart: <span data-testid="start">start</span>,
+      mainTitleBarEnd: <span data-testid="end">end</span>,
+    });
+    const spacers = Array.from(container.querySelectorAll("[data-tauri-drag-region]"));
+    const mainSpacer = spacers[spacers.length - 1]!;
+
+    fireEvent.pointerDown(mainSpacer, { button: 0 });
+
+    await waitFor(() => expect(startDraggingMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("starts native Tauri dragging from the sidebar title-bar spacer", async () => {
+    const { container } = harness();
+    const spacers = Array.from(container.querySelectorAll("[data-tauri-drag-region]"));
+    const sidebarSpacer = spacers[0]!;
+
+    fireEvent.pointerDown(sidebarSpacer, { button: 0 });
+
+    await waitFor(() => expect(startDraggingMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not start native Tauri dragging from titlebar no-drag islands", async () => {
+    harness({
+      mainTitleBarStart: <button type="button">Title action</button>,
+      mainTitleBarEnd: <button type="button">End action</button>,
+    });
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Title action" }), { button: 0 });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "End action" }), { button: 0 });
+    await Promise.resolve();
+
+    expect(startDraggingMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores secondary-button pointer events on title-bar spacers", async () => {
+    const { container } = harness();
+    const allSpacers = Array.from(container.querySelectorAll("[data-tauri-drag-region]"));
+    const mainSpacer = allSpacers[allSpacers.length - 1]!;
+
+    fireEvent.pointerDown(mainSpacer, { button: 2 });
+    await Promise.resolve();
+
+    expect(startDraggingMock).not.toHaveBeenCalled();
   });
 });
 

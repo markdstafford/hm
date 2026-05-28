@@ -67,7 +67,9 @@ describe("SortPanel", () => {
     renderPanel(baseConfig({ sort: [{ property: "status", direction: "asc" }] }));
 
     expect(screen.getByText("1.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reorder sort level 1" })).toHaveAttribute("data-drag-handle", "true");
+    const handle = screen.getByRole("button", { name: "Reorder sort level 1" });
+    expect(handle).toHaveAttribute("data-drag-handle", "true");
+    expect(handle).toHaveClass("titlebar-no-drag");
     expect(screen.getByRole("combobox", { name: "Sort property for level 1" })).toHaveTextContent("Status");
     expect(screen.getByRole("button", { name: "Switch sort level 1 to descending" })).toHaveTextContent("↑ Asc");
     expect(screen.getByRole("button", { name: "Remove Status sort" })).toBeInTheDocument();
@@ -169,8 +171,12 @@ describe("SortPanel", () => {
 
     expect(document.querySelector('[data-sort-level-id="updated_at_source:0"]')).toBeInTheDocument();
     expect(document.querySelector('[data-sort-level-id="priority:1"]')).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reorder sort level 1" })).toHaveAttribute("data-drag-handle", "true");
-    expect(screen.getByRole("button", { name: "Reorder sort level 2" })).toHaveAttribute("data-drag-handle", "true");
+    const firstHandle = screen.getByRole("button", { name: "Reorder sort level 1" });
+    const secondHandle = screen.getByRole("button", { name: "Reorder sort level 2" });
+    expect(firstHandle).toHaveAttribute("data-drag-handle", "true");
+    expect(firstHandle).toHaveClass("titlebar-no-drag");
+    expect(secondHandle).toHaveAttribute("data-drag-handle", "true");
+    expect(secondHandle).toHaveClass("titlebar-no-drag");
   });
 
   it("keyboard reorder moves a sort level down and patches the reordered sort array", async () => {

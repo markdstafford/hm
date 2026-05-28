@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactNode } from "react";
 import { useViewportBreakpoint } from "./useViewportBreakpoint";
 import { useShortcut } from "./useShortcut";
 import { Footer } from "./Footer";
+import { startWindowDragFromPointerEvent } from "./windowDrag";
 
 type FooterLeftRender = (state: { sidebarVisible: boolean; toggleSidebar: () => void }) => ReactNode;
 
@@ -73,7 +74,11 @@ export function AppShell({
           <aside className="bg-mantle flex flex-col border-r border-border" style={{ width: "var(--width-sidebar)" }}>
             <div className="flex" style={{ height: "var(--height-title-bar)" }}>
               <div className="titlebar-no-drag" style={{ width: "var(--width-traffic-light)" }} />
-              <div data-tauri-drag-region className="flex-1 bg-mantle">
+              <div
+                data-tauri-drag-region
+                onPointerDown={startWindowDragFromPointerEvent}
+                className="flex-1 bg-mantle"
+              >
                 {sidebarTitleBar}
               </div>
             </div>
@@ -89,7 +94,11 @@ export function AppShell({
               <div className="titlebar-no-drag" style={{ width: "var(--width-traffic-light)" }} />
             )}
             <span className="titlebar-no-drag flex items-center gap-2 min-w-0">{mainTitleBarStart}</span>
-            <div data-tauri-drag-region className="flex-1 min-w-0" />
+            <div
+              data-tauri-drag-region
+              onPointerDown={startWindowDragFromPointerEvent}
+              className="flex-1 min-w-0 self-stretch"
+            />
             {mainTitleBarEnd && (
               <span className="titlebar-no-drag flex items-center gap-2">{mainTitleBarEnd}</span>
             )}
