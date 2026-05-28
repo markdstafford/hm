@@ -34,6 +34,7 @@ pub struct IssueEventRow {
     pub issue_id: String,
     pub event_type: String,
     pub occurred_at: String,
+    pub field_id: Option<String>,
     pub actor_display_name: Option<String>,
     pub from_string: Option<String>,
     pub to_string: Option<String>,
@@ -220,7 +221,7 @@ pub fn list_issue_events_by_type(
     limit: u32,
 ) -> rusqlite::Result<Vec<IssueEventRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, issue_id, event_type, occurred_at, actor_display_name,
+        "SELECT id, issue_id, event_type, occurred_at, field_id, actor_display_name,
                 from_string, to_string, payload_json
          FROM issue_events
          WHERE issue_id = ?1 AND event_type = ?2
@@ -233,10 +234,40 @@ pub fn list_issue_events_by_type(
             issue_id: row.get(1)?,
             event_type: row.get(2)?,
             occurred_at: row.get(3)?,
-            actor_display_name: row.get(4)?,
-            from_string: row.get(5)?,
-            to_string: row.get(6)?,
-            payload_json: row.get(7)?,
+            field_id: row.get(4)?,
+            actor_display_name: row.get(5)?,
+            from_string: row.get(6)?,
+            to_string: row.get(7)?,
+            payload_json: row.get(8)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Query all issue_events for a given issue, ordered by occurred_at ASC then id ASC.
+/// Returns all event types (no filter), suitable for snapshot folding.
+pub fn query_issue_events_for_issue(
+    conn: &Connection,
+    issue_id: &str,
+) -> rusqlite::Result<Vec<IssueEventRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, issue_id, event_type, occurred_at, field_id, actor_display_name,
+                from_string, to_string, payload_json
+         FROM issue_events
+         WHERE issue_id = ?1
+         ORDER BY occurred_at ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![issue_id], |row| {
+        Ok(IssueEventRow {
+            id: row.get(0)?,
+            issue_id: row.get(1)?,
+            event_type: row.get(2)?,
+            occurred_at: row.get(3)?,
+            field_id: row.get(4)?,
+            actor_display_name: row.get(5)?,
+            from_string: row.get(6)?,
+            to_string: row.get(7)?,
+            payload_json: row.get(8)?,
         })
     })?;
     rows.collect()
