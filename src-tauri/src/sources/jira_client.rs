@@ -284,6 +284,14 @@ impl JiraApiClient {
                             None
                         }
                     });
+                // Log the error response body for diagnostics (capped at 2 KB).
+                {
+                    use std::io::Read as _;
+                    let mut body_bytes = vec![0u8; 2048];
+                    let n = resp.into_reader().read(&mut body_bytes).unwrap_or(0);
+                    let body = String::from_utf8_lossy(&body_bytes[..n]);
+                    eprintln!("[jira] HTTP {status} error on {path_and_query}: {body}");
+                }
                 Err(JiraApiError::from_status(status, retry_after))
             }
             Err(ureq::Error::Transport(_)) => Err(JiraApiError::Network),
@@ -1214,6 +1222,33 @@ mod tests {
         assert!(
             recorded_sleeps.lock().unwrap().is_empty(),
             "should not sleep on non-retryable 403"
+        );
+    }
+
+    #[test]
+    fn returns_bad_request_on_400_without_retry() {
+        // Verifies that a 400 response maps to JiraApiError::BadRequest and that
+        // no retries are attempted (recorded_sleeps stays empty).
+        let base_url = spawn_json_server(|request| {
+            request
+                .respond(json_response(
+                    400,
+                    r#"{"errorMessages":["Field 'customfield_99999' does not exist"],"errors":{}}"#,
+                ))
+                .unwrap();
+        });
+        let (sleeper, recorded_sleeps) = RecordingSleeper::new();
+        let err = JiraApiClient::new_with_sleeper(
+            config(&base_url, "secret-jira-pat-123"),
+            Arc::new(sleeper),
+        )
+        .unwrap()
+        .list_projects()
+        .unwrap_err();
+        assert_eq!(err, JiraApiError::BadRequest);
+        assert!(
+            recorded_sleeps.lock().unwrap().is_empty(),
+            "should not sleep on non-retryable 400"
         );
     }
 
