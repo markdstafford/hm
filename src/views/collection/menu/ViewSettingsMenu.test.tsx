@@ -139,7 +139,24 @@ describe("ViewSettingsMenu", () => {
     await user.click(screen.getByRole("button", { name: "Open view settings" }));
     await user.click(screen.getByText("Filter").closest("button")!);
     expect(screen.getByRole("heading", { name: "Filter" })).toBeInTheDocument();
-    expect(screen.getByText("Coming in #44")).toBeInTheDocument();
+    expect(screen.queryByText("Coming in #44")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Add filter" })).toBeInTheDocument();
+  });
+
+  it("top sheet filter summary shows '1 active' for one complete filter", async () => {
+    const user = userEvent.setup();
+    renderMenu({
+      activeView: {
+        ...activeView,
+        config: {
+          filters: [
+            { id: "f1", property: "title", operator: "contains", value: "bug", active: true },
+          ],
+        },
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Open view settings" }));
+    expect(screen.getByText("1 active")).toBeInTheDocument();
   });
 
   it("Conditional color row is disabled and does not navigate", async () => {

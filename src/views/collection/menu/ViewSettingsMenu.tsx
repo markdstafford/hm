@@ -6,6 +6,7 @@ import { normalizeViewConfig, summarizeViewConfig } from "../ViewConfig";
 import type { ViewConfig } from "../ViewConfig";
 import type { EntityContract } from "../types";
 import type { CollectionView } from "../views/types";
+import type { FilterOptionContext } from "../filter/types";
 import { TopSheet } from "./TopSheet";
 import { LayoutPanel } from "./sub-panels/LayoutPanel";
 import { PropertyVisibilityPanel } from "./sub-panels/PropertyVisibilityPanel";
@@ -19,6 +20,8 @@ export type { ViewSettingsPanel };
 export type ViewSettingsMenuProps<TItem = unknown, TProperty extends string = string> = {
   activeView: CollectionView | null;
   entity: EntityContract<TItem, TProperty>;
+  items?: TItem[];
+  filterOptionContext?: FilterOptionContext<TItem>;
   onRenameView: (viewId: string, displayName: string) => void | Promise<void>;
   onPatchConfig: (viewId: string, config: ViewConfig) => void | Promise<void>;
   onOpenChange?: (open: boolean) => void;
@@ -27,6 +30,8 @@ export type ViewSettingsMenuProps<TItem = unknown, TProperty extends string = st
 export function ViewSettingsMenu<TItem = unknown, TProperty extends string = string>({
   activeView,
   entity,
+  items,
+  filterOptionContext,
   onRenameView,
   onPatchConfig,
   onOpenChange,
@@ -145,7 +150,15 @@ export function ViewSettingsMenu<TItem = unknown, TProperty extends string = str
           />
         )}
         {panel === "filter" && (
-          <FilterPanel onBack={() => setPanel("top")} onClose={() => handleOpenChange(false)} />
+          <FilterPanel
+            entity={entity}
+            items={items ?? []}
+            optionContext={filterOptionContext}
+            config={normalizedConfig}
+            onPatchConfig={handlePatchConfig}
+            onBack={() => setPanel("top")}
+            onClose={() => handleOpenChange(false)}
+          />
         )}
       </section>
     </Popover>

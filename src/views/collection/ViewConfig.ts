@@ -1,4 +1,5 @@
 import type { PropertySide, EntityContract, GroupableProperty } from "./types";
+import { normalizeFilterRows, summarizeFilters } from "./filter/config";
 
 export type LayoutType = "table";
 export type ViewDensity = "compact" | "regular";
@@ -259,26 +260,7 @@ export function normalizeViewConfig(input: unknown, entity: EntityContract<any, 
   }
 
   // filters
-  let filters: FilterConfig[] = [];
-  const rawFilters = input["filters"];
-  if (Array.isArray(rawFilters)) {
-    filters = rawFilters
-      .filter(
-        (row): row is FilterConfig =>
-          isObject(row) &&
-          typeof row["id"] === "string" &&
-          typeof row["property"] === "string" &&
-          typeof row["operator"] === "string" &&
-          typeof row["active"] === "boolean"
-      )
-      .map((row) => ({
-        id: row.id,
-        property: row.property,
-        operator: row.operator,
-        value: row.value,
-        active: row.active,
-      }));
-  }
+  const filters = normalizeFilterRows(input["filters"], entity);
 
   return {
     layout,
@@ -398,8 +380,7 @@ export function summarizeViewConfig(config: ViewConfig, entity: EntityContract<a
       : groupablePropertyLabel(entity, config.group.property) ?? "Unknown property";
 
   // filter
-  const activeFilterCount = config.filters.filter((f) => f.active).length;
-  const filter = activeFilterCount > 0 ? `${activeFilterCount} active` : "None";
+  const filter = summarizeFilters(config.filters, entity);
 
   return {
     layout,

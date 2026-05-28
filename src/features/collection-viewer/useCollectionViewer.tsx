@@ -8,6 +8,7 @@ import { EmptyState } from "../../ui/feedback/EmptyState";
 import { Body } from "../../views/collection/Body";
 import { bucketCollectionItems, flattenBucketedGroups } from "../../views/collection/bucket";
 import { sortCollectionItems } from "../../views/collection/sort";
+import { filterCollectionItems } from "../../views/collection/filter/predicates";
 import { CollectionHeader } from "../../views/collection/CollectionHeader";
 import { Detail } from "../../views/collection/Detail";
 import { FullPagePreview } from "../../views/collection/FullPagePreview";
@@ -76,9 +77,14 @@ export function useCollectionViewer({
     [activeView?.config],
   );
 
+  const filteredItems = useMemo(
+    () => filterCollectionItems({ items: issues, entity: jiraIssueEntity, filters: activeConfig.filters }),
+    [issues, activeConfig.filters],
+  );
+
   const sortedItems = useMemo(
-    () => sortCollectionItems(issues, jiraIssueEntity, activeConfig.sort),
-    [issues, activeConfig.sort],
+    () => sortCollectionItems(filteredItems, jiraIssueEntity, activeConfig.sort),
+    [filteredItems, activeConfig.sort],
   );
 
   const groupedItems = useMemo(
@@ -370,6 +376,8 @@ export function useCollectionViewer({
             onRenameView={handleRename}
             onPatchConfig={handlePatchViewConfig}
             onOpenChange={setSettingsOpen}
+            items={issues}
+            filterOptionContext={{ items: issues }}
           />
         }
       />
@@ -432,9 +440,9 @@ export function useCollectionViewer({
           <div className="flex-1 overflow-y-auto">
             <Body
               items={sortedItems}
+              unfilteredCount={issues.length}
               entity={jiraIssueEntity}
               properties={activeConfig.propertyVisibility as PropertyConfig<JiraIssueProperty>[]}
-              sort={activeConfig.sort}
               group={activeConfig.group}
               collapsedGroupKeys={collapsedGroupKeys}
               onToggleGroupCollapsed={toggleGroupCollapsed}

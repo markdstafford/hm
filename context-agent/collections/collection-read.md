@@ -279,8 +279,8 @@ Operator and value controls depend on the property's type:
 
 - **Text / title**: operators `contains`, `does not contain`, `is`, `is not`, `starts with`, `ends with`, `is empty`, `is not empty`. Value is a textbox; the empty / not-empty operators hide the value.
 - **Number**: operators `=`, `≠`, `>`, `<`, `≥`, `≤`, `is empty`, `is not empty`. Value is a numeric input.
-- **Select / Status**: operators `is`, `is not`, `is empty`, `is not empty`. Value is a single-select popover of the property's option list, with the option's icon and color where defined.
-- **Multi-select / Labels**: operators `contains`, `does not contain`, `is empty`, `is not empty`. Value is a multi-select popover.
+- **Select / Status**: operators `contains`, `does not contain`, `is`, `is not`, `is empty`, `is not empty`. Value is a single-select popover of the property's option list, with the option's icon and color where defined.
+- **Multi-select / Labels**: operators `contains`, `does not contain`, `is empty`, `is not empty`. Value is a multi-select popover. Jira labels are a v1 filterable property with kind `multi-select`; operators: `contains`, `does not contain`, `is empty`, `is not empty`.
 - **Date / Updated / Created**: operators `is`, `is before`, `is after`, `is on or before`, `is on or after`, `is within`, `is empty`, `is not empty`. Value depends on the operator: `is within` opens a relative-date popover (`Today`, `Past week`, `Past month`, `Next week`, …); the others open a date picker.
 - **Person / Assignee**: operators `contains`, `does not contain`, `is empty`, `is not empty`. Value is a person picker.
 - **Checkbox**: operators `is`, `is not` (i.e. checked / unchecked). No value.

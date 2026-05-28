@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { jiraIssueEntity } from "../../entities/jira-issue";
+import type { EntityContract } from "./types";
 import {
   addSortLevel,
   availableSortProperties,
@@ -122,7 +123,10 @@ describe("normalizeViewConfig", () => {
     expect(result.propertyVisibility).toEqual(defaultViewConfig(jiraIssueEntity).propertyVisibility);
   });
 
-  it("normalizes valid filters", () => {
+  it("normalizes valid filters — drops all rows when entity has no filterableProperties", () => {
+    // jiraIssueEntity has no filterableProperties yet (added in Task 4).
+    // normalizeFilterRows validates property membership against filterableProperties,
+    // so all rows are dropped until Task 4 populates that field.
     const input = {
       filters: [
         { id: "f1", property: "status", operator: "eq", value: "In Progress", active: true },
@@ -130,9 +134,8 @@ describe("normalizeViewConfig", () => {
       ],
     };
     const result = normalizeViewConfig(input, jiraIssueEntity);
-    expect(result.filters).toEqual([
-      { id: "f1", property: "status", operator: "eq", value: "In Progress", active: true },
-    ]);
+    // All dropped because jiraIssueEntity.filterableProperties is undefined → no valid properties
+    expect(result.filters).toEqual([]);
   });
 
   it("normalizes valid group config", () => {
@@ -207,7 +210,10 @@ describe("summarizeViewConfig", () => {
     expect(summary.group).toBe("Status");
   });
 
-  it("shows active filter count", () => {
+  it("shows filter summary as None when entity has no filterableProperties", () => {
+    // summarizeFilters uses isFilterComplete which requires filterableProperties.
+    // Since jiraIssueEntity has no filterableProperties (Task 4), all filters evaluate
+    // as incomplete and the summary is "None" regardless of active state.
     const config = {
       ...defaultViewConfig(jiraIssueEntity),
       filters: [
@@ -216,7 +222,7 @@ describe("summarizeViewConfig", () => {
       ],
     };
     const summary = summarizeViewConfig(config, jiraIssueEntity);
-    expect(summary.filter).toBe("1 active");
+    expect(summary.filter).toBe("None");
   });
 
   it("shows compact density label", () => {
@@ -585,5 +591,119 @@ describe("group config normalization", () => {
     const next = setHideEmptyGroups({ property: "status", hideEmptyGroups: true }, false);
     expect(next).toEqual({ property: "status", hideEmptyGroups: false });
     expect(config.group).toEqual({ property: null, hideEmptyGroups: true });
+  });
+});
+
+// -----------------------------------------------------------------------
+// Filter normalization and summary using a local entity with filterableProperties
+// -----------------------------------------------------------------------
+
+type ViewConfigTestItem = { name: string; status: string };
+type ViewConfigTestProperty = "name" | "status";
+
+const filterTestEntity: EntityContract<ViewConfigTestItem, ViewConfigTestProperty> = {
+  id: "filter-test",
+  label: "Filter Test",
+  getId: (item) => item.name,
+  properties: [
+    { id: "name", label: "Name", kind: "text", renderCell: () => null },
+    { id: "status", label: "Status", kind: "categorical", renderCell: () => null },
+  ],
+  defaultProperties: [
+    { property: "name", side: "left", visible: true },
+    { property: "status", side: "right", visible: true },
+  ],
+  defaultSort: () => 0,
+  filterableProperties: [
+    { property: "name", kind: "text", getValue: (item) => item.name },
+    { property: "status", kind: "select", getValue: (item) => item.status },
+  ],
+  Detail: () => null,
+  defaultViews: [],
+};
+
+describe("normalizeViewConfig filter rows with filterableProperties", () => {
+  it("drops a filter row with a stale property id", () => {
+    const input = {
+      filters: [
+        { id: "f1", property: "name", operator: "contains", value: "foo", active: true },
+        { id: "f2", property: "stale_property", operator: "contains", value: "bar", active: true },
+      ],
+    };
+    const result = normalizeViewConfig(input, filterTestEntity);
+    expect(result.filters).toHaveLength(1);
+    expect(result.filters[0].property).toBe("name");
+  });
+
+  it("keeps a valid filter row with a valid property and operator", () => {
+    const input = {
+      filters: [
+        { id: "f1", property: "name", operator: "contains", value: "hello", active: true },
+      ],
+    };
+    const result = normalizeViewConfig(input, filterTestEntity);
+    expect(result.filters).toHaveLength(1);
+    expect(result.filters[0]).toEqual({
+      id: "f1",
+      property: "name",
+      operator: "contains",
+      value: "hello",
+      active: true,
+    });
+  });
+
+  it("drops filter rows with invalid operators for the property kind", () => {
+    const input = {
+      filters: [
+        // "eq" is a number operator, not valid for text kind
+        { id: "f1", property: "name", operator: "eq", value: "", active: true },
+      ],
+    };
+    const result = normalizeViewConfig(input, filterTestEntity);
+    expect(result.filters).toEqual([]);
+  });
+});
+
+describe("summarizeViewConfig filter summary with filterableProperties", () => {
+  it("counts only complete and active filters", () => {
+    const config = {
+      ...defaultViewConfig(filterTestEntity),
+      filters: [
+        { id: "f1", property: "name", operator: "contains", value: "hello", active: true },   // complete + active
+        { id: "f2", property: "name", operator: "contains", value: "", active: true },          // incomplete
+        { id: "f3", property: "name", operator: "not-empty", value: null, active: false },      // inactive
+        { id: "f4", property: "name", operator: "not-empty", value: null, active: true },       // complete + active
+      ],
+    };
+    const summary = summarizeViewConfig(config, filterTestEntity);
+    expect(summary.filter).toBe("2 active");
+  });
+
+  it('returns "None" when no active complete filters', () => {
+    const config = {
+      ...defaultViewConfig(filterTestEntity),
+      filters: [
+        { id: "f1", property: "name", operator: "contains", value: "", active: true }, // incomplete
+      ],
+    };
+    expect(summarizeViewConfig(config, filterTestEntity).filter).toBe("None");
+  });
+});
+
+describe("patchViewConfig preserves fields when patching filters", () => {
+  it("preserves layout, propertyVisibility, sort, group, conditionalColor when patching filters", () => {
+    const base = defaultViewConfig(filterTestEntity);
+    const newFilters = [
+      { id: "f1", property: "name", operator: "contains", value: "test", active: true },
+    ];
+    const patched = patchViewConfig(base, { filters: newFilters });
+
+    expect(patched.layout).toEqual(base.layout);
+    expect(patched.propertyVisibility).toEqual(base.propertyVisibility);
+    expect(patched.sort).toEqual(base.sort);
+    expect(patched.group).toEqual(base.group);
+    expect(patched.conditionalColor).toEqual(base.conditionalColor);
+    expect(patched.filters).toEqual(newFilters);
+    expect(patched.filters).not.toBe(newFilters); // copy
   });
 });

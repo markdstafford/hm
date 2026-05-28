@@ -696,7 +696,7 @@ Sub-panel implementation status:
 | Property visibility | Real controls (issue #41) — see "Property visibility sub-panel" below |
 | Sort | `Coming in #42` |
 | Group | Real controls (issue #43) — see "Group sub-panel" below |
-| Filter | `Coming in #44` |
+| Filter | Real controls (issue #44) |
 
 **Layout sub-panel** (`src/views/collection/menu/sub-panels/LayoutPanel.tsx`): Type tiles (3-col grid; `Table` enabled, others `aria-disabled`), density segmented toggle (`Compact` / `Regular`, maps to `py-1` / `py-2` on rows), and a `PreviewPopover` trigger row. `PreviewPopover` (`src/views/collection/menu/sub-panels/PreviewPopover.tsx`) shows three options (`side-peek` → Side, `bottom-peek` → Bottom, `full-page` → Full page) via `role="listbox"` + `role="option"` ARIA pattern with `aria-selected`.
 
@@ -714,7 +714,9 @@ Sub-panel implementation status:
 
 **Keyboard navigation:** `useKeyboardNavigation` (`src/views/collection/useKeyboardNavigation.ts`) registers on `window`. `ArrowUp`/`ArrowDown` work in all preview modes; `j`/`k`/`Escape` work only in `full-page`. Ignores events from form fields (`isFormFieldTarget` from `src/shell/keys.ts`).
 
-**Display order:** `sortCollectionItems(items, entity, activeConfig.sort)` from `src/views/collection/sort.ts` is the shared helper. `Body`, `useCollectionViewer`, preview navigation, `M of N`, and keyboard movement must all use the same active sort stack and fall back to `entity.defaultSort` when no valid configured levels exist.
+**Display order:** Items flow through three passes before rendering. First, `filterCollectionItems(items, activeConfig.filters, entity)` from `src/views/collection/filter/predicates.ts` removes items that fail any active filter, producing `filteredItems`. Second, `sortCollectionItems(filteredItems, entity, activeConfig.sort)` from `src/views/collection/sort.ts` sorts the filtered list. Third, grouping buckets the sorted list. `Body`, `useCollectionViewer`, preview navigation, `M of N`, and keyboard movement must all use the same pipeline — filter first, then sort, then group — and fall back to `entity.defaultSort` when no valid configured sort levels exist.
+
+**Filter panel** (`src/views/collection/menu/sub-panels/FilterPanel.tsx`): The functional filter sub-panel introduced in issue #44. Renders a list of `FilterRow` components (one per entry in `ViewConfig.filters`), an `+ Add filter` button, and a `Clear all filters` button. Each `FilterRow` composes three popovers — `FilterPropertyPopover`, `FilterOperatorPopover`, and `FilterValueControl` — plus a remove button. `FilterValueControl` dispatches on the operator's `control` field to render the right picker: `FilterOptionPopover` for single-select, `FilterMultiSelectPopover` for multi-select, `RelativeDatePopover` for relative-date windows, a `DatePicker` for absolute dates, and a `TextField` for free-text. Filter logic lives in `src/views/collection/filter/`: `types.ts` (kind/operator/config types), `operators.ts` (operator registry), `config.ts` (normalize/add/remove/clear helpers), `date.ts` (date comparison utilities), and `predicates.ts` (`filterMatchesItem`, `filterCollectionItems`). Jira filterable properties are declared in `src/entities/jira-issue/filterable.ts`.
 
 **Typed view config:** `ViewConfig` type and helpers live in `src/views/collection/ViewConfig.ts`. Legacy `{}` configs normalize to typed defaults via `normalizeViewConfig(input, entity)`.
 

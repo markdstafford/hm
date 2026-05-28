@@ -69,11 +69,13 @@ describe("Body", () => {
     expect(screen.getByRole("button", { name: /open b/i })).toBeInTheDocument();
   });
 
-  it("applies defaultSort — rank ascending so Beta (1) comes before Alpha (2)", () => {
-    const items: Item[] = [
+  it("renders items in the order they are passed (caller is responsible for sorting)", () => {
+    const unsortedItems: Item[] = [
       { id: "a", name: "Alpha", rank: 2 },
       { id: "b", name: "Beta", rank: 1 },
     ];
+    // Pre-sort using sortCollectionItems to simulate what the parent does
+    const items = sortCollectionItems(unsortedItems, entity, []);
     render(
       <Body
         items={items}
@@ -109,26 +111,18 @@ describe("Body", () => {
     expect(sortCollectionItems(items, entity, []).map((i) => i.id)).toEqual(["b", "a"]);
   });
 
-  it("renders rows using active sort levels before default fallback", () => {
-    const items: Item[] = [
-      { id: "a", name: "Alpha", rank: 2 },
-      { id: "b", name: "Beta", rank: 1 },
-    ];
-
+  it("renders filtered empty state when items is empty but unfilteredCount > 0", () => {
     render(
       <Body
-        items={items}
+        items={[]}
+        unfilteredCount={2}
         entity={entity}
-        sort={[{ property: "name", direction: "desc" }]}
         selectedId={null}
         onSelect={vi.fn()}
       />,
     );
-
-    const rows = screen.getAllByRole("button", { name: /open/i });
-    // desc name sort: Beta (b) first, Alpha (a) second
-    expect(rows[0]).toHaveAttribute("aria-label", "Open b");
-    expect(rows[1]).toHaveAttribute("aria-label", "Open a");
+    expect(screen.getByText("No matching Test")).toBeInTheDocument();
+    expect(screen.getByText("Try changing or clearing filters for this view.")).toBeInTheDocument();
   });
 
   it("passes compact density to row elements (py-1 present, py-2 absent)", () => {
