@@ -1321,17 +1321,33 @@ impl JiraIssueClient for JiraApiClient {
 ///
 /// Watchers / votes / remote links are disabled by default and must be
 /// explicitly opted into via this struct. Watchers and votes are placeholders
-/// for the next ingestion baseline; only `fetch_remote_links` is wired today.
-#[derive(Debug, Clone, Default)]
+/// for the next ingestion baseline. Both `fetch_remote_links` and
+/// `fetch_changelog` are wired today; `fetch_watchers` and `fetch_votes`
+/// are placeholders for a future baseline.
+#[derive(Debug, Clone)]
 pub struct JiraIngestionOptions {
     /// When true, fetch `/rest/api/2/issue/{key}/remotelink` for each issue
     /// and persist the result via `jira_remote_links`. Maintained under a
     /// separate cursor key `project:{KEY}:remotelinks`.
     pub fetch_remote_links: bool,
+    /// When true, fetch `/rest/api/2/issue/{key}/changelog` for each issue
+    /// and persist the result as `issue_events` rows.
+    pub fetch_changelog: bool,
     /// Placeholder — not wired in this task.
     pub fetch_watchers: bool,
     /// Placeholder — not wired in this task.
     pub fetch_votes: bool,
+}
+
+impl Default for JiraIngestionOptions {
+    fn default() -> Self {
+        Self {
+            fetch_remote_links: false,
+            fetch_changelog: true,
+            fetch_watchers: false,
+            fetch_votes: false,
+        }
+    }
 }
 
 /// Cooperative cancellation flag shared between the service and any caller
@@ -1751,7 +1767,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                     // Changelog history tail: fetch all pages for this issue and
                     // persist each entry as idempotent issue_events rows.
                     // HTTP is done OUTSIDE the lock; only the write enters with_conn.
-                    {
+                    if self.options.fetch_changelog {
                         let mut cl_start_at: u32 = 0;
                         let cl_page_size: u32 = self.page_size;
                         loop {
@@ -1773,34 +1789,50 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                 }
                             };
                             let cl_returned = cl_page.histories.len() as u32;
-                            // Write (inside lock). Each upsert_issue_event uses ON
-                            // CONFLICT so a partial flush is safe to retry.
-                            db.with_conn(|conn| {
-                                for entry in &cl_page.histories {
-                                    let actor_id =
-                                        crate::sources::jira_history::resolve_actor_identity(
-                                            conn,
-                                            source_system_id,
-                                            entry,
-                                            now_utc,
+                            // Process each changelog entry individually so that a
+                            // decode failure on one entry does not abort the whole
+                            // page. actor resolution needs a connection; the pure
+                            // projection step is done outside the lock so that a
+                            // decode error can be pushed to tail_errors and the
+                            // loop can continue.
+                            for entry in &cl_page.histories {
+                                // Step 1: resolve actor identity (needs DB lock).
+                                let actor_id = db.with_conn(|conn| {
+                                    Ok(crate::sources::jira_history::resolve_actor_identity(
+                                        conn,
+                                        source_system_id,
+                                        entry,
+                                        now_utc,
+                                    ))
+                                })?;
+                                // Step 2: project changelog entry (pure — no lock).
+                                let events = match crate::sources::jira_history::project_changelog_entry(
+                                    source_system_id,
+                                    &work_item_id_for_tail,
+                                    &issue.key,
+                                    entry,
+                                    now_utc,
+                                    actor_id.as_deref(),
+                                ) {
+                                    Ok(events) => events,
+                                    Err(e) => {
+                                        let ie = IngestionError::new(
+                                            IngestionErrorCategory::Decode,
+                                            &e.to_string(),
                                         );
-                                    let events =
-                                        crate::sources::jira_history::project_changelog_entry(
-                                            source_system_id,
-                                            &work_item_id_for_tail,
-                                            &issue.key,
-                                            entry,
-                                            now_utc,
-                                            actor_id.as_deref(),
-                                        )
-                                        .map_err(|e| {
-                                            IngestionError::new(
-                                                IngestionErrorCategory::Decode,
-                                                &e.to_string(),
-                                            )
-                                        })?;
-                                    for event in events {
-                                        crate::issues::history::upsert_issue_event(conn, &event)
+                                        tail_errors.push(format!(
+                                            "changelog {}: {}",
+                                            issue.key, ie
+                                        ));
+                                        continue;
+                                    }
+                                };
+                                // Step 3: write events (needs DB lock).
+                                // Each upsert_issue_event uses ON CONFLICT so a
+                                // partial flush is safe to retry.
+                                db.with_conn(|conn| {
+                                    for event in &events {
+                                        crate::issues::history::upsert_issue_event(conn, event)
                                             .map_err(|e| {
                                                 IngestionError::new(
                                                     IngestionErrorCategory::Storage,
@@ -1808,9 +1840,9 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                                 )
                                             })?;
                                     }
-                                }
-                                Ok(())
-                            })?;
+                                    Ok(())
+                                })?;
+                            }
                             let next_cl = cl_start_at.saturating_add(cl_returned);
                             let cl_done = cl_page
                                 .total
@@ -3547,9 +3579,9 @@ mod tests {
                     .unwrap())
             })
             .unwrap();
-        assert!(
-            event_count >= 1,
-            "expected at least one status_changed event, got {event_count}"
+        assert_eq!(
+            event_count, 1,
+            "expected exactly one status_changed event, got {event_count}"
         );
 
         // Verify the changelog endpoint was called for each issue.
