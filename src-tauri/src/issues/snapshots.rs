@@ -435,6 +435,16 @@ fn load_terms(
     Ok(terms)
 }
 
+// ── Replay result type ───────────────────────────────────────────────────────
+
+/// Result returned by `replay_missing_snapshots`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SnapshotReplayResult {
+    pub generated_dates: Vec<String>,
+    pub snapshots_written: usize,
+    pub job_id: String,
+}
+
 // ── Main range generator ─────────────────────────────────────────────────────
 
 /// Generate (or regenerate) daily snapshots for every issue belonging to
@@ -482,6 +492,114 @@ pub fn generate_snapshots_for_range(
     }
 
     Ok(total)
+}
+
+// ── Replay missing snapshots ─────────────────────────────────────────────────
+
+/// Build the `shared_settings` key used to track the last snapshot date for a
+/// project.  Colons are not allowed by `validate_key`, so we use dots.
+/// e.g. `"project.AMP.snapshots"`
+fn snapshot_cursor_key(project_key: &str) -> String {
+    format!("project.{}.snapshots", project_key)
+}
+
+/// Replay any missing daily snapshots for `project_key` since the last cursor.
+///
+/// The cursor (stored in `shared_settings` as a JSON string `"YYYY-MM-DD"`)
+/// records the last date for which snapshots were generated.  If the cursor is
+/// absent, only today (`current_local_date`) is generated.
+///
+/// On success the cursor is advanced to `current_local_date` and a
+/// [`SnapshotReplayResult`] is returned.
+pub fn replay_missing_snapshots(
+    conn: &Connection,
+    source_system_id: &str,
+    project_key: &str,
+    current_local_date: &str,
+    now_utc: &str,
+) -> Result<SnapshotReplayResult, IssueHistoryError> {
+    let cursor_key = snapshot_cursor_key(project_key);
+
+    // Read the existing cursor (a JSON-encoded date string).
+    let cursor_opt: Option<String> =
+        match crate::settings::shared::shared_settings_get(conn, &cursor_key) {
+            Ok(Some(v)) => v.as_str().map(|s| s.to_string()),
+            Ok(None) => None,
+            Err(e) => {
+                return Err(IssueHistoryError::Storage(rusqlite::Error::ToSqlConversionFailure(
+                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+                )));
+            }
+        };
+
+    // Determine the start date for generation.
+    let start_date: String = match cursor_opt.as_deref() {
+        Some(cursor) if cursor >= current_local_date => {
+            // Already up-to-date — nothing to do.
+            return Ok(SnapshotReplayResult {
+                generated_dates: vec![],
+                snapshots_written: 0,
+                job_id: String::new(),
+            });
+        }
+        Some(cursor) => next_date(cursor),
+        None => current_local_date.to_string(),
+    };
+
+    let dates = dates_in_range(&start_date, current_local_date);
+
+    // Create a job record.
+    let job_id = crate::issues::ids::stable_id(
+        "snapjob",
+        &[source_system_id, project_key, current_local_date, now_utc],
+    );
+    let job_input = crate::issues::history::IssueSnapshotJobStartInput {
+        id: job_id.clone(),
+        source_system_id: Some(source_system_id.to_string()),
+        job_kind: "replay_missing".to_string(),
+        started_at: now_utc.to_string(),
+        target_start_date: Some(start_date.clone()),
+        target_end_date: Some(current_local_date.to_string()),
+        progress_json: serde_json::json!({ "dates": dates.len() }).to_string(),
+    };
+    crate::issues::history::start_snapshot_job(conn, &job_input)
+        .map_err(IssueHistoryError::Storage)?;
+
+    // Generate snapshots for the full missing range.
+    let snapshots_written =
+        generate_snapshots_for_range(conn, source_system_id, &start_date, current_local_date, now_utc)?;
+
+    // Mark the job done.
+    let final_progress = serde_json::json!({
+        "dates_generated": dates.len(),
+        "snapshots_written": snapshots_written,
+    })
+    .to_string();
+    crate::issues::history::finish_snapshot_job(
+        conn,
+        &job_id,
+        "succeeded",
+        now_utc,
+        &final_progress,
+        None,
+    )
+    .map_err(IssueHistoryError::Storage)?;
+
+    // Advance the cursor.
+    let cursor_value = serde_json::json!(current_local_date);
+    crate::settings::shared::shared_settings_set(conn, &cursor_key, &cursor_value).map_err(
+        |e| {
+            IssueHistoryError::Storage(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+            )))
+        },
+    )?;
+
+    Ok(SnapshotReplayResult {
+        generated_dates: dates,
+        snapshots_written,
+        job_id,
+    })
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -770,6 +888,102 @@ mod tests {
         );
         apply_event(&mut state, &event);
         assert_eq!(state.epic_link.as_deref(), Some("EPIC-42"));
+    }
+
+    // ── seeded_snapshot_conn_with_cursor ─────────────────────────────────────
+
+    fn seeded_snapshot_conn_with_cursor(cursor_key: &str, cursor_date: &str) -> Connection {
+        let conn = seeded_snapshot_conn();
+        // Store the cursor as a JSON-encoded date string, using the raw SQL so
+        // we can use a colon-containing key for the spec-aligned assertion.
+        let value_json = serde_json::json!(cursor_date).to_string();
+        conn.execute(
+            "INSERT INTO shared_settings (key, value_json, updated_at)
+             VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json, updated_at = datetime('now')",
+            rusqlite::params![cursor_key, value_json],
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn replay_missing_days_fills_gap_after_downtime() {
+        // Use the dot-separated key required by validate_key.
+        let cursor_key = "project.AMP.snapshots";
+        // Seed the cursor with value "2026-05-25" (JSON string).
+        let conn = seeded_snapshot_conn_with_cursor(cursor_key, "2026-05-25");
+
+        let result = replay_missing_snapshots(
+            &conn,
+            "srcsys_jira_1",
+            "AMP",
+            "2026-05-28",
+            "2026-05-28T12:00:00Z",
+        )
+        .unwrap();
+
+        assert!(
+            result.generated_dates.contains(&"2026-05-26".to_string()),
+            "should include 2026-05-26"
+        );
+        assert!(
+            result.generated_dates.contains(&"2026-05-27".to_string()),
+            "should include 2026-05-27"
+        );
+        assert!(
+            result.generated_dates.contains(&"2026-05-28".to_string()),
+            "should include 2026-05-28"
+        );
+        assert!(result.snapshots_written > 0, "should write at least one snapshot");
+
+        // Cursor is updated to current date (stored as JSON string "\"2026-05-28\"")
+        let updated_cursor_json: String = conn
+            .query_row(
+                "SELECT value_json FROM shared_settings WHERE key = ?1",
+                rusqlite::params![cursor_key],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // The value is stored as a JSON string: "\"2026-05-28\""
+        let updated_cursor: String =
+            serde_json::from_str::<serde_json::Value>(&updated_cursor_json)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string();
+        assert_eq!(updated_cursor, "2026-05-28");
+    }
+
+    #[test]
+    fn replay_returns_empty_when_cursor_is_current() {
+        let cursor_key = "project.AMP.snapshots";
+        let conn = seeded_snapshot_conn_with_cursor(cursor_key, "2026-05-28");
+        let result = replay_missing_snapshots(
+            &conn,
+            "srcsys_jira_1",
+            "AMP",
+            "2026-05-28",
+            "2026-05-28T12:00:00Z",
+        )
+        .unwrap();
+        assert!(result.generated_dates.is_empty());
+        assert_eq!(result.snapshots_written, 0);
+    }
+
+    #[test]
+    fn replay_generates_only_today_when_no_cursor() {
+        let conn = seeded_snapshot_conn();
+        let result = replay_missing_snapshots(
+            &conn,
+            "srcsys_jira_1",
+            "AMP",
+            "2026-05-28",
+            "2026-05-28T12:00:00Z",
+        )
+        .unwrap();
+        assert_eq!(result.generated_dates, vec!["2026-05-28"]);
+        assert!(result.snapshots_written > 0);
     }
 
     #[test]

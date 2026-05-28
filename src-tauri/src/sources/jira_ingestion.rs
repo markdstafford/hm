@@ -1969,6 +1969,36 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             Ok(())
         })?;
 
+        // ── Replay missing snapshot dates for this project ──────────────
+        // Derive the local date from the leading 10 chars of `now_utc`
+        // (YYYY-MM-DD).  This avoids a chrono dependency and is correct for
+        // UTC-anchored dates; callers that need local-date accuracy should
+        // pass `now_utc` with an appropriate offset.
+        let replay_date = now_utc.get(..10).unwrap_or(now_utc).to_string();
+        let now_owned = now_utc.to_string();
+        let source_system_id_owned = source_system_id.to_string();
+        db.with_conn(|conn| {
+            match crate::issues::snapshots::replay_missing_snapshots(
+                conn,
+                &source_system_id_owned,
+                &project_key_owned,
+                &replay_date,
+                &now_owned,
+            ) {
+                Ok(result) => {
+                    eprintln!(
+                        "[snapshots] replay: {} dates, {} snapshots written",
+                        result.generated_dates.len(),
+                        result.snapshots_written
+                    );
+                }
+                Err(e) => {
+                    tail_errors.push(format!("snapshot_replay: {e}"));
+                }
+            }
+            Ok(())
+        })?;
+
         Ok(JiraIssueIngestionSummary {
             run_id,
             status: status.to_string(),
