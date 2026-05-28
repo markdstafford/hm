@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { axe } from "jest-axe";
 import { JiraIssueDetail } from "./detail";
 import type { JiraIssueListItem, JiraIssueStatusTransition } from "../../bindings";
 import * as historyModule from "./history";
@@ -200,5 +201,16 @@ describe("JiraIssueDetail — status history", () => {
       expect(label).toMatch(/In Progress/);
       expect(label).toMatch(/Alice Smith/);
     });
+  });
+
+  it("has no axe violations when status history is loaded", async () => {
+    vi.mocked(historyModule.loadJiraIssueStatusHistory).mockResolvedValue({
+      status: "ok",
+      transitions: [transition()],
+      partial: false,
+    });
+    const { container } = render(<JiraIssueDetail item={baseItem()} />);
+    await screen.findByRole("list", { name: "Status history" });
+    expect(await axe(container)).toHaveNoViolations();
   });
 });
