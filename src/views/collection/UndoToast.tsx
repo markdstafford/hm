@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../../ui/buttons/Button";
 import { Toast } from "../../ui/feedback/Toast";
 
@@ -40,11 +40,20 @@ export function UndoToastProvider({ children }: { children: ReactNode }) {
 
   const api: UndoToastApi = { show, dismiss };
   const canUndo = input?.reversible === true && !!input.undo;
+  const undoInFlightRef = useRef(false);
 
   async function handleUndo() {
-    if (!input?.undo) return;
-    await input.undo();
+    if (!input?.undo || undoInFlightRef.current) return;
+    undoInFlightRef.current = true;
+    // Dismiss immediately so the button is removed before the async handler resolves,
+    // preventing rapid double-activation.
+    const undoFn = input.undo;
     dismiss();
+    try {
+      await undoFn();
+    } finally {
+      undoInFlightRef.current = false;
+    }
   }
 
   return (

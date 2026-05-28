@@ -115,6 +115,33 @@ describe("UndoToast", () => {
     expect(screen.queryByText("Approved 2 suggestions")).not.toBeInTheDocument();
   });
 
+  it("calls async undo handler exactly once on rapid double-activation", async () => {
+    let resolveUndo!: () => void;
+    const undo = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveUndo = resolve;
+        }),
+    );
+    renderHarness(undo);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Show reversible" }));
+
+    const undoButton = screen.getByRole("button", { name: "Undo" });
+
+    // Simulate two synchronous clicks before React can re-render (ref guard blocks the second)
+    fireEvent.click(undoButton);
+    fireEvent.click(undoButton);
+
+    // Resolve the async undo handler
+    resolveUndo();
+    await waitFor(() => expect(undo).toHaveBeenCalledTimes(1));
+
+    // Toast should be gone
+    expect(screen.queryByText("Approved 2 suggestions")).not.toBeInTheDocument();
+  });
+
   it("has no axe violations when visible", async () => {
     const user = userEvent.setup();
     const { container } = renderHarness();
