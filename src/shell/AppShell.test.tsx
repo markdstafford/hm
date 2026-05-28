@@ -79,7 +79,7 @@ describe("AppShell", () => {
       mainTitleBarEnd: <span data-testid="end">end</span>,
     });
     const spacers = Array.from(container.querySelectorAll("[data-tauri-drag-region]"));
-    const mainSpacer = spacers.at(-1)!;
+    const mainSpacer = spacers[spacers.length - 1]!;
 
     fireEvent.pointerDown(mainSpacer, { button: 0 });
 
@@ -111,7 +111,8 @@ describe("AppShell", () => {
 
   it("ignores secondary-button pointer events on title-bar spacers", async () => {
     const { container } = harness();
-    const mainSpacer = Array.from(container.querySelectorAll("[data-tauri-drag-region]")).at(-1)!;
+    const allSpacers = Array.from(container.querySelectorAll("[data-tauri-drag-region]"));
+    const mainSpacer = allSpacers[allSpacers.length - 1]!;
 
     fireEvent.pointerDown(mainSpacer, { button: 2 });
     await Promise.resolve();

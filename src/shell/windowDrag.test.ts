@@ -11,16 +11,17 @@ type FakePointerEvent = {
   button: number;
   defaultPrevented: boolean;
   target: EventTarget | null;
-  preventDefault: ReturnType<typeof vi.fn>;
+  preventDefault: () => void;
 };
 
-function fakeEvent(target: EventTarget | null, overrides: Partial<FakePointerEvent> = {}): FakePointerEvent {
+function fakeEvent(target: EventTarget | null, overrides: Partial<Omit<FakePointerEvent, "preventDefault">> = {}) {
+  const preventDefault = vi.fn<() => void>();
   return {
     button: 0,
     defaultPrevented: false,
     target,
-    preventDefault: vi.fn(),
     ...overrides,
+    preventDefault,
   };
 }
 
