@@ -4,6 +4,19 @@ The write-side UX contract for any `hm` collection: how the user selects rows, r
 
 This is the layer that turns a read-only collection into a workbench. Every entity that supports actions plugs into the same surfaces; entity-specific action definitions live in `collection-enhance.md` (hygiene suggestion) and `collection-history.md` (audit-log entry).
 
+## Implementation landmarks
+
+Issue #46 implements the generic write UI layer in these modules:
+
+- `src/views/collection/selection/useSelection.ts` — local Set-backed selection state for mounted collection pages.
+- `src/views/collection/Row.tsx` and `src/views/collection/Body.tsx` — optional row checkbox wiring; row-body detail focus stays separate from selection.
+- `src/views/collection/BulkActionBar.tsx` — floating bottom-center action slot container.
+- `src/views/collection/ConfirmAction.tsx` — Promise-based confirmation provider/hook around the shared `AlertDialog` primitive.
+- `src/views/collection/UndoToast.tsx` — one-at-a-time 8-second undo toast provider/hook around the shared `Toast` primitive.
+- `src/views/collection/actions/types.ts` — generic action registration contracts; no Jira-specific imports.
+- `src/views/collection/actions/runner.ts` — sequential confirm → apply → clear → toast → undo runner. It generates one batch id per run, ignores stale selected ids, stops on first apply failure, and returns the safe display error `Action could not be completed` instead of exposing raw source-system errors.
+- `src/_dev/Showcase.tsx` — the `Collection write` section exercises the primitives with fake in-memory handlers only.
+
 ## Selection
 
 Each row in the collection carries a checkbox at its leftmost position. Selection is independent of detail focus: ticking the checkbox does not open the detail surface; clicking the row body opens the detail without affecting the checkbox.
