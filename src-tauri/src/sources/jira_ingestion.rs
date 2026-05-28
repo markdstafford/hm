@@ -2795,7 +2795,8 @@ mod tests {
         let err = service
             .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
             .expect_err("expected partial failure");
-        assert_eq!(err.category(), IngestionErrorCategory::Unknown);
+        assert_eq!(err.category(), IngestionErrorCategory::Server);
+        assert_eq!(format!("{err}"), "Jira server error");
 
         let runs: Vec<(String, Option<String>)> = {
             let mut stmt = conn
@@ -2813,15 +2814,7 @@ mod tests {
         };
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].0, "partial");
-        assert!(
-            runs[0]
-                .1
-                .as_deref()
-                .map(|s| !s.is_empty())
-                .unwrap_or(false),
-            "expected non-empty error_summary, got {:?}",
-            runs[0].1
-        );
+        assert_eq!(runs[0].1.as_deref(), Some("Jira server error"));
 
         // The first page's work_items should still be present.
         let wi_count: i64 = conn
