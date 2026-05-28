@@ -323,3 +323,11 @@ src/features/settings/ai-providers/
 ```
 
 The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `ProfilesSection` / `RoutingSection` under `src/settings/aiProviders/`) was deleted in PR #30. Schema notes on the runner-flavor distinction (`anthropic_direct` vs `claude_agent_sdk`) — the binding's `AiRunner` enum only distinguishes anthropic/openai families; the YAML view preserves the original runner spelling via `profile.settings._yaml_runner` for lossless round-trip.
+
+---
+
+## Hygiene suggestion entity (added 2026-05-28, issue #47)
+
+- `src/entities/hygiene-suggestion/` defines the read-side collection entity for duplicate, stale, and enrichment suggestions.
+- `src/features/backlog-hygiene/data.ts` is the fixture-backed seam to replace with producer/store output from future duplicate, stale, and enrichment engines.
+- `src/features/collection-viewer/useEntityCollectionViewer.tsx` is the generic collection binding used by Jira issues and backlog hygiene; entity-specific wrappers provide load state and copy.

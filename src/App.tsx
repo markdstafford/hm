@@ -19,6 +19,7 @@ import { ScopeHeader } from "./ui/sidebar/ScopeHeader";
 import { Showcase } from "./_dev/Showcase";
 import { InboxPage } from "./features/inbox/InboxPage";
 import { useCollectionViewer } from "./features/collection-viewer/useCollectionViewer";
+import { BacklogHygienePage } from "./features/backlog-hygiene/BacklogHygienePage";
 import { Breadcrumb } from "./ui/navigation/Breadcrumb";
 import {
   SettingsPage,
@@ -33,7 +34,7 @@ function App() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [settingsPage, setSettingsPage] = useState<SettingsCategory | null>(null);
   const [showShowcase, setShowShowcase] = useState(false);
-  type MainPage = "inbox" | "jira-issues";
+  type MainPage = "inbox" | "jira-issues" | "backlog-hygiene";
   const [mainPage, setMainPage] = useState<MainPage>("inbox");
   const [prefersDark, setPrefersDark] = useState(getSystemPrefersDark);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
@@ -125,6 +126,10 @@ function App() {
     active: !inSettings && !showShowcase && mainPage === "jira-issues",
   });
 
+  const backlogHygienePage = BacklogHygienePage({
+    active: !inSettings && !showShowcase && mainPage === "backlog-hygiene",
+  });
+
   const page = inSettings
     ? {
         titleBar: <SettingsBreadcrumb category={settingsPage!} />,
@@ -147,6 +152,8 @@ function App() {
         header: collectionViewer.header,
         content: collectionViewer.body,
       }
+    : mainPage === "backlog-hygiene"
+    ? backlogHygienePage
     : InboxPage;
 
   return (
@@ -170,6 +177,12 @@ function App() {
                 icon={<ListTodo size={12} />}
                 active={mainPage === "jira-issues"}
                 onClick={() => setMainPage("jira-issues")}
+              />
+              <NavItem
+                label="Backlog hygiene"
+                icon={<Sparkles size={12} />}
+                active={mainPage === "backlog-hygiene"}
+                onClick={() => setMainPage("backlog-hygiene")}
               />
             </NavSection>
           )

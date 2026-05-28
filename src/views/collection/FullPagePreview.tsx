@@ -17,6 +17,7 @@ export function FullPagePreview<TItem, TProperty extends string>({
   item, entity, index, total, canMovePrevious, canMoveNext, onBack, onMovePrevious, onMoveNext,
 }: Props<TItem, TProperty>) {
   const EntityDetail = entity.Detail;
+  const noun = entity.detailLabel ?? entity.id;
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
@@ -32,7 +33,7 @@ export function FullPagePreview<TItem, TProperty extends string>({
         <span className="text-xs tabular-nums text-subtext">{index + 1} of {total}</span>
         <button
           type="button"
-          aria-label="Previous issue"
+          aria-label={`Previous ${noun}`}
           disabled={!canMovePrevious}
           onClick={onMovePrevious}
           className="inline-flex h-control-sm items-center justify-center rounded px-1.5 text-subtext hover:bg-surface hover:text-text disabled:cursor-default disabled:opacity-40"
@@ -41,7 +42,7 @@ export function FullPagePreview<TItem, TProperty extends string>({
         </button>
         <button
           type="button"
-          aria-label="Next issue"
+          aria-label={`Next ${noun}`}
           disabled={!canMoveNext}
           onClick={onMoveNext}
           className="inline-flex h-control-sm items-center justify-center rounded px-1.5 text-subtext hover:bg-surface hover:text-text disabled:cursor-default disabled:opacity-40"

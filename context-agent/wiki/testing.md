@@ -307,6 +307,15 @@ Run this after touching any `#[tauri::command] #[specta::specta]` function so `s
 - Full credential/profile creation flow requires Tauri IPC — see `tauri-driver` upstream docs if deeper e2e is needed.
 - Run `npm run test:e2e` only when `npm run dev` (Vite) is running in a separate terminal.
 
+## Backlog hygiene read-rendering checks (added 2026-05-28, issue #47)
+
+- Entity/unit: `npm test -- src/entities/hygiene-suggestion`
+- Page/component: `npm test -- src/features/backlog-hygiene/BacklogHygienePage.test.tsx`
+- Generic collection binding: `npm test -- src/features/collection-viewer/useEntityCollectionViewer.test.tsx src/features/collection-viewer/CollectionViewerPage.test.tsx`
+- E2E smoke: `npm run test:e2e -- e2e/backlog-hygiene.spec.ts`
+
+---
+
 ## Collection write data layer smoke (issue #45)
 
 Backend-only smoke path:

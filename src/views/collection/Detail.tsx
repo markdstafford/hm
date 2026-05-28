@@ -25,14 +25,16 @@ export function Detail<TItem, TProperty extends string>({
   const frameClass = surface === "side-peek"
     ? "w-[440px] shrink-0 border-l border-border"
     : "h-[280px] shrink-0 border-t border-border";
+  const noun = entity.detailLabel ?? entity.id;
+  const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
 
   return (
-    <aside aria-label="Issue detail" className={`${frameClass} flex flex-col overflow-hidden bg-background`}>
+    <aside aria-label={`${Noun} detail`} className={`${frameClass} flex flex-col overflow-hidden bg-background`}>
       <div className="flex items-center gap-2 px-3 py-2 shrink-0 border-b border-border">
         <span className="mr-auto text-xs tabular-nums text-subtext">{index + 1} of {total}</span>
         <button
           type="button"
-          aria-label="Previous issue"
+          aria-label={`Previous ${noun}`}
           disabled={!canMovePrevious}
           onClick={onMovePrevious}
           className="inline-flex h-control-sm items-center justify-center rounded px-1.5 text-subtext hover:bg-surface hover:text-text disabled:cursor-default disabled:opacity-40"
@@ -41,14 +43,14 @@ export function Detail<TItem, TProperty extends string>({
         </button>
         <button
           type="button"
-          aria-label="Next issue"
+          aria-label={`Next ${noun}`}
           disabled={!canMoveNext}
           onClick={onMoveNext}
           className="inline-flex h-control-sm items-center justify-center rounded px-1.5 text-subtext hover:bg-surface hover:text-text disabled:cursor-default disabled:opacity-40"
         >
           <ArrowDown size={12} aria-hidden />
         </button>
-        <IconButton label="Close issue detail" onClick={onClose}>
+        <IconButton label={`Close ${noun} detail`} onClick={onClose}>
           <X size={12} aria-hidden />
         </IconButton>
       </div>

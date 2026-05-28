@@ -27,7 +27,23 @@ vi.mock("./bindings", () => ({
     preferencesRead: vi.fn().mockResolvedValue({ status: "ok", data: {} }),
     preferencesWrite: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     jiraIssuesList: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
+    collectionViewsSeedDefaults: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
+    collectionViewSave: vi.fn().mockImplementation(async (v: any) => ({ status: "ok", data: v })),
+    collectionViewDelete: vi.fn().mockResolvedValue({ status: "ok", data: null }),
   },
+}));
+
+vi.mock("./preferences/storage", () => ({
+  loadPreferences: vi.fn().mockResolvedValue({}),
+  savePreferences: vi.fn().mockImplementation(async (c: any, p: any) => ({ ok: true, next: { ...c, ...p } })),
+}));
+
+vi.mock("./features/backlog-hygiene/data", () => ({
+  useHygieneSuggestions: vi.fn().mockReturnValue({ suggestions: [], loading: false, error: null, partialFailures: [] }),
+}));
+
+vi.mock("./features/collection-viewer/data", () => ({
+  useJiraIssues: vi.fn().mockReturnValue({ issues: [], loading: false, error: null }),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -102,5 +118,26 @@ describe("App / Jira issues navigation", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: /jira issues/i }));
     expect(screen.getByRole("button", { name: /jira issues/i })).toHaveAttribute("aria-current", "page");
+  });
+});
+
+describe("App / Backlog hygiene navigation", () => {
+  it("renders Backlog hygiene nav item in the sidebar", () => {
+    render(<App />);
+    expect(screen.getByRole("button", { name: /backlog hygiene/i })).toBeInTheDocument();
+  });
+
+  it("navigates to Backlog hygiene page when nav item is clicked", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /backlog hygiene/i }));
+    expect(await screen.findByRole("button", { name: "All" })).toBeInTheDocument();
+  });
+
+  it("Backlog hygiene nav item becomes active after navigation", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /backlog hygiene/i }));
+    expect(screen.getByRole("button", { name: /backlog hygiene/i })).toHaveAttribute("aria-current", "page");
   });
 });
