@@ -1,7 +1,7 @@
 ---
 created: 2026-05-27
-last_updated: 2026-05-27
-status: implementing
+last_updated: 2026-05-28
+status: complete
 issue: 44
 issue_url: [https://github.com/markdstafford/hm/issues/44](https://github.com/markdstafford/hm/issues/44)
 specced_by: autocatalyst
