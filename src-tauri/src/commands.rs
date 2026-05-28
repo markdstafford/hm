@@ -1321,6 +1321,42 @@ mod tests {
     }
 
     #[test]
+    fn status_timeline_missing_issue_returns_empty_list() {
+        let conn = seeded_history_command_conn();
+        let rows = jira_issue_status_timeline_from_conn(&conn, "nonexistent_id").unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn snapshot_query_rejects_unbounded_limit_to_500() {
+        let conn = seeded_history_command_conn_with_many_snapshots(600);
+        let query = IssueSnapshotQuery {
+            snapshot_date: "2026-05-28".to_string(),
+            source_id: None,
+            project_key: None,
+            status_name: None,
+            state: None,
+            assignee_person_id: None,
+            priority_name: None,
+            label: None,
+            sprint_name: None,
+            product_name: None,
+            customer_name: None,
+            limit: Some(9999),
+        };
+        let rows = issue_snapshots_query_from_conn(&conn, &query).unwrap();
+        assert_eq!(rows.len(), 500);
+    }
+
+    #[test]
+    fn command_storage_errors_are_safe() {
+        // Open a connection WITHOUT running setup_schema - so tables don't exist
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let err = jira_issue_status_timeline_from_conn(&conn, "wi_amp_1043").unwrap_err();
+        assert_eq!(err, "Could not read issue history. Try syncing Jira again.");
+    }
+
+    #[test]
     fn run_options_with_fetch_remote_links_propagate_to_service() {
         // Smoke test that JiraIngestionRunOptions is plumbed through specta
         // correctly. Full end-to-end runs require Tauri state (AppHandle),
