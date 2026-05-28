@@ -446,44 +446,46 @@ pub fn finish_snapshot_job(
 }
 
 /// Load retention config from shared_settings. Returns the default if no value is stored.
-pub fn load_retention_config(conn: &Connection) -> rusqlite::Result<IssueHistoryRetentionConfig> {
+pub fn load_retention_config(conn: &Connection) -> Result<IssueHistoryRetentionConfig, IssueHistoryError> {
     match crate::settings::shared::shared_settings_get(conn, ISSUE_HISTORY_RETENTION_KEY) {
         Ok(Some(value)) => {
             serde_json::from_value(value).map_err(|e| {
-                rusqlite::Error::ToSqlConversionFailure(Box::new(
+                IssueHistoryError::Storage(rusqlite::Error::ToSqlConversionFailure(Box::new(
                     std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
-                ))
+                )))
             })
         }
         Ok(None) => Ok(IssueHistoryRetentionConfig::default()),
-        Err(_) => Ok(IssueHistoryRetentionConfig::default()),
+        Err(e) => {
+            eprintln!("[history] load_retention_config error (using defaults): {e}");
+            Ok(IssueHistoryRetentionConfig::default())
+        }
     }
 }
 
 /// Validate and save the retention config to shared_settings.
-/// Returns `rusqlite::Error::InvalidQuery` on validation failure.
+/// Returns `IssueHistoryError::InvalidConfig` on validation failure.
 pub fn save_retention_config(
     conn: &Connection,
     config: &IssueHistoryRetentionConfig,
-) -> rusqlite::Result<()> {
-    if config.daily_days == 0 {
-        return Err(rusqlite::Error::InvalidQuery);
-    }
-    if config.compact_to_weekly_after_days == 0 {
-        return Err(rusqlite::Error::InvalidQuery);
+) -> Result<(), IssueHistoryError> {
+    if config.daily_days == 0 || config.compact_to_weekly_after_days == 0 {
+        return Err(IssueHistoryError::InvalidConfig(
+            "daily_days and compact_to_weekly_after_days must be greater than zero".to_string(),
+        ));
     }
     if config.weekly_anchor != "monday" {
-        return Err(rusqlite::Error::InvalidQuery);
+        return Err(IssueHistoryError::InvalidConfig(
+            format!("weekly_anchor '{}' is not supported; use 'monday'", config.weekly_anchor),
+        ));
     }
 
     let value = serde_json::to_value(config).map_err(|e| {
-        rusqlite::Error::ToSqlConversionFailure(Box::new(
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
-        ))
+        IssueHistoryError::InvalidConfig(e.to_string())
     })?;
 
     crate::settings::shared::shared_settings_set(conn, ISSUE_HISTORY_RETENTION_KEY, &value)
-        .map_err(|_| rusqlite::Error::InvalidQuery)
+        .map_err(|e| IssueHistoryError::InvalidConfig(e.to_string()))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
