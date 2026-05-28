@@ -220,10 +220,122 @@ pub fn project_changelog_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::issues::history::{upsert_issue_event, IssueEventInput};
     use crate::sources::jira_types::JiraChangelogEntry;
+    use rusqlite::Connection;
 
     fn entry_from_json(json: &str) -> JiraChangelogEntry {
         serde_json::from_str(json).unwrap()
+    }
+
+    // ── Idempotency helpers ───────────────────────────────────────────────────
+
+    fn insert_test_source_system(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO source_systems (id, kind, deployment_kind, display_name, base_url, config_source_id, created_at, updated_at)
+             VALUES ('srcsys_jira_1', 'jira', 'datacenter', 'Test Jira', 'https://jira.example.com', 'primary', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+    }
+
+    fn insert_test_work_item(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO work_items (id, source_system_id, source_kind, upstream_id, key, title, state, raw_updated_hash, last_seen_at, created_at, updated_at)
+             VALUES ('wi_amp_1043', 'srcsys_jira_1', 'jira_issue', 'AMP-1043', 'AMP-1043', 'Fix the widget', 'open', 'abc123', '2026-05-28T00:00:00Z', '2026-05-28T00:00:00Z', '2026-05-28T00:00:00Z')",
+            [],
+        ).unwrap();
+    }
+
+    fn conn_with_issue() -> Connection {
+        let conn = crate::db::open_in_memory().unwrap();
+        insert_test_source_system(&conn);
+        insert_test_work_item(&conn);
+        conn
+    }
+
+    /// Ingest the status fixture once, persisting one event row via upsert_issue_event.
+    fn ingest_status_fixture(conn: &Connection) -> rusqlite::Result<()> {
+        let entry = entry_from_json(include_str!("fixtures/jira_changelog_history_status.json"));
+        let events = project_changelog_entry(
+            "srcsys_jira_1",
+            "wi_amp_1043",
+            "AMP-1043",
+            &entry,
+            "2026-05-28T12:00:00Z",
+            None,
+        )
+        .unwrap();
+        for event in &events {
+            upsert_issue_event(conn, event)?;
+        }
+        Ok(())
+    }
+
+    // ── Deleted-author helpers ────────────────────────────────────────────────
+
+    /// Project the deleted-author fixture and return the resulting events.
+    /// The caller passes actor_identity_id = None, mirroring what resolve_actor_identity
+    /// returns when no stable key (accountId / name / key) exists.
+    fn project_deleted_author_fixture() -> Result<Vec<IssueEventInput>, IssueHistoryError> {
+        let entry =
+            entry_from_json(include_str!("fixtures/jira_changelog_history_deleted_author.json"));
+        project_changelog_entry(
+            "srcsys_jira_1",
+            "wi_amp_1043",
+            "AMP-1043",
+            &entry,
+            "2026-05-28T12:00:00Z",
+            None, // caller supplies None when no stable key is available
+        )
+    }
+
+    // ── Unknown-custom-field helpers ──────────────────────────────────────────
+
+    /// Project the fields fixture and return the event for the unknown custom field.
+    fn project_unknown_custom_field_fixture() -> Result<Vec<IssueEventInput>, IssueHistoryError> {
+        let entry =
+            entry_from_json(include_str!("fixtures/jira_changelog_history_fields.json"));
+        let all = project_changelog_entry(
+            "srcsys_jira_1",
+            "wi_amp_1043",
+            "AMP-1043",
+            &entry,
+            "2026-05-28T12:00:00Z",
+            None,
+        )?;
+        // Return only the event for the unknown custom field.
+        let filtered: Vec<IssueEventInput> = all
+            .into_iter()
+            .filter(|e| e.field_id.as_deref() == Some("customfield_99999"))
+            .collect();
+        Ok(filtered)
+    }
+
+    // ── New fixture-coverage tests ────────────────────────────────────────────
+
+    #[test]
+    fn reingesting_same_changelog_does_not_duplicate_events() {
+        let conn = conn_with_issue();
+        ingest_status_fixture(&conn).unwrap();
+        ingest_status_fixture(&conn).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM issue_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn deleted_author_uses_display_name_without_identity_when_no_stable_key_exists() {
+        let event = project_deleted_author_fixture().unwrap().remove(0);
+        assert_eq!(event.actor_display_name.as_deref(), Some("Deleted User"));
+        assert_eq!(event.actor_identity_id, None);
+    }
+
+    #[test]
+    fn unknown_custom_fields_are_persisted_as_field_changed_rows() {
+        let event = project_unknown_custom_field_fixture().unwrap().remove(0);
+        assert_eq!(event.event_type, "field_changed");
+        assert_eq!(event.field_id.as_deref(), Some("customfield_99999"));
     }
 
     #[test]
