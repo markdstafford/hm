@@ -284,14 +284,6 @@ impl JiraApiClient {
                             None
                         }
                     });
-                // Log the error response body for diagnostics (capped at 2 KB).
-                {
-                    use std::io::Read as _;
-                    let mut body_bytes = vec![0u8; 2048];
-                    let n = resp.into_reader().read(&mut body_bytes).unwrap_or(0);
-                    let body = String::from_utf8_lossy(&body_bytes[..n]);
-                    eprintln!("[jira] HTTP {status} error on {path_and_query}: {body}");
-                }
                 Err(JiraApiError::from_status(status, retry_after))
             }
             Err(ureq::Error::Transport(_)) => Err(JiraApiError::Network),
@@ -1249,6 +1241,40 @@ mod tests {
         assert!(
             recorded_sleeps.lock().unwrap().is_empty(),
             "should not sleep on non-retryable 400"
+        );
+    }
+
+    #[test]
+    fn error_response_body_is_not_emitted_to_stderr() {
+        // Regression guard: send_get_once must NOT log raw upstream bodies to stderr.
+        // Jira error bodies can echo Authorization headers, tokens, or JQL/issue data.
+        // This test serves as documentation of the invariant; the implementation enforces
+        // it by discarding the response body rather than reading and logging it.
+        //
+        // We spin up a real server that returns a 400 with a body containing a
+        // token-shaped string, then verify the returned error carries no raw body.
+        let base_url = spawn_json_server(|request| {
+            request
+                .respond(json_response(
+                    400,
+                    r#"{"errorMessages":["Authorization: Bearer secret-body-token"],"errors":{}}"#,
+                ))
+                .unwrap();
+        });
+        let err = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
+            .unwrap()
+            .list_projects()
+            .unwrap_err();
+        // The error type is safe — raw body is not part of JiraApiError.
+        assert_eq!(err, JiraApiError::BadRequest);
+        let rendered = format!("{err}");
+        assert!(
+            !rendered.contains("secret-body-token"),
+            "error display leaked upstream body token: {rendered}"
+        );
+        assert!(
+            !rendered.to_ascii_lowercase().contains("authorization"),
+            "error display leaked Authorization header: {rendered}"
         );
     }
 
