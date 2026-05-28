@@ -97,7 +97,7 @@ export function AppShell({
             <div
               data-tauri-drag-region
               onPointerDown={startWindowDragFromPointerEvent}
-              className="flex-1 min-w-0"
+              className="flex-1 min-w-0 self-stretch"
             />
             {mainTitleBarEnd && (
               <span className="titlebar-no-drag flex items-center gap-2">{mainTitleBarEnd}</span>
