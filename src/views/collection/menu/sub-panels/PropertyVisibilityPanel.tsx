@@ -79,7 +79,7 @@ function SortablePropertyRow({ row, titleId, dragDisabled, onSideChange, onVisib
       <button
         type="button"
         data-drag-handle="true"
-        className="inline-flex h-control-sm w-control-sm items-center justify-center rounded text-subtext hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus aria-disabled:opacity-50 aria-disabled:cursor-default"
+        className="titlebar-no-drag inline-flex h-control-sm w-control-sm items-center justify-center rounded text-subtext hover:bg-surface-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus aria-disabled:opacity-50 aria-disabled:cursor-default"
         {...attributes}
         aria-label={`Reorder ${label}`}
         aria-disabled={dragDisabled || undefined}

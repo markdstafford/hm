@@ -127,11 +127,12 @@ describe("PropertyVisibilityPanel", () => {
     expect(onPatchConfig).not.toHaveBeenCalled();
   });
 
-  it("marks drag handles with data-drag-handle='true'", () => {
+  it("marks drag handles as dnd handles and titlebar no-drag islands", () => {
     renderPanel();
 
     const handle = screen.getByRole("button", { name: "Reorder Key" });
     expect(handle).toHaveAttribute("data-drag-handle", "true");
+    expect(handle).toHaveClass("titlebar-no-drag");
   });
 
   it("keeps drag disabled while search is active and shows explanation text", async () => {
@@ -142,6 +143,7 @@ describe("PropertyVisibilityPanel", () => {
 
     expect(screen.getByText("Clear search to reorder properties.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reorder Key" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Reorder Key" })).toHaveClass("titlebar-no-drag");
   });
 
   it("changing side patches only the selected row side and preserves order and unrelated config", async () => {
