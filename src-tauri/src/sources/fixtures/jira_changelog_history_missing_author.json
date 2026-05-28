@@ -1,0 +1,7 @@
+{
+  "id": "30102",
+  "created": "2026-05-28T09:42:00.000+0000",
+  "items": [
+    { "field": "status", "fieldtype": "jira", "from": "10001", "fromString": "In Progress", "to": "10002", "toString": "Blocked" }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "30101",
+  "author": { "accountId": "user-alice-123", "displayName": "Alice Smith", "active": true },
+  "created": "2026-05-27T15:00:00.000+0000",
+  "items": [
+    { "field": "priority", "fieldtype": "jira", "fromString": "Medium", "toString": "High" },
+    { "field": "assignee", "fieldtype": "jira", "fromString": null, "toString": "Alice Smith" },
+    { "field": "customfield_10557", "fieldtype": "custom", "fromString": null, "toString": "Sprint 12" },
+    { "field": "customfield_99999", "fieldtype": "custom", "fromString": "old value", "toString": "new value" }
+  ]
+}
