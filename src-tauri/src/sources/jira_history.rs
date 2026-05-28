@@ -49,37 +49,135 @@ pub fn issue_changelog_cursor_key(issue_key: &str) -> String {
 
 /// Convert Jira's `created` timestamps to UTC RFC 3339.
 ///
-/// Jira Data Center emits timestamps like `"2026-05-03T11:00:00.000+0000"`.
-/// We strip the millisecond fraction and normalise the UTC offset to `Z`.
-/// Non-UTC offsets are left as-is (they will be stored verbatim). If the
-/// string cannot be parsed at all, the original is returned unchanged so we
-/// never silently lose data.
+/// Jira Data Center emits timestamps like `"2026-05-03T11:00:00.000+0000"` or
+/// `"2026-05-03T11:00:00.000+05:30"`.  We strip the millisecond fraction,
+/// parse the timezone offset, and convert to UTC so the stored value is always
+/// a UTC RFC 3339 string like `"2026-05-03T05:30:00Z"`.
 ///
-/// Limitations:
-/// - Does not handle the `-0000` UTC representation; such values are stored verbatim.
-/// - Non-UTC offsets (e.g. `+0530`) are preserved but remain in non-colon-separated
-///   form and are therefore not strictly RFC 3339 compliant.
+/// If the string cannot be parsed at all, the original is returned unchanged so
+/// we never silently lose data.
 pub fn normalize_jira_datetime(created: &str) -> String {
     // Strip fractional seconds: "...T11:00:00.000+0000" → "...T11:00:00+0000"
     let without_ms = if let Some(dot_pos) = created.find('.') {
-        // Find where the fraction ends (first +, -, or Z after the dot)
         let rest = &created[dot_pos + 1..];
-        let frac_len = rest
-            .find(['+', '-', 'Z'])
-            .unwrap_or(rest.len());
-        // Recombine: everything before the dot + everything after the fraction
+        let frac_len = rest.find(['+', '-', 'Z']).unwrap_or(rest.len());
         format!("{}{}", &created[..dot_pos], &rest[frac_len..])
     } else {
         created.to_string()
     };
 
-    // Normalise UTC offset representations to Z
+    // Fast-path: already UTC
+    if without_ms.ends_with('Z') {
+        return without_ms;
+    }
     if without_ms.ends_with("+0000") {
-        format!("{}Z", &without_ms[..without_ms.len() - 5])
-    } else if without_ms.ends_with("+00:00") {
-        format!("{}Z", &without_ms[..without_ms.len() - 6])
+        return format!("{}Z", &without_ms[..without_ms.len() - 5]);
+    }
+    if without_ms.ends_with("+00:00") {
+        return format!("{}Z", &without_ms[..without_ms.len() - 6]);
+    }
+
+    // General path: parse and convert non-zero UTC offsets.
+    convert_offset_to_utc(&without_ms).unwrap_or(without_ms)
+}
+
+/// Parse `YYYY-MM-DDTHH:MM:SS±HHMM` or `YYYY-MM-DDTHH:MM:SS±HH:MM` and
+/// return the equivalent UTC RFC 3339 string.  Returns `None` if parsing fails.
+fn convert_offset_to_utc(s: &str) -> Option<String> {
+    // Split at 'T' to get date and time-with-offset.
+    let t_pos = s.find('T')?;
+    let date_str = &s[..t_pos];
+    let time_offset_str = &s[t_pos + 1..];
+
+    // Time component is always HH:MM:SS (8 chars).
+    if time_offset_str.len() < 8 {
+        return None;
+    }
+    let time_str = &time_offset_str[..8]; // "HH:MM:SS"
+    let offset_str = &time_offset_str[8..]; // "±HHMM" or "±HH:MM"
+
+    if offset_str.is_empty() {
+        return None;
+    }
+
+    // Parse offset sign and magnitude.
+    let (sign, offset_body) = match offset_str.chars().next()? {
+        '+' => (1i64, &offset_str[1..]),
+        '-' => (-1i64, &offset_str[1..]),
+        _ => return None,
+    };
+
+    let (off_h, off_m) = if offset_body.contains(':') {
+        let (h, rest) = offset_body.split_once(':')?;
+        (h.parse::<i64>().ok()?, rest.parse::<i64>().ok()?)
+    } else if offset_body.len() == 4 {
+        (offset_body[..2].parse::<i64>().ok()?, offset_body[2..].parse::<i64>().ok()?)
     } else {
-        without_ms
+        return None;
+    };
+
+    // Parse date.
+    let (ds, rest) = date_str.split_once('-')?;
+    let (ms, day_s) = rest.split_once('-')?;
+    let y = ds.parse::<i64>().ok()?;
+    let mo = ms.parse::<i64>().ok()?;
+    let d = day_s.parse::<i64>().ok()?;
+
+    // Parse time.
+    let (hs, rest) = time_str.split_once(':')?;
+    let (mis, ss) = rest.split_once(':')?;
+    let h = hs.parse::<i64>().ok()?;
+    let mi = mis.parse::<i64>().ok()?;
+    let sec = ss.parse::<i64>().ok()?;
+
+    // Subtract offset (offset is how far local is ahead of UTC).
+    let offset_minutes = sign * (off_h * 60 + off_m);
+    let mut utc_minutes = h * 60 + mi - offset_minutes;
+    let mut day_delta: i64 = 0;
+    while utc_minutes < 0 {
+        utc_minutes += 24 * 60;
+        day_delta -= 1;
+    }
+    while utc_minutes >= 24 * 60 {
+        utc_minutes -= 24 * 60;
+        day_delta += 1;
+    }
+    let utc_h = utc_minutes / 60;
+    let utc_m = utc_minutes % 60;
+
+    // Adjust calendar date.
+    let (ny, nmo, nd) = add_days_simple(y, mo, d, day_delta);
+
+    Some(format!("{ny:04}-{nmo:02}-{nd:02}T{utc_h:02}:{utc_m:02}:{sec:02}Z"))
+}
+
+/// Add `delta` days (expected to be -1, 0, or +1 — timezone offsets never span
+/// more than one calendar day) to a `(year, month, day)` triple.
+fn add_days_simple(y: i64, m: i64, d: i64, delta: i64) -> (i64, i64, i64) {
+    if delta == 0 {
+        return (y, m, d);
+    }
+    let dims = days_in_month_i64(y, m);
+    if delta == 1 {
+        if d < dims { return (y, m, d + 1); }
+        if m < 12  { return (y, m + 1, 1); }
+        return (y + 1, 1, 1);
+    }
+    // delta == -1
+    if d > 1 { return (y, m, d - 1); }
+    if m > 1 {
+        let prev_m = m - 1;
+        return (y, prev_m, days_in_month_i64(y, prev_m));
+    }
+    (y - 1, 12, 31)
+}
+
+fn days_in_month_i64(y: i64, m: i64) -> i64 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 29 } else { 28 },
+        _ => 30,
     }
 }
 
@@ -466,10 +564,26 @@ mod tests {
             normalize_jira_datetime("2026-05-03T11:00:00Z"),
             "2026-05-03T11:00:00Z"
         );
-        // Non-UTC offset is left as-is (minus millis)
+        // Non-UTC offsets are now converted to UTC (fixes INIT-2).
+        // +0530 means UTC+5:30 → UTC = 11:00 - 5:30 = 05:30
         assert_eq!(
             normalize_jira_datetime("2026-05-03T11:00:00.000+0530"),
-            "2026-05-03T11:00:00+0530"
+            "2026-05-03T05:30:00Z"
+        );
+        // +05:30 colon-separated form
+        assert_eq!(
+            normalize_jira_datetime("2026-05-03T11:00:00.000+05:30"),
+            "2026-05-03T05:30:00Z"
+        );
+        // Negative offset: -0800 (UTC-8) → UTC = 22:00 + 8:00 = 06:00 next day
+        assert_eq!(
+            normalize_jira_datetime("2026-05-03T22:00:00.000-0800"),
+            "2026-05-04T06:00:00Z"
+        );
+        // Positive offset pushing past midnight: +0530 at 00:15 → previous day 18:45
+        assert_eq!(
+            normalize_jira_datetime("2026-05-03T00:15:00.000+0530"),
+            "2026-05-02T18:45:00Z"
         );
     }
 

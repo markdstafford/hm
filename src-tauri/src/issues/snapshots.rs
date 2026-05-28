@@ -71,7 +71,97 @@ fn parse_csv(raw: &str) -> Vec<String> {
 
 // ── Event application ────────────────────────────────────────────────────────
 
+/// Reverse a single event on `state`, mutating it in place.
+///
+/// Called by `fold_events_to_day_end` when computing a historical snapshot via
+/// the reverse-from-current approach: start from the current DB state and
+/// undo each event that occurred AFTER the target date, newest-first.
+fn reverse_event(state: &mut SnapshotState, event: &IssueEventRow) {
+    match event.event_type.as_str() {
+        "status_changed" => {
+            let prev_status = event.from_string.clone();
+            state.state = coarse_state(prev_status.as_deref()).to_string();
+            state.status_name = prev_status;
+        }
+        "priority_changed" => {
+            state.priority_name = event.from_string.clone();
+        }
+        "resolution_changed" => {
+            state.resolution_name = event.from_string.clone();
+            // Re-derive coarse state from status since resolution is cleared.
+            state.state = coarse_state(state.status_name.as_deref()).to_string();
+        }
+        "title_changed" => {
+            if let Some(prev_title) = &event.from_string {
+                state.title = prev_title.clone();
+            }
+        }
+        "labels_changed" => {
+            state.labels = event
+                .from_string
+                .as_deref()
+                .map(parse_csv)
+                .unwrap_or_default();
+        }
+        "components_changed" => {
+            state.components = event
+                .from_string
+                .as_deref()
+                .map(parse_csv)
+                .unwrap_or_default();
+        }
+        "fix_versions_changed" => {
+            state.fix_versions = event
+                .from_string
+                .as_deref()
+                .map(parse_csv)
+                .unwrap_or_default();
+        }
+        "sprint_changed" => {
+            state.sprint_names = event
+                .from_string
+                .as_deref()
+                .map(parse_csv)
+                .unwrap_or_default();
+        }
+        "product_changed" => {
+            state.product_names = event
+                .from_string
+                .as_deref()
+                .map(parse_csv)
+                .unwrap_or_default();
+        }
+        "assigned_teams_changed" => {
+            state.assigned_team_names = event
+                .from_string
+                .as_deref()
+                .map(parse_csv)
+                .unwrap_or_default();
+        }
+        "customer_changed" => {
+            state.customer_name = event.from_string.clone();
+        }
+        "relationship_field_changed" => {
+            if let Some(field_id) = &event.field_id {
+                match field_id.as_str() {
+                    "customfield_14051" => state.parent_link = event.from_string.clone(),
+                    "customfield_10857" => state.epic_link = event.from_string.clone(),
+                    "customfield_10858" => state.epic_name = event.from_string.clone(),
+                    "customfield_10859" => state.epic_status = event.from_string.clone(),
+                    _ => {}
+                }
+            }
+        }
+        "due_date_changed" => {
+            state.due_at_source = event.from_string.clone();
+        }
+        _ => {}
+    }
+}
+
 /// Apply a single event to `state`, mutating it in place.
+/// Only used in unit tests; `fold_events_to_day_end` uses `reverse_event` instead.
+#[cfg(test)]
 fn apply_event(state: &mut SnapshotState, event: &IssueEventRow) {
     match event.event_type.as_str() {
         "status_changed" => {
@@ -163,27 +253,46 @@ fn apply_event(state: &mut SnapshotState, event: &IssueEventRow) {
 
 // ── Core fold function ────────────────────────────────────────────────────────
 
-/// Fold all events in `events` that occurred on or before the end of
-/// `snapshot_date` (i.e. ≤ `{snapshot_date}T23:59:59`) into `state`.
+/// Compute the issue state at the end of `snapshot_date` using a
+/// reverse-from-current approach:
 ///
-/// Events are processed in `occurred_at` ASC order, with `id` as a tiebreaker.
+/// 1. `state` is the **current** issue state (loaded from `work_items` /
+///    `jira_issues`), which is correct for today.
+/// 2. Any events that occurred **after** the end of `snapshot_date` are
+///    collected, sorted newest-first, and reversed one-by-one via
+///    `reverse_event` — each reversal restores the prior field value using the
+///    event's `from_string` / `from_json`.
+///
+/// This approach is correct for any historical date, including dates before the
+/// first captured event (where forward-from-initial would leak the current state
+/// into historical snapshots).
+///
+/// Timestamps must be stored as UTC RFC 3339 strings for the lexicographic
+/// comparison against `{snapshot_date}T23:59:59Z` to be correct.
 pub fn fold_events_to_day_end(
-    mut state: SnapshotState,
+    state: SnapshotState,
     events: &[IssueEventRow],
     snapshot_date: &str,
 ) -> SnapshotState {
-    let day_end_prefix = format!("{snapshot_date}T23:59:59");
-    let mut ordered = events.to_vec();
-    ordered.sort_by(|a, b| {
-        a.occurred_at
-            .cmp(&b.occurred_at)
-            .then(a.id.cmp(&b.id))
+    let day_end = format!("{snapshot_date}T23:59:59Z");
+
+    // Collect events that occurred strictly after end-of-day; reverse them.
+    let mut to_reverse: Vec<&IssueEventRow> = events
+        .iter()
+        .filter(|e| e.occurred_at.as_str() > day_end.as_str())
+        .collect();
+
+    // Sort descending (newest first) so we undo changes in reverse chronological
+    // order, preserving correct state at each step.
+    to_reverse.sort_by(|a, b| {
+        b.occurred_at
+            .cmp(&a.occurred_at)
+            .then(b.id.cmp(&a.id))
     });
-    for event in &ordered {
-        if event.occurred_at.as_str() > day_end_prefix.as_str() {
-            continue;
-        }
-        apply_event(&mut state, event);
+
+    let mut state = state;
+    for event in &to_reverse {
+        reverse_event(&mut state, event);
     }
     state
 }
@@ -797,6 +906,15 @@ mod tests {
 
     // ── Shared test helpers ───────────────────────────────────────────────────
 
+    /// The CURRENT state for tests that use `events_spanning_two_days`.
+    ///
+    /// `fold_events_to_day_end` now uses the reverse-from-current approach, so
+    /// the base state passed to it must represent the state **after all events
+    /// have been applied**, not the initial/pre-event state.  This mirrors the
+    /// real-world setup where `work_items` / `jira_issues` holds the latest
+    /// ingested state.
+    ///
+    /// After e1 (→In Progress), e2 (→High), e3 (→backend,urgent), e4 (→Done):
     fn base_state() -> SnapshotState {
         SnapshotState {
             issue_id: "wi_amp_1043".to_string(),
@@ -804,19 +922,19 @@ mod tests {
             source_kind: "jira_issue".to_string(),
             key: Some("AMP-1043".to_string()),
             title: "Fix the widget".to_string(),
-            state: "open".to_string(),
-            status_name: Some("To Do".to_string()),
+            state: "done".to_string(),
+            status_name: Some("Done".to_string()),
             status_id: None,
             resolution_name: None,
             resolution_id: None,
-            priority_name: Some("Medium".to_string()),
+            priority_name: Some("High".to_string()),
             priority_id: None,
             item_type: None,
             project_key: Some("AMP".to_string()),
             project_name: None,
             assignee_person_id: None,
             reporter_person_id: None,
-            labels: vec![],
+            labels: vec!["backend".to_string(), "urgent".to_string()],
             components: vec![],
             fix_versions: vec![],
             sprint_names: vec![],
@@ -839,6 +957,7 @@ mod tests {
         id: &str,
         event_type: &str,
         occurred_at: &str,
+        from_string: Option<&str>,
         to_string: Option<&str>,
         field_id: Option<&str>,
     ) -> IssueEventRow {
@@ -849,19 +968,23 @@ mod tests {
             occurred_at: occurred_at.to_string(),
             field_id: field_id.map(|s| s.to_string()),
             actor_display_name: None,
-            from_string: None,
+            from_string: from_string.map(|s| s.to_string()),
             to_string: to_string.map(|s| s.to_string()),
             payload_json: "{}".to_string(),
         }
     }
 
+    /// Events that span two days.  `base_state()` should represent the CURRENT
+    /// state (after all events have been applied) so that `fold_events_to_day_end`
+    /// can reverse the appropriate subset to reconstruct any historical date.
     fn events_spanning_two_days() -> Vec<IssueEventRow> {
         vec![
-            make_event("e1", "status_changed",   "2026-05-27T10:00:00Z", Some("In Progress"), None),
-            make_event("e2", "priority_changed",  "2026-05-27T11:00:00Z", Some("High"),        None),
-            make_event("e3", "labels_changed",    "2026-05-27T12:00:00Z", Some("backend, urgent"), None),
-            // This event is on 2026-05-28 and must NOT be applied for snapshot_date 2026-05-27
-            make_event("e4", "status_changed",    "2026-05-28T09:00:00Z", Some("Done"),        None),
+            // Day 1 events (2026-05-27)
+            make_event("e1", "status_changed",   "2026-05-27T10:00:00Z", Some("To Do"),          Some("In Progress"),       None),
+            make_event("e2", "priority_changed",  "2026-05-27T11:00:00Z", Some("Medium"),          Some("High"),              None),
+            make_event("e3", "labels_changed",    "2026-05-27T12:00:00Z", Some(""),                Some("backend, urgent"),   None),
+            // Day 2 event (2026-05-28) — must NOT affect the May-27 snapshot
+            make_event("e4", "status_changed",    "2026-05-28T09:00:00Z", Some("In Progress"),    Some("Done"),              None),
         ]
     }
 
@@ -876,9 +999,12 @@ mod tests {
     }
 
     fn insert_work_item(conn: &Connection) {
+        // state='done', status_name='Done' — this is the CURRENT state after all
+        // test events (e1: →In Progress, e2: →Done) have been applied.  The
+        // reverse-fold approach requires that work_items holds the latest state.
         conn.execute(
             "INSERT INTO work_items (id, source_system_id, source_kind, upstream_id, key, title, state, status_name, raw_updated_hash, last_seen_at, created_at, updated_at)
-             VALUES ('wi_amp_1043', 'srcsys_jira_1', 'jira_issue', 'AMP-1043', 'AMP-1043', 'Fix the widget', 'open', 'To Do', 'abc123', '2026-05-27T00:00:00Z', '2026-05-27T00:00:00Z', '2026-05-27T00:00:00Z')",
+             VALUES ('wi_amp_1043', 'srcsys_jira_1', 'jira_issue', 'AMP-1043', 'AMP-1043', 'Fix the widget', 'done', 'Done', 'abc123', '2026-05-28T00:00:00Z', '2026-05-27T00:00:00Z', '2026-05-27T00:00:00Z')",
             [],
         ).unwrap();
     }
@@ -949,11 +1075,21 @@ mod tests {
 
     // ── Test 1: Pure fold ─────────────────────────────────────────────────────
 
+    /// Verify that the May-27 snapshot produces the correct mid-history state.
+    ///
+    /// `base_state()` represents the current (post-all-events) state:
+    ///   status=Done, priority=High, labels=[backend,urgent]
+    ///
+    /// Only e4 (status In Progress→Done, May 28) falls after May-27T23:59:59Z,
+    /// so it is the only event reversed.  The result should be status=In Progress
+    /// with the other fields unchanged.
     #[test]
     fn folds_status_priority_and_label_events_up_to_day_end() {
         let folded =
             fold_events_to_day_end(base_state(), &events_spanning_two_days(), "2026-05-27");
         assert_eq!(folded.status_name.as_deref(), Some("In Progress"));
+        // priority and labels were changed on May-27 itself (not after), so they
+        // are NOT reversed and remain at their current values.
         assert_eq!(folded.priority_name.as_deref(), Some("High"));
         assert_eq!(
             folded.labels,
@@ -965,9 +1101,31 @@ mod tests {
     fn does_not_apply_event_after_day_end() {
         let folded =
             fold_events_to_day_end(base_state(), &events_spanning_two_days(), "2026-05-27");
-        // The "Done" event is on 2026-05-28 — state must NOT be "done"
+        // e4 (Done) occurred on 2026-05-28 and is reversed; state must be in_progress.
         assert_ne!(folded.state, "done");
         assert_eq!(folded.state, "in_progress");
+    }
+
+    /// Snapshot for a date BEFORE the first event must reflect the pre-event
+    /// state, not the current DB state.  On 2026-05-26 none of the day-1 events
+    /// (May-27) have occurred yet, so all four events fall after the day-end and
+    /// are reversed:
+    ///   reverse e4 (In Progress→Done): status = In Progress
+    ///   reverse e3 (→backend,urgent):  labels = [] (from_string = "")
+    ///   reverse e2 (Medium→High):      priority = Medium
+    ///   reverse e1 (To Do→In Progress):status = To Do
+    #[test]
+    fn snapshot_before_first_event_uses_pre_event_state() {
+        let folded =
+            fold_events_to_day_end(base_state(), &events_spanning_two_days(), "2026-05-26");
+        assert_eq!(
+            folded.status_name.as_deref(),
+            Some("To Do"),
+            "should show pre-transition status, not current Done"
+        );
+        assert_eq!(folded.priority_name.as_deref(), Some("Medium"));
+        // labels from_string was "" so it parses to empty vec
+        assert!(folded.labels.is_empty(), "labels should be empty before first label change");
     }
 
     // ── Test 2: JSON array serialization ──────────────────────────────────────
@@ -1025,6 +1183,38 @@ mod tests {
         assert_eq!(status_28, "Done");
     }
 
+    /// DB-backed proof that a snapshot for a date BEFORE the first recorded event
+    /// reflects the pre-transition field values (via `from_string` reversal), not
+    /// the current DB state.
+    ///
+    /// Setup: work_items has status_name='Done' (current).
+    /// Events: To Do → In Progress (May 27), In Progress → Done (May 28).
+    /// Expected for May 26: status = 'To Do' (reversed through both events).
+    #[test]
+    fn db_snapshot_before_first_event_shows_pre_transition_state() {
+        let conn = seeded_snapshot_conn();
+        let count = generate_snapshots_for_range(
+            &conn,
+            "srcsys_jira_1",
+            "2026-05-26",
+            "2026-05-26",
+            "2026-05-28T12:00:00Z",
+        )
+        .unwrap();
+        assert_eq!(count, 1);
+        let status_26: String = conn
+            .query_row(
+                "SELECT status_name FROM issue_snapshots WHERE issue_id = 'wi_amp_1043' AND snapshot_date = '2026-05-26'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            status_26, "To Do",
+            "pre-event snapshot must show from_string of first event, not current 'Done'"
+        );
+    }
+
     // ── Additional unit tests ─────────────────────────────────────────────────
 
     #[test]
@@ -1068,6 +1258,7 @@ mod tests {
             "e10",
             "relationship_field_changed",
             "2026-05-27T09:00:00Z",
+            None,
             Some("EPIC-42"),
             Some("customfield_10857"),
         );
