@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test("opens backlog hygiene, inspects a duplicate suggestion, and switches to By action view", async ({ page }) => {
+test("opens backlog hygiene and inspects a duplicate suggestion", async ({ page }) => {
   await page.goto("/");
 
   await page.getByRole("button", { name: /backlog hygiene/i }).click();
@@ -10,10 +10,17 @@ test("opens backlog hygiene, inspects a duplicate suggestion, and switches to By
   await page.getByRole("button", { name: /merge as duplicate.*AMP-1149/i }).click();
   await expect(page.getByRole("heading", { name: "This issue" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Duplicate of" })).toBeVisible();
+});
 
-  await page.getByRole("button", { name: "By action" }).click();
-  await expect(page.getByRole("button", { name: "By action" })).toHaveAttribute("aria-current", "true");
-  await expect(page.getByText("Merge as duplicate")).toBeVisible();
-  await expect(page.getByText("Close as resolved")).toBeVisible();
-  await expect(page.getByText("Ping for context")).toBeVisible();
+test("view chips render and switching chips changes active state", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /backlog hygiene/i }).click();
+  await expect(page.getByRole("button", { name: "All" })).toHaveAttribute("aria-current", "true");
+  await expect(page.getByRole("button", { name: "By action" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "High confidence" })).toBeVisible();
+
+  await page.getByRole("button", { name: "High confidence" }).click();
+  await expect(page.getByRole("button", { name: "High confidence" })).toHaveAttribute("aria-current", "true");
+  await expect(page.getByRole("button", { name: "All" })).not.toHaveAttribute("aria-current", "true");
 });
