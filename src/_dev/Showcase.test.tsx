@@ -6,9 +6,18 @@ import { Showcase } from "./Showcase";
 describe("Showcase", () => {
   it("renders all category headings", () => {
     render(<Showcase />);
-    for (const h of ["Appearance (transient)", "Tokens", "Buttons", "Forms", "Overlays", "Navigation", "Sidebar", "Feedback", "Data", "Text", "Layout"]) {
+    for (const h of ["Appearance (transient)", "Tokens", "Buttons", "Forms", "Overlays", "Navigation", "Sidebar", "Feedback", "Data", "Text", "Layout", "Collection write"]) {
       expect(screen.getByRole("heading", { name: h })).toBeInTheDocument();
     }
+  });
+
+  it("renders collection write showcase controls", () => {
+    render(<Showcase />);
+
+    expect(screen.getByRole("toolbar", { name: "Bulk actions" })).toHaveTextContent("3 selected");
+    expect(screen.getByRole("button", { name: "Open collection confirm" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show reversible undo toast" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run fake collection action" })).toBeInTheDocument();
   });
   it("renders DatePicker showcase examples", () => {
     render(<Showcase />);
