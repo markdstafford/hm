@@ -66,6 +66,19 @@ export const commands = {
 	issueSnapshotsQuery: (filter: IssueSnapshotQuery) => typedError<IssueSnapshotListItem[], string>(__TAURI_INVOKE("issue_snapshots_query", { filter })),
 	issueHistoryRetentionGet: () => typedError<IssueHistoryRetentionConfig, string>(__TAURI_INVOKE("issue_history_retention_get")),
 	issueHistoryRetentionSave: (config: IssueHistoryRetentionConfig) => typedError<null, string>(__TAURI_INVOKE("issue_history_retention_save", { config })),
+	/**
+	 *  Trigger a batch embedding refresh. Processes up to `options.limit` pending
+	 *  documents (default 25 per call) using the configured AI embedding provider.
+	 *  Returns a summary with counts and status. Failures are non-fatal: documents
+	 *  revert to pending and the summary's `safe_error` field carries a
+	 *  sanitised description.
+	 */
+	embeddingRefreshRun: (options: EmbeddingRunOptions) => typedError<EmbeddingRunSummary, string>(__TAURI_INVOKE("embedding_refresh_run", { options })),
+	/**
+	 *  Return counts of indexable documents by embedding status. Pass
+	 *  `source_system_id` to scope the query to a single ingestion source.
+	 */
+	embeddingStatus: (sourceSystemId: string | null) => typedError<EmbeddingStatusSummary, string>(__TAURI_INVOKE("embedding_status", { sourceSystemId })),
 	auditLogList: (filter: AuditLogListFilter) => typedError<AuditLogEntry[], string>(__TAURI_INVOKE("audit_log_list", { filter })),
 	auditLogMarkReverted: (input: AuditLogMarkRevertedInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("audit_log_mark_reverted", { input })),
 	jiraUpdateTitle: (input: JiraUpdateTitleInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_update_title", { input })),
@@ -97,7 +110,7 @@ export type AiEndpointConfig = {
 	credential_ref: string,
 };
 
-export type AiEndpointProtocol = "AnthropicMessages" | "OpenAiChatCompletionsCompatible";
+export type AiEndpointProtocol = "AnthropicMessages" | "OpenAiChatCompletionsCompatible" | "OpenAiEmbeddingsCompatible";
 
 export type AiExecutionMode = "DirectApi";
 
@@ -118,7 +131,7 @@ export type AiProviderConfig = {
 	routing: { [key in string]: string },
 };
 
-export type AiRunner = "AnthropicMessages" | "OpenAiChatCompletions";
+export type AiRunner = "AnthropicMessages" | "OpenAiChatCompletions" | "OpenAiEmbeddings";
 
 export type AppStatus = {
 	version: string,
@@ -189,6 +202,40 @@ export type ConnectionTestSummary = {
 };
 
 export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
+
+export type EmbeddingRunOptions = {
+	source_system_id: string | null,
+	entity_kind: string | null,
+	limit: number | null,
+	force_rebuild: boolean,
+};
+
+export type EmbeddingRunStatus = "Complete" | "Running" | "Paused" | "Failed" | "Partial";
+
+export type EmbeddingRunSummary = {
+	status: EmbeddingRunStatus,
+	scanned: number,
+	embedded: number,
+	skipped: number,
+	failed: number,
+	model_id: string,
+	/**
+	 *  Embedding vector dimension. Stored as `u32` rather than `usize` so
+	 *  specta can emit a TypeScript-safe numeric type without BigInt risk.
+	 */
+	dimension: number,
+	safe_error: string | null,
+};
+
+export type EmbeddingStatusSummary = {
+	pending: number,
+	embedding: number,
+	embedded: number,
+	stale: number,
+	failed: number,
+	last_embedding_refresh: string | null,
+	warning: string | null,
+};
 
 export type IssueHistoryRetentionConfig = {
 	version: number,
@@ -386,6 +433,7 @@ export type ResetJiraProjectCounts = {
 	jira_project_field_mappings: number,
 	issue_events: number,
 	issue_snapshots: number,
+	document_embeddings: number,
 	indexable_documents: number,
 	ingestion_cursors: number,
 	ingestion_runs: number,

@@ -1310,6 +1310,14 @@ pub struct JiraIngestionOptions {
     pub fetch_watchers: bool,
     /// Placeholder — not wired in this task.
     pub fetch_votes: bool,
+    /// When true, signal that the caller should trigger an embedding refresh
+    /// after ingestion completes. The ingestion service itself does not call
+    /// `refresh_embeddings` directly (it has no access to the secret store);
+    /// the Tauri command layer reads this flag and issues the refresh via
+    /// `crate::embeddings::service::refresh_embeddings`. New documents created
+    /// during ingestion already have `embedding_status = 'pending'` and are
+    /// therefore immediately eligible without any extra marking step.
+    pub run_embedding_refresh: bool,
 }
 
 impl Default for JiraIngestionOptions {
@@ -1319,6 +1327,7 @@ impl Default for JiraIngestionOptions {
             fetch_changelog: true,
             fetch_watchers: false,
             fetch_votes: false,
+            run_embedding_refresh: false,
         }
     }
 }

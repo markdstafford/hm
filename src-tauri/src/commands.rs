@@ -834,6 +834,39 @@ pub(crate) fn issue_history_retention_save_to_conn(
     crate::issues::history::save_retention_config(conn, config).map_err(|e| e.to_string())
 }
 
+// ── Embedding commands ────────────────────────────────────────────────────────
+
+/// Trigger a batch embedding refresh. Processes up to `options.limit` pending
+/// documents (default 25 per call) using the configured AI embedding provider.
+/// Returns a summary with counts and status. Failures are non-fatal: documents
+/// revert to pending and the summary's `safe_error` field carries a
+/// sanitised description.
+#[tauri::command]
+#[specta::specta]
+pub fn embedding_refresh_run(
+    options: crate::embeddings::service::EmbeddingRunOptions,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<crate::embeddings::service::EmbeddingRunSummary, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let now = now_utc_rfc3339();
+    crate::embeddings::service::refresh_embeddings(&conn, store.0.as_ref(), options, &now)
+        .map_err(|e| e.to_string())
+}
+
+/// Return counts of indexable documents by embedding status. Pass
+/// `source_system_id` to scope the query to a single ingestion source.
+#[tauri::command]
+#[specta::specta]
+pub fn embedding_status(
+    source_system_id: Option<String>,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<crate::embeddings::service::EmbeddingStatusSummary, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    crate::embeddings::service::embedding_status(&conn, source_system_id.as_deref())
+        .map_err(|e| e.to_string())
+}
+
 // Ensure specta sees all source config types for TypeScript binding generation.
 // These types are used in the commands above but referenced here explicitly so
 // the specta type registry picks them up even if inference misses a variant.
@@ -863,6 +896,10 @@ const _: () = {
         _assert_specta::<crate::issues::history::IssueSnapshotQuery>();
         _assert_specta::<crate::issues::history::IssueSnapshotListItem>();
         _assert_specta::<crate::issues::history::IssueHistoryRetentionConfig>();
+        _assert_specta::<crate::embeddings::service::EmbeddingRunOptions>();
+        _assert_specta::<crate::embeddings::service::EmbeddingRunSummary>();
+        _assert_specta::<crate::embeddings::service::EmbeddingRunStatus>();
+        _assert_specta::<crate::embeddings::service::EmbeddingStatusSummary>();
     }
 };
 

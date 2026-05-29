@@ -32,7 +32,9 @@ pub struct EmbeddingRunSummary {
     pub skipped: u32,
     pub failed: u32,
     pub model_id: String,
-    pub dimension: usize,
+    /// Embedding vector dimension. Stored as `u32` rather than `usize` so
+    /// specta can emit a TypeScript-safe numeric type without BigInt risk.
+    pub dimension: u32,
     pub safe_error: Option<String>,
 }
 
@@ -128,7 +130,7 @@ pub fn refresh_embeddings_with_provider(
         response.dimension,
         "l2",
     );
-    let dimension = response.dimension;
+    let dimension = response.dimension as u32;
 
     // Write vectors and update status
     match write_embedding_batch(conn, &claimed, &response, now_utc) {
@@ -240,7 +242,7 @@ pub fn refresh_embeddings(
         response.dimension,
         "l2",
     );
-    let dimension = response.dimension;
+    let dimension = response.dimension as u32;
 
     match write_embedding_batch(conn, &claimed, &response, now_utc) {
         Ok(()) => {}
