@@ -87,7 +87,7 @@ export function JiraIssueDetail({ item }: Props) {
                 Showing captured history. Some older changelog pages have not synced yet.
               </p>
             )}
-            <ol aria-label="Status history">
+            <ol aria-label="Status history" className="flex flex-col gap-1">
               {history.transitions.map((t) => (
                 <li
                   key={t.event_id}

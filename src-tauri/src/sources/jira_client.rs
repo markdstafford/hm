@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use crate::sources::jira_errors::JiraApiError;
 use crate::sources::jira_types::{
-    JiraChangelogEntry, JiraChangelogPage, JiraCreateCommentRequest, JiraCreateIssueLinkRequest,
-    JiraCreatedComment, JiraCreatedIssueLink, JiraIssue, JiraIssueFieldsUpdateRequest,
-    JiraPagedComments, JiraPagedProjects, JiraPagedWorklogs, JiraProject, JiraRemoteLink,
-    JiraSearchPage, JiraTransitionIssueRequest, JiraTransitionsResponse,
+    JiraCreateCommentRequest, JiraCreateIssueLinkRequest, JiraCreatedComment, JiraCreatedIssueLink,
+    JiraIssue, JiraIssueFieldsUpdateRequest, JiraPagedComments, JiraPagedProjects,
+    JiraPagedWorklogs, JiraProject, JiraRemoteLink, JiraSearchPage, JiraTransitionIssueRequest,
+    JiraTransitionsResponse,
 };
 
 // ── Secret string ─────────────────────────────────────────────────────────────
@@ -440,52 +440,6 @@ impl JiraApiClient {
             start_at = next_start;
         }
         Ok(issues)
-    }
-
-    /// Fetch one changelog page.
-    pub fn get_issue_changelog_page(
-        &self,
-        issue_id_or_key: &str,
-        start_at: u32,
-        max_results: u32,
-    ) -> Result<JiraChangelogPage, JiraApiError> {
-        let issue = encode_path_segment(issue_id_or_key)?;
-        let max_results = clamp_page_size(max_results);
-        self.get_json(&format!(
-            "/rest/api/2/issue/{issue}/changelog?startAt={start_at}&maxResults={max_results}"
-        ))
-    }
-
-    /// Fetch all changelog entries, following pagination.
-    pub fn get_issue_changelog_all(
-        &self,
-        issue_id_or_key: &str,
-        max_results: u32,
-    ) -> Result<Vec<JiraChangelogEntry>, JiraApiError> {
-        let page_size = clamp_page_size(max_results);
-        let mut start_at = 0u32;
-        let mut histories = Vec::new();
-        let mut pages_fetched = 0usize;
-        loop {
-            if pages_fetched >= MAX_PAGINATION_PAGES {
-                break;
-            }
-            let page = self.get_issue_changelog_page(issue_id_or_key, start_at, page_size)?;
-            let returned = page.histories.len();
-            let stop =
-                should_stop_pagination(page.start_at, page.max_results, returned, page.total);
-            histories.extend(page.histories);
-            pages_fetched += 1;
-            if stop {
-                break;
-            }
-            let next_start = start_at.saturating_add(returned as u32);
-            if next_start <= start_at {
-                break;
-            }
-            start_at = next_start;
-        }
-        Ok(histories)
     }
 
     /// Fetch one page of comments for an issue.
@@ -1037,43 +991,6 @@ mod tests {
             issues.iter().map(|i| i.key.as_str()).collect::<Vec<_>>(),
             vec!["HM-1", "HM-2", "HM-3"]
         );
-    }
-
-    #[test]
-    fn changelog_all_follows_two_pages() {
-        let server = Server::http("127.0.0.1:0").unwrap();
-        let base_url = format!("http://{}", server.server_addr());
-        thread::spawn(move || {
-            let first = server.recv().unwrap();
-            assert_eq!(
-                first.url(),
-                "/rest/api/2/issue/HM-1/changelog?startAt=0&maxResults=1"
-            );
-            first
-                .respond(json_response(
-                    200,
-                    r#"{"startAt":0,"maxResults":1,"total":2,"histories":[{"id":"1","created":"2026-05-01T00:00:00.000+0000","items":[]}]}"#,
-                ))
-                .unwrap();
-            let second = server.recv().unwrap();
-            assert_eq!(
-                second.url(),
-                "/rest/api/2/issue/HM-1/changelog?startAt=1&maxResults=1"
-            );
-            second
-                .respond(json_response(
-                    200,
-                    r#"{"startAt":1,"maxResults":1,"total":2,"histories":[{"id":"2","created":"2026-05-02T00:00:00.000+0000","items":[]}]}"#,
-                ))
-                .unwrap();
-        });
-        let histories = JiraApiClient::new(config(&base_url, "secret-jira-pat-123"))
-            .unwrap()
-            .get_issue_changelog_all("HM-1", 1)
-            .unwrap();
-        assert_eq!(histories.len(), 2);
-        assert_eq!(histories[0].id, "1");
-        assert_eq!(histories[1].id, "2");
     }
 
     #[test]

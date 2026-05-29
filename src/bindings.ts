@@ -22,6 +22,12 @@ export const commands = {
 	sourceCredentialSecretSet: (sourceId: string, kind: SourceCredentialKind, value: string) => typedError<string, string>(__TAURI_INVOKE("source_credential_secret_set", { sourceId, kind, value })),
 	sourceCredentialDelete: (credentialRef: string) => typedError<null, string>(__TAURI_INVOKE("source_credential_delete", { credentialRef })),
 	sourceConfigRemove: (sourceId: string) => typedError<null, string>(__TAURI_INVOKE("source_config_remove", { sourceId })),
+	/**
+	 *  Wipe every row scoped to (source, project) so the next sync re-fetches
+	 *  the project from scratch. Source config and credentials are untouched.
+	 *  See `sources::reset` for the full table list.
+	 */
+	jiraSourceResetProjectData: (sourceId: string, projectKey: string) => typedError<ResetJiraProjectCounts, string>(__TAURI_INVOKE("jira_source_reset_project_data", { sourceId, projectKey })),
 	jiraSourceTestConnection: (source: JiraSourceConfig, pendingPat: string | null) => typedError<JiraConnectionTestResult, string>(__TAURI_INVOKE("jira_source_test_connection", { source, pendingPat })),
 	jiraIssueIngestionRun: (sourceId: string, options: {
 	fetch_remote_links?: boolean,
@@ -366,6 +372,23 @@ export type MutationCommonInput = {
 	issue_key: string,
 	source_feature: string | null,
 	batch_id: string | null,
+};
+
+export type ResetJiraProjectCounts = {
+	work_items: number,
+	work_item_terms: number,
+	work_item_relationships: number,
+	work_item_comments: number,
+	jira_issues: number,
+	jira_issue_field_values: number,
+	jira_worklogs: number,
+	jira_remote_links: number,
+	jira_project_field_mappings: number,
+	issue_events: number,
+	issue_snapshots: number,
+	indexable_documents: number,
+	ingestion_cursors: number,
+	ingestion_runs: number,
 };
 
 export type ReverseCommonInput = {

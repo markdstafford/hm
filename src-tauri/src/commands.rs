@@ -240,6 +240,22 @@ pub fn source_config_remove(
         .map_err(|e| e.to_string())
 }
 
+/// Wipe every row scoped to (source, project) so the next sync re-fetches
+/// the project from scratch. Source config and credentials are untouched.
+/// See `sources::reset` for the full table list.
+#[tauri::command]
+#[specta::specta]
+pub fn jira_source_reset_project_data(
+    source_id: String,
+    project_key: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<crate::sources::reset::ResetJiraProjectCounts, String> {
+    let mut conn = db.lock().unwrap();
+    let source_system_id = source_system_id_for(&source_id);
+    crate::sources::reset::reset_jira_project_data(&mut conn, &source_system_id, &project_key)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn jira_source_test_connection(

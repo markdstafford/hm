@@ -1,5 +1,8 @@
 import { commands } from "../bindings";
-import type { JiraIssueIngestionProgress } from "../bindings";
+import type {
+  JiraIssueIngestionProgress,
+  ResetJiraProjectCounts,
+} from "../bindings";
 import { EMPTY_SOURCES_CONFIG, JIRA_UNAVAILABLE_MESSAGE } from "./defaults";
 import type {
   SourcesConfig,
@@ -105,4 +108,37 @@ export async function loadJiraIssueIngestionProgress(
   const r = await commands.jiraIssueIngestionProgress(sourceId);
   if (r.status === "error") throw new Error(r.error);
   return r.data;
+}
+
+export async function resetJiraProjectData(
+  sourceId: string,
+  projectKey: string
+): Promise<
+  { ok: true; counts: ResetJiraProjectCounts } | { ok: false; error: string }
+> {
+  if (!isTauri()) {
+    return {
+      ok: true,
+      counts: {
+        work_items: 0,
+        work_item_terms: 0,
+        work_item_relationships: 0,
+        work_item_comments: 0,
+        jira_issues: 0,
+        jira_issue_field_values: 0,
+        jira_worklogs: 0,
+        jira_remote_links: 0,
+        jira_project_field_mappings: 0,
+        issue_events: 0,
+        issue_snapshots: 0,
+        indexable_documents: 0,
+        ingestion_cursors: 0,
+        ingestion_runs: 0,
+      },
+    };
+  }
+  const r = await commands.jiraSourceResetProjectData(sourceId, projectKey);
+  return r.status === "ok"
+    ? { ok: true, counts: r.data }
+    : { ok: false, error: r.error };
 }

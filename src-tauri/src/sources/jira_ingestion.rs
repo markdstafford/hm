@@ -1243,12 +1243,10 @@ pub trait JiraIssueClient {
         issue_id_or_key: &str,
     ) -> Result<Vec<JiraRemoteLink>, JiraApiError>;
 
-    fn get_issue_changelog_page(
+    fn get_issue_changelog(
         &self,
         issue_id_or_key: &str,
-        start_at: u32,
-        max_results: u32,
-    ) -> Result<JiraChangelogPage, JiraApiError>;
+    ) -> Result<Option<JiraChangelogPage>, JiraApiError>;
 }
 
 impl JiraIssueClient for JiraApiClient {
@@ -1284,13 +1282,11 @@ impl JiraIssueClient for JiraApiClient {
         JiraApiClient::get_issue_remote_links(self, issue_id_or_key)
     }
 
-    fn get_issue_changelog_page(
+    fn get_issue_changelog(
         &self,
         issue_id_or_key: &str,
-        start_at: u32,
-        max_results: u32,
-    ) -> Result<JiraChangelogPage, JiraApiError> {
-        JiraApiClient::get_issue_changelog_page(self, issue_id_or_key, start_at, max_results)
+    ) -> Result<Option<JiraChangelogPage>, JiraApiError> {
+        Ok(JiraApiClient::get_issue_with_changelog(self, issue_id_or_key)?.changelog)
     }
 }
 
@@ -1745,90 +1741,79 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                     // persist each entry as idempotent issue_events rows.
                     // HTTP is done OUTSIDE the lock; only the write enters with_conn.
                     if self.options.fetch_changelog {
-                        let mut cl_start_at: u32 = 0;
-                        let cl_page_size: u32 = self.page_size;
-                        loop {
+                        // Jira Data Center returns the full changelog inline via
+                        // `?expand=changelog` on the issue endpoint. There is no
+                        // separate paginated `/changelog` resource on DC — the
+                        // Cloud-only endpoint 404s here. The inline list is
+                        // capped by the server's `jira.changelog.history.max`
+                        // setting (default 100). For issues whose history
+                        // exceeds that cap we silently truncate; revisit if it
+                        // becomes a real problem.
+                        let cl_histories = match self.client.get_issue_changelog(&issue.key) {
+                            Ok(Some(page)) => page.histories,
+                            Ok(None) => Vec::new(),
+                            Err(err) => {
+                                let ie: IngestionError = err.into();
+                                tail_errors.push(format!("changelog {}: {}", issue.key, ie));
+                                Vec::new()
+                            }
+                        };
+                        // Process each changelog entry individually so that a
+                        // decode failure on one entry does not abort the rest.
+                        // Actor resolution needs a connection; the pure
+                        // projection step is done outside the lock so that a
+                        // decode error can be pushed to tail_errors and the
+                        // loop can continue.
+                        for entry in &cl_histories {
                             if cancellation.is_cancelled() {
                                 break;
                             }
-                            // HTTP (no lock held).
-                            let cl_page = match self.client.get_issue_changelog_page(
-                                &issue.key,
-                                cl_start_at,
-                                cl_page_size,
-                            ) {
-                                Ok(p) => p,
-                                Err(err) => {
-                                    let ie: IngestionError = err.into();
-                                    tail_errors
-                                        .push(format!("changelog {}: {}", issue.key, ie));
-                                    break;
-                                }
-                            };
-                            let cl_returned = cl_page.histories.len() as u32;
-                            // Process each changelog entry individually so that a
-                            // decode failure on one entry does not abort the whole
-                            // page. actor resolution needs a connection; the pure
-                            // projection step is done outside the lock so that a
-                            // decode error can be pushed to tail_errors and the
-                            // loop can continue.
-                            for entry in &cl_page.histories {
-                                // Step 1: resolve actor identity (needs DB lock).
-                                let actor_id = db.with_conn(|conn| {
-                                    Ok(crate::sources::jira_history::resolve_actor_identity(
-                                        conn,
-                                        source_system_id,
-                                        entry,
-                                        now_utc,
-                                    ))
-                                })?;
-                                // Step 2: project changelog entry (pure — no lock).
-                                let events = match crate::sources::jira_history::project_changelog_entry(
+                            // Step 1: resolve actor identity (needs DB lock).
+                            let actor_id = db.with_conn(|conn| {
+                                Ok(crate::sources::jira_history::resolve_actor_identity(
+                                    conn,
                                     source_system_id,
-                                    &work_item_id_for_tail,
-                                    &issue.key,
                                     entry,
                                     now_utc,
-                                    actor_id.as_deref(),
-                                ) {
-                                    Ok(events) => events,
-                                    Err(e) => {
-                                        let ie = IngestionError::new(
-                                            IngestionErrorCategory::Decode,
-                                            e.to_string(),
-                                        );
-                                        tail_errors.push(format!(
-                                            "changelog {}: {}",
-                                            issue.key, ie
-                                        ));
-                                        continue;
-                                    }
-                                };
-                                // Step 3: write events (needs DB lock).
-                                // Each upsert_issue_event uses ON CONFLICT so a
-                                // partial flush is safe to retry.
-                                db.with_conn(|conn| {
-                                    for event in &events {
-                                        crate::issues::history::upsert_issue_event(conn, event)
-                                            .map_err(|e| {
-                                                IngestionError::new(
-                                                    IngestionErrorCategory::Storage,
-                                                    e.to_string(),
-                                                )
-                                            })?;
-                                    }
-                                    Ok(())
-                                })?;
-                            }
-                            let next_cl = cl_start_at.saturating_add(cl_returned);
-                            let cl_done = cl_page
-                                .total
-                                .map(|t| next_cl >= t)
-                                .unwrap_or(cl_returned < cl_page_size);
-                            if cl_returned == 0 || cl_done || next_cl <= cl_start_at {
-                                break;
-                            }
-                            cl_start_at = next_cl;
+                                ))
+                            })?;
+                            // Step 2: project changelog entry (pure — no lock).
+                            let events = match crate::sources::jira_history::project_changelog_entry(
+                                source_system_id,
+                                &work_item_id_for_tail,
+                                &issue.key,
+                                entry,
+                                now_utc,
+                                actor_id.as_deref(),
+                            ) {
+                                Ok(events) => events,
+                                Err(e) => {
+                                    let ie = IngestionError::new(
+                                        IngestionErrorCategory::Decode,
+                                        e.to_string(),
+                                    );
+                                    tail_errors.push(format!(
+                                        "changelog {}: {}",
+                                        issue.key, ie
+                                    ));
+                                    continue;
+                                }
+                            };
+                            // Step 3: write events (needs DB lock).
+                            // Each upsert_issue_event uses ON CONFLICT so a
+                            // partial flush is safe to retry.
+                            db.with_conn(|conn| {
+                                for event in &events {
+                                    crate::issues::history::upsert_issue_event(conn, event)
+                                        .map_err(|e| {
+                                            IngestionError::new(
+                                                IngestionErrorCategory::Storage,
+                                                e.to_string(),
+                                            )
+                                        })?;
+                                }
+                                Ok(())
+                            })?;
                         }
                     }
                 }
@@ -1899,7 +1884,11 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         } else if !tail_errors.is_empty() {
             (
                 "partial",
-                Some(format!("{} tail errors", tail_errors.len())),
+                Some(format!(
+                    "{} tail errors; first: {}",
+                    tail_errors.len(),
+                    tail_errors[0]
+                )),
             )
         } else {
             ("succeeded", None)
@@ -2558,8 +2547,8 @@ mod tests {
         remote_links: Mutex<HashMap<String, Vec<JiraRemoteLink>>>,
         remote_link_calls: Mutex<Vec<String>>,
         next_remote_links_error: Mutex<Option<JiraApiError>>,
-        changelog_pages: Mutex<HashMap<String, Vec<JiraChangelogPage>>>,
-        changelog_calls: Mutex<Vec<(String, u32, u32)>>,
+        changelog_pages: Mutex<HashMap<String, JiraChangelogPage>>,
+        changelog_calls: Mutex<Vec<String>>,
         next_changelog_error: Mutex<Option<JiraApiError>>,
     }
 
@@ -2636,14 +2625,14 @@ mod tests {
             *self.cancel_after_call.lock().unwrap() = Some((n, flag));
         }
 
-        fn stub_changelog_pages(&self, key: &str, pages: Vec<JiraChangelogPage>) {
+        fn stub_changelog(&self, key: &str, page: JiraChangelogPage) {
             self.changelog_pages
                 .lock()
                 .unwrap()
-                .insert(key.to_string(), pages);
+                .insert(key.to_string(), page);
         }
 
-        fn changelog_calls(&self) -> Vec<(String, u32, u32)> {
+        fn changelog_calls(&self) -> Vec<String> {
             self.changelog_calls.lock().unwrap().clone()
         }
     }
@@ -2762,28 +2751,23 @@ mod tests {
             Ok(map.get(issue_id_or_key).cloned().unwrap_or_default())
         }
 
-        fn get_issue_changelog_page(
+        fn get_issue_changelog(
             &self,
             issue_id_or_key: &str,
-            start_at: u32,
-            max_results: u32,
-        ) -> Result<JiraChangelogPage, JiraApiError> {
+        ) -> Result<Option<JiraChangelogPage>, JiraApiError> {
             self.changelog_calls
                 .lock()
                 .unwrap()
-                .push((issue_id_or_key.to_string(), start_at, max_results));
+                .push(issue_id_or_key.to_string());
             if let Some(err) = self.next_changelog_error.lock().unwrap().take() {
                 return Err(err);
             }
-            let pages = self.changelog_pages.lock().unwrap();
-            let issue_pages = pages.get(issue_id_or_key).cloned().unwrap_or_default();
-            let page_idx = (start_at / max_results.max(1)) as usize;
-            Ok(issue_pages.into_iter().nth(page_idx).unwrap_or(JiraChangelogPage {
-                start_at,
-                max_results,
-                total: Some(0),
-                histories: vec![],
-            }))
+            Ok(self
+                .changelog_pages
+                .lock()
+                .unwrap()
+                .get(issue_id_or_key)
+                .cloned())
         }
     }
 
@@ -3584,7 +3568,7 @@ mod tests {
                 }],
             }],
         };
-        client.stub_changelog_pages("AMP-1", vec![changelog]);
+        client.stub_changelog("AMP-1", changelog);
 
         let mutex_conn = std::sync::Mutex::new(conn);
         let db = MutexDbAccess(&mutex_conn);
@@ -3613,10 +3597,9 @@ mod tests {
 
         // Verify the changelog endpoint was called for each issue.
         let cl_calls = client.changelog_calls();
-        let amp1_cl_calls: Vec<_> = cl_calls.iter().filter(|(k, _, _)| k == "AMP-1").collect();
         assert!(
-            !amp1_cl_calls.is_empty(),
-            "expected at least one changelog call for AMP-1"
+            cl_calls.iter().any(|k| k == "AMP-1"),
+            "expected changelog call for AMP-1, got {cl_calls:?}"
         );
     }
 
@@ -3956,18 +3939,11 @@ mod tests {
                 Ok(vec![])
             }
 
-            fn get_issue_changelog_page(
+            fn get_issue_changelog(
                 &self,
                 _issue_id_or_key: &str,
-                start_at: u32,
-                max_results: u32,
-            ) -> Result<JiraChangelogPage, JiraApiError> {
-                Ok(JiraChangelogPage {
-                    start_at,
-                    max_results,
-                    total: Some(0),
-                    histories: vec![],
-                })
+            ) -> Result<Option<JiraChangelogPage>, JiraApiError> {
+                Ok(None)
             }
         }
 

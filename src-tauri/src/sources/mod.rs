@@ -7,3 +7,4 @@ pub mod jira_errors;
 pub mod jira_history;
 pub mod jira_ingestion;
 pub mod jira_types;
+pub mod reset;
