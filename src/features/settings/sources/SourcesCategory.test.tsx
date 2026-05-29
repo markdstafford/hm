@@ -251,6 +251,31 @@ describe("SourcesCategory", () => {
     );
   });
 
+  it("shows Status: Synced without a Progress line after a no-op succeeded sync", async () => {
+    vi.mocked(commands.sourceConfigGet).mockResolvedValue({
+      status: "ok",
+      data: { version: 1, sources: [JIRA_SOURCE] },
+    });
+    vi.mocked(commands.jiraIssueIngestionProgress).mockResolvedValue({
+      status: "ok",
+      data: {
+        run_id: "run_noop",
+        status: "succeeded",
+        phase: null,
+        saved_issues: 0,
+        total_issues: 0,
+        current_page: null,
+        total_pages: null,
+        message: "Synced",
+        last_successful_issue_sync_at: null,
+        error_summary: null,
+      },
+    });
+    render(<SourcesCategory />);
+    expect(await screen.findByText(/Status: Synced/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Progress:/i)).not.toBeInTheDocument();
+  });
+
   it("does not render credential refs or PAT-shaped text in source rows", async () => {
     vi.mocked(commands.sourceConfigGet).mockResolvedValue({
       status: "ok",
