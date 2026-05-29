@@ -57,6 +57,30 @@ pub fn delete_vector(
     Ok(())
 }
 
+/// Query k-nearest neighbors using sqlite-vec KNN.
+/// Returns Vec<(rowid, distance)> sorted by distance ascending.
+pub fn nearest_by_vector(
+    conn: &rusqlite::Connection,
+    vector: &[f32],
+    limit: usize,
+) -> Result<Vec<(i64, f32)>, EmbeddingError> {
+    let vec_json = vector_to_json(vector);
+    let k = limit.max(1) as i64;
+
+    let mut stmt = conn.prepare(
+        "SELECT rowid, distance FROM vec_document_embeddings WHERE embedding MATCH ? AND k = ?"
+    ).map_err(EmbeddingError::from)?;
+
+    let rows = stmt.query_map(
+        rusqlite::params![vec_json, k],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f32>(1)?)),
+    ).map_err(EmbeddingError::from)?
+    .collect::<rusqlite::Result<Vec<_>>>()
+    .map_err(EmbeddingError::from)?;
+
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

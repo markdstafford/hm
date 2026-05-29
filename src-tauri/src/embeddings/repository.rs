@@ -322,6 +322,68 @@ pub fn write_embedding_batch(
     Ok(())
 }
 
+/// Get fresh embedding vector and metadata for a document.
+/// Returns (embedding_id, model_id, dimension, vector) only when embedding is fresh.
+pub fn fresh_embedding_for_document(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<Option<(String, String, usize, Vec<f32>)>, EmbeddingError> {
+    use rusqlite::OptionalExtension;
+    // Check the document exists and has a fresh embedding
+    let result: Option<(String, String, i64)> = conn.query_row(
+        "SELECT de.id, de.model_id, de.dimension \
+         FROM document_embeddings de \
+         JOIN indexable_documents id ON id.id = de.document_id \
+         WHERE de.document_id = ?1 \
+           AND de.status = 'fresh' \
+           AND id.embedding_status = 'embedded'
+         LIMIT 1",
+        [document_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).optional().map_err(EmbeddingError::from)?;
+
+    let (emb_id, model_id, dimension) = match result {
+        None => return Err(EmbeddingError::new(
+            EmbeddingErrorCategory::MissingFreshEmbedding,
+            "Embedding unavailable: no fresh embedding exists for this document.",
+        )),
+        Some(r) => r,
+    };
+
+    // Get the vector from vec_document_embeddings
+    let vec_result: Option<String> = conn.query_row(
+        "SELECT embedding FROM vec_document_embeddings WHERE embedding_id = ?1",
+        [&emb_id],
+        |r| r.get(0),
+    ).optional().map_err(EmbeddingError::from)?;
+
+    let Some(vec_json) = vec_result else {
+        return Err(EmbeddingError::new(
+            EmbeddingErrorCategory::MissingFreshEmbedding,
+            "Embedding unavailable: vector data not found.",
+        ));
+    };
+
+    let vector: Vec<f32> = serde_json::from_str(&vec_json)
+        .map_err(|_| EmbeddingError::invalid_response())?;
+
+    Ok(Some((emb_id, model_id, dimension as usize, vector)))
+}
+
+pub fn model_dimension(conn: &Connection, model_id: &str) -> Result<usize, EmbeddingError> {
+    use rusqlite::OptionalExtension;
+    let dim: Option<i64> = conn.query_row(
+        "SELECT dimension FROM embedding_models WHERE id = ?1",
+        [model_id],
+        |r| r.get(0),
+    ).optional().map_err(EmbeddingError::from)?;
+
+    dim.map(|d| d as usize).ok_or_else(|| EmbeddingError::new(
+        EmbeddingErrorCategory::DimensionMismatch,
+        "Embedding dimension changed: Rebuild embeddings for this model before searching.",
+    ))
+}
+
 /// Test helper: seed a source system, work item, and indexable document.
 /// Available in test builds only, placed outside `mod tests` so other test modules can import it.
 #[cfg(test)]
