@@ -72,6 +72,11 @@ export const commands = {
 	 *  Returns a summary with counts and status. Failures are non-fatal: documents
 	 *  revert to pending and the summary's `safe_error` field carries a
 	 *  sanitised description.
+	 * 
+	 *  The DB mutex is held in two short scopes only:
+	 *    Phase 1 — claim documents + resolve AI provider config.
+	 *    Phase 3 — write vectors + update document status.
+	 *  The provider HTTP call (Phase 2) happens between these scopes with no lock held.
 	 */
 	embeddingRefreshRun: (options: EmbeddingRunOptions) => typedError<EmbeddingRunSummary, string>(__TAURI_INVOKE("embedding_refresh_run", { options })),
 	/**
@@ -82,6 +87,12 @@ export const commands = {
 	/**
 	 *  Find nearest-neighbor embedding candidates for a document or query text.
 	 *  Pass exactly one of `query.document_id` or `query.query_text`.
+	 * 
+	 *  The DB mutex is held in two brief scopes only:
+	 *    Phase 1 — load AI provider config (document_id path also reads the stored vector).
+	 *    Phase 3 — sqlite-vec KNN query.
+	 *  For the query_text path, the provider HTTP call (Phase 2) runs between these
+	 *  scopes with no lock held.
 	 */
 	embeddingNearestNeighbors: (query: EmbeddingCandidateQuery) => typedError<EmbeddingCandidate[], string>(__TAURI_INVOKE("embedding_nearest_neighbors", { query })),
 	auditLogList: (filter: AuditLogListFilter) => typedError<AuditLogEntry[], string>(__TAURI_INVOKE("audit_log_list", { filter })),

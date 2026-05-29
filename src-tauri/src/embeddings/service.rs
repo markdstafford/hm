@@ -73,61 +73,103 @@ pub struct EmbeddingCandidate {
     pub distance: f32,
 }
 
-pub fn nearest_neighbors(
-    conn: &rusqlite::Connection,
+/// Embed query text and return the vector + model id outside any DB lock.
+/// This is Phase 2 of the command path: call the provider with no mutex held,
+/// then pass the result to `nearest_neighbors_by_precomputed_vector` for Phase 3.
+pub fn embed_query_text_for_search(
     provider: &dyn EmbeddingProvider,
-    query: EmbeddingCandidateQuery,
-) -> Result<Vec<EmbeddingCandidate>, EmbeddingError> {
-    // Validate: exactly one of document_id or query_text
-    match (&query.document_id, &query.query_text) {
-        (None, None) | (Some(_), Some(_)) => {
-            return Err(EmbeddingError::new(
-                EmbeddingErrorCategory::InvalidQuery,
-                "Exactly one of document_id or query_text must be provided.",
-            ));
+    conn: &rusqlite::Connection,
+    text: &str,
+) -> Result<(Vec<f32>, String), EmbeddingError> {
+    let request = EmbeddingRequest { input: vec![text.to_string()] };
+    let mut response = provider.embed(request)?;
+    let model_id = crate::embeddings::repository::stable_model_id(
+        &response.profile,
+        &response.model,
+        "OpenAiEmbeddings",
+        response.dimension,
+        "l2",
+    );
+    let vector = response.vectors.drain(..).next().ok_or_else(EmbeddingError::invalid_response)?;
+    // Dimension check requires a DB read — acceptable here since this function is
+    // called in test paths where conn is passed directly (not mutex-guarded).
+    // The command path uses embed_query_text_no_conn + dimension check in Phase 3.
+    if let Ok(stored_dim) = crate::embeddings::repository::stored_dimension_for_profile(
+        conn,
+        &response.profile,
+        &response.model,
+        "OpenAiEmbeddings",
+        "l2",
+    ) {
+        if stored_dim != response.dimension {
+            return Err(EmbeddingError::dimension_mismatch());
         }
-        _ => {}
+    }
+    Ok((vector, model_id))
+}
+
+/// Embed query text with no DB connection required.
+/// Use this in command paths where the DB mutex must not be held during
+/// the provider HTTP call. Dimension validation happens in Phase 3 after
+/// re-acquiring the lock.
+pub fn embed_query_text_unlocked(
+    provider: &dyn EmbeddingProvider,
+    text: &str,
+) -> Result<(Vec<f32>, String, usize), EmbeddingError> {
+    let request = EmbeddingRequest { input: vec![text.to_string()] };
+    let mut response = provider.embed(request)?;
+    let model_id = crate::embeddings::repository::stable_model_id(
+        &response.profile,
+        &response.model,
+        "OpenAiEmbeddings",
+        response.dimension,
+        "l2",
+    );
+    let dimension = response.dimension;
+    let vector = response.vectors.drain(..).next().ok_or_else(EmbeddingError::invalid_response)?;
+    Ok((vector, model_id, dimension))
+}
+
+/// KNN search using a precomputed query vector and known model metadata.
+///
+/// Use this in the command path for `query_text` queries: embed the text
+/// outside the DB lock (with `embed_query_text_unlocked`), then call this
+/// with only a brief DB lock held for the sqlite-vec query.
+pub fn nearest_neighbors_by_precomputed_vector(
+    conn: &rusqlite::Connection,
+    query_vector: &[f32],
+    query_dimension: usize,
+    profile: &str,
+    model: &str,
+    query: &EmbeddingCandidateQuery,
+) -> Result<Vec<EmbeddingCandidate>, EmbeddingError> {
+    // Validate dimension against stored embeddings for this profile/model
+    if let Ok(stored_dim) = crate::embeddings::repository::stored_dimension_for_profile(
+        conn, profile, model, "OpenAiEmbeddings", "l2",
+    ) {
+        if stored_dim != query_dimension {
+            return Err(EmbeddingError::dimension_mismatch());
+        }
     }
 
-    let (vector, model_id) = if let Some(doc_id) = &query.document_id {
-        // fresh_embedding_for_document returns Err when unavailable
-        let (_emb_id, model_id, _dimension, vector) =
-            crate::embeddings::repository::fresh_embedding_for_document(conn, doc_id)?
-                .unwrap_or_else(|| unreachable!("fresh_embedding_for_document returns Err, not Ok(None)"));
-        (vector, model_id)
-    } else {
-        // query_text path — embed on the fly
-        let text = query.query_text.as_deref().unwrap_or("");
-        let request = EmbeddingRequest { input: vec![text.to_string()] };
-        let mut response = provider.embed(request)?;
-        let model_id = crate::embeddings::repository::stable_model_id(
-            &response.profile,
-            &response.model,
-            "OpenAiEmbeddings",
-            response.dimension,
-            "l2",
-        );
-        let vector = response.vectors.drain(..).next().ok_or_else(EmbeddingError::invalid_response)?;
-        // Check if this profile+model+runner combination has stored embeddings
-        // with a different dimension. `stable_model_id` encodes dimension in the
-        // id, so we look up by profile/model/runner instead of by model_id.
-        if let Ok(stored_dim) = crate::embeddings::repository::stored_dimension_for_profile(
-            conn,
-            &response.profile,
-            &response.model,
-            "OpenAiEmbeddings",
-            "l2",
-        ) {
-            if stored_dim != response.dimension {
-                return Err(EmbeddingError::dimension_mismatch());
-            }
-        }
-        (vector, model_id)
-    };
+    let model_id = crate::embeddings::repository::stable_model_id(
+        profile, model, "OpenAiEmbeddings", query_dimension, "l2",
+    );
 
+    run_knn_query(conn, query_vector, &model_id, query)
+}
+
+/// Shared KNN query implementation used by both `nearest_neighbors` and
+/// `nearest_neighbors_by_precomputed_vector`.
+fn run_knn_query(
+    conn: &rusqlite::Connection,
+    vector: &[f32],
+    model_id: &str,
+    query: &EmbeddingCandidateQuery,
+) -> Result<Vec<EmbeddingCandidate>, EmbeddingError> {
     // Get KNN candidates from sqlite-vec; over-fetch to allow for filtering/self-exclusion
     let fetch_limit = if query.include_self { query.limit as usize } else { query.limit as usize + 1 };
-    let raw_matches = crate::embeddings::sqlite_vec::nearest_by_vector(conn, &vector, fetch_limit)?;
+    let raw_matches = crate::embeddings::sqlite_vec::nearest_by_vector(conn, vector, fetch_limit)?;
 
     if raw_matches.is_empty() {
         return Ok(vec![]);
@@ -231,6 +273,40 @@ pub fn nearest_neighbors(
     candidates.truncate(query.limit as usize);
 
     Ok(candidates)
+}
+
+/// Nearest-neighbor search for stored documents or query text.
+///
+/// For tests and direct-connection callers. The command path should use the
+/// 3-phase variant: embed query text with `embed_query_text_unlocked` (no DB
+/// lock), then call `nearest_neighbors_by_precomputed_vector`.
+pub fn nearest_neighbors(
+    conn: &rusqlite::Connection,
+    provider: &dyn EmbeddingProvider,
+    query: EmbeddingCandidateQuery,
+) -> Result<Vec<EmbeddingCandidate>, EmbeddingError> {
+    match (&query.document_id, &query.query_text) {
+        (None, None) | (Some(_), Some(_)) => {
+            return Err(EmbeddingError::new(
+                EmbeddingErrorCategory::InvalidQuery,
+                "Exactly one of document_id or query_text must be provided.",
+            ));
+        }
+        _ => {}
+    }
+
+    let (vector, model_id) = if let Some(doc_id) = &query.document_id {
+        let (_emb_id, model_id, _dimension, vector) =
+            crate::embeddings::repository::fresh_embedding_for_document(conn, doc_id)?
+                .unwrap_or_else(|| unreachable!("fresh_embedding_for_document returns Err, not Ok(None)"));
+        (vector, model_id)
+    } else {
+        let text = query.query_text.as_deref().unwrap_or("");
+        let (vector, model_id) = embed_query_text_for_search(provider, conn, text)?;
+        (vector, model_id)
+    };
+
+    run_knn_query(conn, &vector, &model_id, &query)
 }
 
 pub fn refresh_embeddings_with_provider(
@@ -465,6 +541,133 @@ pub fn refresh_embeddings(
         dimension,
         safe_error: None,
     })
+}
+
+/// Batch prepared during Phase 1 of a scoped refresh run.
+/// Holds the claimed documents so Phase 3 can write their results.
+pub struct PreparedRefreshBatch {
+    pub claimed: Vec<crate::embeddings::repository::ClaimedDocument>,
+    pub texts: Vec<String>,
+    pub scanned: u32,
+}
+
+/// Phase 1 of a scoped refresh: recover stuck claims, apply force_rebuild, claim documents.
+///
+/// Call with a brief DB lock. Release the lock before calling the embedding provider.
+/// Returns `None` when there are no documents to embed.
+pub fn prepare_refresh_batch(
+    conn: &rusqlite::Connection,
+    options: &EmbeddingRunOptions,
+    now_utc: &str,
+) -> Result<Option<PreparedRefreshBatch>, EmbeddingError> {
+    recover_stuck_embedding_claims(conn).map_err(EmbeddingError::from)?;
+
+    if options.force_rebuild {
+        let mut sql = String::from(
+            "UPDATE indexable_documents SET embedding_status = 'pending' WHERE embedding_status = 'embedded'",
+        );
+        let mut rebuild_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(ref ssid) = options.source_system_id {
+            sql.push_str(" AND source_system_id = ?");
+            rebuild_params.push(Box::new(ssid.clone()));
+        }
+        if let Some(ref kind) = options.entity_kind {
+            sql.push_str(" AND entity_kind = ?");
+            rebuild_params.push(Box::new(kind.clone()));
+        }
+        conn.execute(&sql, rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())))
+            .map_err(EmbeddingError::from)?;
+    }
+
+    let limit = options.limit.unwrap_or(25).max(1) as usize;
+    let claim_opts = ClaimOptions {
+        source_system_id: options.source_system_id.as_deref(),
+        entity_kind: options.entity_kind.as_deref(),
+        limit,
+    };
+
+    let claimed = claim_documents(conn, &claim_opts, now_utc)?;
+    if claimed.is_empty() {
+        return Ok(None);
+    }
+
+    let texts: Vec<String> = claimed
+        .iter()
+        .map(|doc| assemble_text(doc.title.as_deref(), &doc.body))
+        .collect();
+    let scanned = claimed.len() as u32;
+
+    Ok(Some(PreparedRefreshBatch { claimed, texts, scanned }))
+}
+
+/// Phase 3 of a scoped refresh: write embedding vectors and update document status.
+///
+/// Call with a brief DB lock after the provider HTTP call has completed.
+pub fn complete_refresh_batch(
+    conn: &rusqlite::Connection,
+    batch: &PreparedRefreshBatch,
+    response: crate::embeddings::provider::EmbeddingResponse,
+    now_utc: &str,
+) -> Result<EmbeddingRunSummary, EmbeddingError> {
+    let model_id = crate::embeddings::repository::stable_model_id(
+        &response.profile,
+        &response.model,
+        "OpenAiEmbeddings",
+        response.dimension,
+        "l2",
+    );
+    let dimension = response.dimension as u32;
+
+    match write_embedding_batch(conn, &batch.claimed, &response, now_utc) {
+        Ok(()) => Ok(EmbeddingRunSummary {
+            status: EmbeddingRunStatus::Complete,
+            scanned: batch.scanned,
+            embedded: batch.scanned,
+            skipped: 0,
+            failed: 0,
+            model_id,
+            dimension,
+            safe_error: None,
+        }),
+        Err(e) => {
+            for doc in &batch.claimed {
+                let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+            }
+            Ok(EmbeddingRunSummary {
+                status: EmbeddingRunStatus::Paused,
+                scanned: batch.scanned,
+                embedded: 0,
+                skipped: 0,
+                failed: batch.scanned,
+                model_id,
+                dimension,
+                safe_error: Some(e.to_string()),
+            })
+        }
+    }
+}
+
+/// Record provider failures for all documents in a batch.
+/// Call with a brief DB lock when the provider HTTP call returns an error.
+pub fn record_batch_provider_failure(
+    conn: &rusqlite::Connection,
+    batch: &PreparedRefreshBatch,
+    err: &EmbeddingError,
+    now_utc: &str,
+) -> EmbeddingRunSummary {
+    for doc in &batch.claimed {
+        let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, err, now_utc);
+    }
+    EmbeddingRunSummary {
+        status: EmbeddingRunStatus::Paused,
+        scanned: batch.scanned,
+        embedded: 0,
+        skipped: 0,
+        failed: batch.scanned,
+        model_id: String::new(),
+        dimension: 0,
+        safe_error: Some(err.to_string()),
+    }
 }
 
 pub fn embedding_status(
@@ -1029,5 +1232,86 @@ mod tests {
                 "work_item_kind filter should exclude Task candidates"
             );
         }
+    }
+
+    /// Regression test: prove that the embedding provider is called OUTSIDE the
+    /// DB mutex when using the phase-separated helpers.
+    ///
+    /// The `LockDetectingProvider` captures a clone of the same
+    /// `Arc<Mutex<Connection>>` used for DB work.  When `embed()` is invoked, it
+    /// calls `try_lock()` on that mutex.  If the caller still holds the guard the
+    /// `try_lock()` will fail (Err / WouldBlock), which would panic the test.
+    /// With correct phase separation the lock is released before `embed()` is
+    /// called, so `try_lock()` succeeds.
+    #[test]
+    fn phase_separated_refresh_does_not_hold_db_lock_during_provider_call() {
+        use std::sync::{Arc, Mutex};
+
+        let conn = open_with_embedding_schema();
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        // Wrap the connection in an Arc<Mutex<_>> so we can share it with the provider.
+        let db: Arc<Mutex<rusqlite::Connection>> = Arc::new(Mutex::new(conn));
+
+        struct LockDetectingProvider {
+            db: Arc<Mutex<rusqlite::Connection>>,
+        }
+        impl EmbeddingProvider for LockDetectingProvider {
+            fn embed(&self, _req: EmbeddingRequest) -> Result<EmbeddingResponse, EmbeddingError> {
+                // If the caller holds the DB lock, try_lock() returns Err.
+                // The test fails at this point, proving the bug is present.
+                let _guard = self.db.try_lock().expect(
+                    "DB mutex must NOT be held when the embedding provider is called",
+                );
+                Ok(EmbeddingResponse {
+                    vectors: vec![vec![0.1f32, 0.2, 0.3]],
+                    model: "test-model".into(),
+                    profile: "test-profile".into(),
+                    dimension: 3,
+                    usage: None,
+                })
+            }
+        }
+
+        let provider = LockDetectingProvider { db: db.clone() };
+        let options = EmbeddingRunOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: Some(10),
+            force_rebuild: false,
+        };
+        let now = "2026-01-01T00:00:00Z";
+
+        // Phase 1: claim docs (brief lock).
+        let batch = {
+            let conn = db.lock().expect("phase 1 lock");
+            prepare_refresh_batch(&conn, &options, now)
+                .expect("prepare batch")
+                .expect("should have pending docs")
+        }; // lock released here
+
+        // Phase 2: provider call (no lock held — verified inside embed()).
+        let request = EmbeddingRequest { input: batch.texts.clone() };
+        let response = provider.embed(request).expect("embed");
+
+        // Phase 3: write results (brief lock).
+        let conn = db.lock().expect("phase 3 lock");
+        let summary = complete_refresh_batch(&conn, &batch, response, now)
+            .expect("complete batch");
+
+        assert_eq!(summary.embedded, 1);
+        assert!(matches!(summary.status, EmbeddingRunStatus::Complete));
+    }
+
+    /// Regression test: prove that `embed_query_text_unlocked` does not require
+    /// a DB connection at all (confirming it can be called outside any DB lock).
+    #[test]
+    fn embed_query_text_unlocked_requires_no_db_connection() {
+        let provider = FakeEmbeddingProvider::new(3, "test-profile", "test-model");
+        let (vector, model_id, dimension) =
+            embed_query_text_unlocked(&provider, "login bug").expect("embed");
+        assert_eq!(dimension, 3);
+        assert_eq!(vector.len(), 3);
+        assert!(!model_id.is_empty());
     }
 }
