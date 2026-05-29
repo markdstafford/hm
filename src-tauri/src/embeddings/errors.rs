@@ -69,3 +69,60 @@ impl From<crate::ai::errors::AiError> for EmbeddingError {
         }
     }
 }
+
+#[cfg(test)]
+pub fn assert_safe_message(message: &str) {
+    for forbidden in [
+        "Authorization",
+        "Bearer",
+        "sk-test-secret",
+        "api_key",
+        "raw provider body",
+        "Cannot sign in",
+        "Full issue text",
+    ] {
+        assert!(
+            !message.contains(forbidden),
+            "forbidden text leaked: {forbidden} in: {message}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_rejected_redacts_secret_and_document_text() {
+        let err = EmbeddingError::provider_rejected(
+            "Bearer sk-test-secret Authorization raw provider body Cannot sign in Full issue text".into(),
+        );
+        assert_safe_message(&err.to_string());
+        assert!(err.to_string().contains("Embedding provider rejected"));
+    }
+
+    #[test]
+    fn provider_unavailable_message_is_safe() {
+        let err = EmbeddingError::provider_unavailable();
+        assert_safe_message(&err.to_string());
+    }
+
+    #[test]
+    fn dimension_mismatch_message_is_safe() {
+        let err = EmbeddingError::dimension_mismatch();
+        assert_safe_message(&err.to_string());
+    }
+
+    #[test]
+    fn invalid_response_message_is_safe() {
+        let err = EmbeddingError::invalid_response();
+        assert_safe_message(&err.to_string());
+    }
+
+    #[test]
+    fn storage_error_is_safe() {
+        let rusqlite_err = rusqlite::Error::QueryReturnedNoRows;
+        let err = EmbeddingError::from(rusqlite_err);
+        assert_safe_message(&err.to_string());
+    }
+}

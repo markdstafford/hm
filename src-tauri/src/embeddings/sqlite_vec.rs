@@ -82,8 +82,32 @@ pub fn nearest_by_vector(
 }
 
 #[cfg(test)]
+pub fn require_sqlite_vec_for_test_without_loading(conn: &rusqlite::Connection) -> Result<(), EmbeddingError> {
+    conn.query_row("SELECT vec_version()", [], |_| Ok(()))
+        .map_err(|_| EmbeddingError::new(
+            EmbeddingErrorCategory::SqliteVecUnavailable,
+            "sqlite-vec is unavailable in this environment.",
+        ))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sqlite_vec_unavailable_safe_error_from_helper() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // Try without loading the extension
+        let result = require_sqlite_vec_for_test_without_loading(&conn);
+        match result {
+            Ok(_) => {} // sqlite-vec was already loaded globally, acceptable
+            Err(e) => {
+                assert_eq!(e.category, EmbeddingErrorCategory::SqliteVecUnavailable);
+                assert!(e.to_string().contains("unavailable"));
+                crate::embeddings::errors::assert_safe_message(&e.to_string());
+            }
+        }
+    }
 
     #[test]
     fn sqlite_vec_unavailable_returns_safe_error() {

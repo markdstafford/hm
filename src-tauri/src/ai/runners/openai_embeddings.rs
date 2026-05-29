@@ -209,6 +209,7 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("Embedding provider rejected the request"), "should be safe error");
         assert!(!msg.contains("sk-test-secret"), "must not contain secret");
+        crate::embeddings::errors::assert_safe_message(&msg);
     }
 
     #[test]
