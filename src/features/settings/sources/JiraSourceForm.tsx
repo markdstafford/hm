@@ -7,6 +7,7 @@ import { Form } from "../../../ui/forms/Form";
 import { Button } from "../../../ui/buttons/Button";
 import { ConnectionTestStatus } from "./ConnectionTestStatus";
 import { ProjectMultiSelect } from "./ProjectMultiSelect";
+import { ProjectResetSection } from "./ProjectResetSection";
 
 interface JiraSourceFormProps {
   mode: "new" | "edit";
@@ -278,6 +279,13 @@ export function JiraSourceForm({ mode, existingSource, config, onSaved, onCancel
             onChange={(selected) => setDraft((d) => ({ ...d, projects: selected }))}
           />
         </Form.Section>
+      )}
+
+      {mode === "edit" && existingSource && existingSource.projects.length > 0 && (
+        <ProjectResetSection
+          sourceId={existingSource.id}
+          projects={existingSource.projects}
+        />
       )}
 
       {saveError && <Form.Error>{saveError}</Form.Error>}

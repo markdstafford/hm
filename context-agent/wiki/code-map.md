@@ -331,3 +331,15 @@ The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `Pro
 - `src/entities/hygiene-suggestion/` defines the read-side collection entity for duplicate, stale, and enrichment suggestions.
 - `src/features/backlog-hygiene/data.ts` is the fixture-backed seam to replace with producer/store output from future duplicate, stale, and enrichment engines.
 - `src/features/collection-viewer/useEntityCollectionViewer.tsx` is the generic collection binding used by Jira issues and backlog hygiene; entity-specific wrappers provide load state and copy.
+
+---
+
+## Jira issue history (added 2026-05-28, issue #11)
+
+- `src-tauri/src/issues/history.rs` — issue event/snapshot repository helpers, retention config load/save (`IssueHistoryRetentionConfig`, key `"issue_history.retention"`), snapshot job lifecycle, `coarse_state` helper, `IssueHistoryError` safe error type.
+- `src-tauri/src/issues/snapshots.rs` — pure `fold_events_to_day_end` + `apply_event` (14 typed event types), `generate_snapshots_for_range`, `replay_missing_snapshots` (cursor key: `"project.{KEY}.snapshots"` — dots not colons), `compact_snapshot_retention`.
+- `src-tauri/src/sources/jira_history.rs` — pure `project_changelog_entry` maps `JiraChangelogEntry` to `Vec<IssueEventInput>`; `event_type_for_field`; `pub(crate) resolve_actor_identity`.
+- Ingestion: after each issue projection, changelog tail loop (guarded by `options.fetch_changelog`, default `true`) fetches pages outside DB lock, writes inside `db.with_conn`. After project sync, replay then compaction run (soft errors).
+- New schema tables: `issue_events`, `issue_snapshots`, `issue_snapshot_jobs`.
+- New commands: `jira_issue_status_timeline`, `issue_snapshots_query`, `issue_history_retention_get`, `issue_history_retention_save`.
+- React: `src/entities/jira-issue/history.ts` — `loadJiraIssueStatusHistory` with `typedError` unwrap + browser fallback. `src/entities/jira-issue/detail.tsx` — Status history section, keyed on `work_item_id`, loading/error/empty/partial/success states.

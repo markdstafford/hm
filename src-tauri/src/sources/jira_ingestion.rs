@@ -22,6 +22,7 @@
 use rusqlite::{params, Connection};
 use serde_json::Value;
 
+use crate::issues::history::coarse_state;
 use crate::issues::ids::{content_hash, stable_id};
 use crate::issues::people::{upsert_source_identity, SourceIdentityInput, UpsertedIdentity};
 use crate::issues::repository::{
@@ -226,30 +227,6 @@ pub struct ProjectedJiraIssue {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-/// Coarse status grouping used for `work_items.state`. Resolved/closed states
-/// take priority over the in-progress check so a status like
-/// `"Closed (Done)"` lands on the closed bucket.
-fn coarse_state(status_name: Option<&str>) -> &'static str {
-    let Some(raw) = status_name else { return "unknown" };
-    let lower = raw.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return "unknown";
-    }
-    if lower.contains("closed") {
-        return "closed";
-    }
-    if lower.contains("done") || lower.contains("resolved") {
-        return "done";
-    }
-    if lower.contains("in progress") || lower.contains("review") {
-        return "in_progress";
-    }
-    match lower.as_str() {
-        "open" | "to do" | "new" | "backlog" => "open",
-        _ => "unknown",
-    }
-}
 
 /// Extract a string value from a JSON node, treating non-strings/nulls as None.
 fn as_string(v: Option<&Value>) -> Option<String> {
@@ -1237,7 +1214,7 @@ use crate::ingestion::runs::{
 static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 use crate::sources::jira_client::{JiraApiClient, JiraSearchRequest};
 use crate::sources::jira_errors::JiraApiError;
-use crate::sources::jira_types::{JiraPagedComments, JiraPagedWorklogs, JiraSearchPage};
+use crate::sources::jira_types::{JiraChangelogPage, JiraPagedComments, JiraPagedWorklogs, JiraSearchPage};
 
 /// Trait seam that abstracts over `JiraApiClient::search_issues_page` so
 /// `JiraIssueIngestionService` can be exercised against an in-memory stub.
@@ -1265,6 +1242,11 @@ pub trait JiraIssueClient {
         &self,
         issue_id_or_key: &str,
     ) -> Result<Vec<JiraRemoteLink>, JiraApiError>;
+
+    fn get_issue_changelog(
+        &self,
+        issue_id_or_key: &str,
+    ) -> Result<Option<JiraChangelogPage>, JiraApiError>;
 }
 
 impl JiraIssueClient for JiraApiClient {
@@ -1299,23 +1281,46 @@ impl JiraIssueClient for JiraApiClient {
     ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
         JiraApiClient::get_issue_remote_links(self, issue_id_or_key)
     }
+
+    fn get_issue_changelog(
+        &self,
+        issue_id_or_key: &str,
+    ) -> Result<Option<JiraChangelogPage>, JiraApiError> {
+        Ok(JiraApiClient::get_issue_with_changelog(self, issue_id_or_key)?.changelog)
+    }
 }
 
 /// Opt-in feature toggles for the Jira issue ingestion service.
 ///
 /// Watchers / votes / remote links are disabled by default and must be
 /// explicitly opted into via this struct. Watchers and votes are placeholders
-/// for the next ingestion baseline; only `fetch_remote_links` is wired today.
-#[derive(Debug, Clone, Default)]
+/// for the next ingestion baseline. Both `fetch_remote_links` and
+/// `fetch_changelog` are wired today; `fetch_watchers` and `fetch_votes`
+/// are placeholders for a future baseline.
+#[derive(Debug, Clone)]
 pub struct JiraIngestionOptions {
     /// When true, fetch `/rest/api/2/issue/{key}/remotelink` for each issue
     /// and persist the result via `jira_remote_links`. Maintained under a
     /// separate cursor key `project:{KEY}:remotelinks`.
     pub fetch_remote_links: bool,
+    /// When true, fetch `/rest/api/2/issue/{key}/changelog` for each issue
+    /// and persist the result as `issue_events` rows.
+    pub fetch_changelog: bool,
     /// Placeholder — not wired in this task.
     pub fetch_watchers: bool,
     /// Placeholder — not wired in this task.
     pub fetch_votes: bool,
+}
+
+impl Default for JiraIngestionOptions {
+    fn default() -> Self {
+        Self {
+            fetch_remote_links: false,
+            fetch_changelog: true,
+            fetch_watchers: false,
+            fetch_votes: false,
+        }
+    }
 }
 
 /// Cooperative cancellation flag shared between the service and any caller
@@ -1727,6 +1732,90 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                             }
                         }
                     }
+
+                    if cancellation.is_cancelled() {
+                        break;
+                    }
+
+                    // Changelog history tail: fetch all pages for this issue and
+                    // persist each entry as idempotent issue_events rows.
+                    // HTTP is done OUTSIDE the lock; only the write enters with_conn.
+                    if self.options.fetch_changelog {
+                        // Jira Data Center returns the full changelog inline via
+                        // `?expand=changelog` on the issue endpoint. There is no
+                        // separate paginated `/changelog` resource on DC — the
+                        // Cloud-only endpoint 404s here. The inline list is
+                        // capped by the server's `jira.changelog.history.max`
+                        // setting (default 100). For issues whose history
+                        // exceeds that cap we silently truncate; revisit if it
+                        // becomes a real problem.
+                        let cl_histories = match self.client.get_issue_changelog(&issue.key) {
+                            Ok(Some(page)) => page.histories,
+                            Ok(None) => Vec::new(),
+                            Err(err) => {
+                                let ie: IngestionError = err.into();
+                                tail_errors.push(format!("changelog {}: {}", issue.key, ie));
+                                Vec::new()
+                            }
+                        };
+                        // Process each changelog entry individually so that a
+                        // decode failure on one entry does not abort the rest.
+                        // Actor resolution needs a connection; the pure
+                        // projection step is done outside the lock so that a
+                        // decode error can be pushed to tail_errors and the
+                        // loop can continue.
+                        for entry in &cl_histories {
+                            if cancellation.is_cancelled() {
+                                break;
+                            }
+                            // Step 1: resolve actor identity (needs DB lock).
+                            let actor_id = db.with_conn(|conn| {
+                                Ok(crate::sources::jira_history::resolve_actor_identity(
+                                    conn,
+                                    source_system_id,
+                                    entry,
+                                    now_utc,
+                                ))
+                            })?;
+                            // Step 2: project changelog entry (pure — no lock).
+                            let events = match crate::sources::jira_history::project_changelog_entry(
+                                source_system_id,
+                                &work_item_id_for_tail,
+                                &issue.key,
+                                entry,
+                                now_utc,
+                                actor_id.as_deref(),
+                            ) {
+                                Ok(events) => events,
+                                Err(e) => {
+                                    let ie = IngestionError::new(
+                                        IngestionErrorCategory::Decode,
+                                        e.to_string(),
+                                    );
+                                    tail_errors.push(format!(
+                                        "changelog {}: {}",
+                                        issue.key, ie
+                                    ));
+                                    continue;
+                                }
+                            };
+                            // Step 3: write events (needs DB lock).
+                            // Each upsert_issue_event uses ON CONFLICT so a
+                            // partial flush is safe to retry.
+                            db.with_conn(|conn| {
+                                for event in &events {
+                                    crate::issues::history::upsert_issue_event(conn, event)
+                                        .map_err(|e| {
+                                            IngestionError::new(
+                                                IngestionErrorCategory::Storage,
+                                                e.to_string(),
+                                            )
+                                        })?;
+                                }
+                                Ok(())
+                            })?;
+                        }
+                    }
                 }
 
                 pages += 1;
@@ -1795,7 +1884,11 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
         } else if !tail_errors.is_empty() {
             (
                 "partial",
-                Some(format!("{} tail errors", tail_errors.len())),
+                Some(format!(
+                    "{} tail errors; first: {}",
+                    tail_errors.len(),
+                    tail_errors[0]
+                )),
             )
         } else {
             ("succeeded", None)
@@ -1862,6 +1955,56 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 &final_counts,
                 error_summary.as_deref(),
             )?;
+            Ok(())
+        })?;
+
+        // ── Replay missing snapshot dates for this project ──────────────
+        // Derive the local date from the leading 10 chars of `now_utc`
+        // (YYYY-MM-DD).  This avoids a chrono dependency and is correct for
+        // UTC-anchored dates; callers that need local-date accuracy should
+        // pass `now_utc` with an appropriate offset.
+        let replay_date = now_utc.get(..10).unwrap_or(now_utc).to_string();
+        let now_owned = now_utc.to_string();
+        let source_system_id_owned = source_system_id.to_string();
+        db.with_conn(|conn| {
+            match crate::issues::snapshots::replay_missing_snapshots(
+                conn,
+                &source_system_id_owned,
+                &project_key_owned,
+                &replay_date,
+                &now_owned,
+            ) {
+                Ok(result) => {
+                    eprintln!(
+                        "[snapshots] replay: {} dates, {} snapshots written",
+                        result.generated_dates.len(),
+                        result.snapshots_written
+                    );
+                }
+                Err(e) => {
+                    eprintln!("[snapshots] replay_missing_snapshots failed for {project_key_owned}: {e}");
+                    tail_errors.push(format!("snapshot_replay: {e}"));
+                }
+            }
+            Ok(())
+        })?;
+
+        // ── Retention compaction ────────────────────────────────────────
+        db.with_conn(|conn| {
+            let config = crate::issues::history::load_retention_config(conn)
+                .unwrap_or_default();
+            match crate::issues::snapshots::compact_snapshot_retention(
+                conn,
+                &source_system_id_owned,
+                &replay_date,
+                &config,
+                &now_owned,
+            ) {
+                Ok(_result) => {}
+                Err(e) => {
+                    eprintln!("[snapshots] compact_snapshot_retention failed: {e}");
+                }
+            }
             Ok(())
         })?;
 
@@ -2404,6 +2547,9 @@ mod tests {
         remote_links: Mutex<HashMap<String, Vec<JiraRemoteLink>>>,
         remote_link_calls: Mutex<Vec<String>>,
         next_remote_links_error: Mutex<Option<JiraApiError>>,
+        changelog_pages: Mutex<HashMap<String, JiraChangelogPage>>,
+        changelog_calls: Mutex<Vec<String>>,
+        next_changelog_error: Mutex<Option<JiraApiError>>,
     }
 
     impl FakeJiraClient {
@@ -2422,6 +2568,9 @@ mod tests {
                 remote_links: Mutex::new(HashMap::new()),
                 remote_link_calls: Mutex::new(Vec::new()),
                 next_remote_links_error: Mutex::new(None),
+                changelog_pages: Mutex::new(HashMap::new()),
+                changelog_calls: Mutex::new(Vec::new()),
+                next_changelog_error: Mutex::new(None),
             }
         }
 
@@ -2474,6 +2623,17 @@ mod tests {
         /// (1-indexed). Used by the cancellation test.
         fn trip_cancel_after(&self, n: usize, flag: Arc<CancellationFlag>) {
             *self.cancel_after_call.lock().unwrap() = Some((n, flag));
+        }
+
+        fn stub_changelog(&self, key: &str, page: JiraChangelogPage) {
+            self.changelog_pages
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), page);
+        }
+
+        fn changelog_calls(&self) -> Vec<String> {
+            self.changelog_calls.lock().unwrap().clone()
         }
     }
 
@@ -2589,6 +2749,25 @@ mod tests {
             }
             let map = self.remote_links.lock().unwrap();
             Ok(map.get(issue_id_or_key).cloned().unwrap_or_default())
+        }
+
+        fn get_issue_changelog(
+            &self,
+            issue_id_or_key: &str,
+        ) -> Result<Option<JiraChangelogPage>, JiraApiError> {
+            self.changelog_calls
+                .lock()
+                .unwrap()
+                .push(issue_id_or_key.to_string());
+            if let Some(err) = self.next_changelog_error.lock().unwrap().take() {
+                return Err(err);
+            }
+            Ok(self
+                .changelog_pages
+                .lock()
+                .unwrap()
+                .get(issue_id_or_key)
+                .cloned())
         }
     }
 
@@ -3358,6 +3537,72 @@ mod tests {
         assert_eq!(count, 2, "both runs should be persisted with distinct ids");
     }
 
+    // -- Changelog history tests ------------------------------------------
+
+    #[test]
+    fn ingestion_writes_changelog_events_after_issue_projection() {
+        use crate::sources::jira_types::{JiraChangelogEntry, JiraChangelogItem};
+
+        let conn = open_in_memory().expect("db");
+        seed_amp_source(&conn, "srcsys_1");
+
+        let (_, page1) = load_amp_fixture();
+        let client = FakeJiraClient::with_pages(vec![page1]);
+
+        // Stub a changelog page for AMP-1 (the first issue in the fixture).
+        let changelog = JiraChangelogPage {
+            start_at: 0,
+            max_results: 50,
+            total: Some(1),
+            histories: vec![JiraChangelogEntry {
+                id: "cl_001".to_string(),
+                author: None,
+                created: "2026-05-27T14:18:00.000+0000".to_string(),
+                items: vec![JiraChangelogItem {
+                    field: "status".to_string(),
+                    fieldtype: Some("jira".to_string()),
+                    from: Some("1".to_string()),
+                    from_string: Some("To Do".to_string()),
+                    to: Some("2".to_string()),
+                    to_string: Some("In Progress".to_string()),
+                }],
+            }],
+        };
+        client.stub_changelog("AMP-1", changelog);
+
+        let mutex_conn = std::sync::Mutex::new(conn);
+        let db = MutexDbAccess(&mutex_conn);
+        let service = JiraIssueIngestionService::new(&client);
+        let cancellation = CancellationFlag::new();
+        let summary = service
+            .ingest_project(&db, "srcsys_1", "AMP", Some("AMP Project"), NOW, &cancellation)
+            .expect("ingest");
+        assert_eq!(summary.status, "succeeded");
+
+        let event_count: i64 = db
+            .with_conn(|conn| {
+                Ok(conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM issue_events WHERE event_type = 'status_changed'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap())
+            })
+            .unwrap();
+        assert_eq!(
+            event_count, 1,
+            "expected exactly one status_changed event, got {event_count}"
+        );
+
+        // Verify the changelog endpoint was called for each issue.
+        let cl_calls = client.changelog_calls();
+        assert!(
+            cl_calls.iter().any(|k| k == "AMP-1"),
+            "expected changelog call for AMP-1, got {cl_calls:?}"
+        );
+    }
+
     // -- Redaction tests --------------------------------------------------
     //
     // These tests lock down the guarantee that PATs, Authorization headers,
@@ -3692,6 +3937,13 @@ mod tests {
                 _issue_id_or_key: &str,
             ) -> Result<Vec<JiraRemoteLink>, JiraApiError> {
                 Ok(vec![])
+            }
+
+            fn get_issue_changelog(
+                &self,
+                _issue_id_or_key: &str,
+            ) -> Result<Option<JiraChangelogPage>, JiraApiError> {
+                Ok(None)
             }
         }
 

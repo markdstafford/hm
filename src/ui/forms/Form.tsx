@@ -38,7 +38,7 @@ function Section({ label, description, children }: SectionProps) {
         {label}
       </legend>
       {description && (
-        <p id={descriptionId} className="text-xs text-subtext-1 -mt-2">
+        <p id={descriptionId} className="text-xs text-subtext-1">
           {description}
         </p>
       )}

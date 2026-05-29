@@ -257,6 +257,99 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             UNIQUE(source_system_id, work_item_id, url)
         );
 
+        CREATE TABLE IF NOT EXISTS issue_events (
+          id TEXT PRIMARY KEY,
+          source_system_id TEXT NOT NULL REFERENCES source_systems(id),
+          issue_id TEXT NOT NULL REFERENCES work_items(id),
+          entity_type TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          source_kind TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          upstream_event_id TEXT,
+          upstream_item_id TEXT,
+          field_id TEXT,
+          field_name TEXT,
+          actor_identity_id TEXT REFERENCES source_identities(id),
+          actor_display_name TEXT,
+          occurred_at TEXT NOT NULL,
+          from_string TEXT,
+          to_string TEXT,
+          from_json TEXT,
+          to_json TEXT,
+          payload_json TEXT NOT NULL,
+          ingested_at TEXT NOT NULL,
+          -- Secondary dedup: the primary key (id) is the main uniqueness guarantee via
+          -- deterministic stable_id generation in the ingestion layer. This constraint
+          -- catches cases where the same upstream event is accidentally assigned different ids;
+          -- SQLite treats NULLs as distinct so rows with NULL upstream IDs rely on the PK alone.
+          UNIQUE(source_system_id, upstream_event_id, upstream_item_id, issue_id, event_type)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_issue_events_issue_time
+          ON issue_events(issue_id, occurred_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_issue_events_type_time
+          ON issue_events(event_type, occurred_at DESC);
+
+        CREATE TABLE IF NOT EXISTS issue_snapshots (
+          issue_id TEXT NOT NULL REFERENCES work_items(id),
+          snapshot_date TEXT NOT NULL,
+          source_system_id TEXT NOT NULL REFERENCES source_systems(id),
+          source_kind TEXT NOT NULL,
+          key TEXT,
+          title TEXT NOT NULL,
+          body_hash TEXT,
+          state TEXT NOT NULL,
+          status_name TEXT,
+          status_id TEXT,
+          resolution_name TEXT,
+          resolution_id TEXT,
+          priority_name TEXT,
+          priority_id TEXT,
+          item_type TEXT,
+          project_key TEXT,
+          project_name TEXT,
+          assignee_person_id TEXT REFERENCES people(id),
+          reporter_person_id TEXT REFERENCES people(id),
+          labels_json TEXT NOT NULL DEFAULT '[]',
+          components_json TEXT NOT NULL DEFAULT '[]',
+          fix_versions_json TEXT NOT NULL DEFAULT '[]',
+          sprint_names_json TEXT NOT NULL DEFAULT '[]',
+          product_names_json TEXT NOT NULL DEFAULT '[]',
+          assigned_team_names_json TEXT NOT NULL DEFAULT '[]',
+          customer_name TEXT,
+          parent_link TEXT,
+          epic_link TEXT,
+          epic_name TEXT,
+          epic_status TEXT,
+          created_at_source TEXT,
+          updated_at_source TEXT,
+          resolved_at_source TEXT,
+          due_at_source TEXT,
+          snapshot_source TEXT NOT NULL,
+          generated_at TEXT NOT NULL,
+          PRIMARY KEY(issue_id, snapshot_date)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_issue_snapshots_project_date
+          ON issue_snapshots(project_key, snapshot_date);
+
+        CREATE INDEX IF NOT EXISTS idx_issue_snapshots_source_date
+          ON issue_snapshots(source_system_id, snapshot_date);
+
+        CREATE TABLE IF NOT EXISTS issue_snapshot_jobs (
+          id TEXT PRIMARY KEY,
+          source_system_id TEXT REFERENCES source_systems(id),
+          job_kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          finished_at TEXT,
+          target_start_date TEXT,
+          target_end_date TEXT,
+          progress_json TEXT NOT NULL,
+          error_summary TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS indexable_documents (
             id TEXT PRIMARY KEY,
             source_system_id TEXT NOT NULL REFERENCES source_systems(id),
@@ -297,6 +390,9 @@ mod tests {
         "jira_issue_field_values",
         "jira_worklogs",
         "jira_remote_links",
+        "issue_events",
+        "issue_snapshots",
+        "issue_snapshot_jobs",
         "indexable_documents",
     ];
 
@@ -340,7 +436,7 @@ mod tests {
     #[test]
     fn creates_core_work_data_tables() {
         let conn = open_in_memory().expect("database should open");
-        assert_eq!(EXPECTED_TABLES.len(), 17, "expected 17 work-data tables");
+        assert_eq!(EXPECTED_TABLES.len(), 20, "expected 20 work-data tables");
         for table in EXPECTED_TABLES {
             assert!(
                 table_exists(&conn, table),
@@ -445,6 +541,60 @@ mod tests {
             .expect("select");
         assert_eq!(created, ts);
         assert_eq!(updated, ts);
+    }
+
+    #[test]
+    fn history_tables_and_indexes_are_created() {
+        let conn = crate::db::open_in_memory().expect("database should open");
+        super::setup_schema(&conn).expect("schema setup should succeed");
+
+        let issue_events_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'issue_events'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("issue_events table should exist");
+        assert!(issue_events_sql.contains("upstream_event_id TEXT"));
+        assert!(issue_events_sql.contains("payload_json TEXT NOT NULL"));
+        assert!(issue_events_sql.contains("UNIQUE(source_system_id, upstream_event_id, upstream_item_id, issue_id, event_type)"));
+
+        let issue_snapshots_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'issue_snapshots'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("issue_snapshots table should exist");
+        assert!(issue_snapshots_sql.contains("snapshot_date TEXT NOT NULL"));
+        assert!(issue_snapshots_sql.contains("labels_json TEXT NOT NULL DEFAULT '[]'"));
+        assert!(issue_snapshots_sql.contains("PRIMARY KEY(issue_id, snapshot_date)"));
+
+        let jobs_sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'issue_snapshot_jobs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("issue_snapshot_jobs table should exist");
+        assert!(jobs_sql.contains("job_kind TEXT NOT NULL"));
+        assert!(jobs_sql.contains("progress_json TEXT NOT NULL"));
+
+        for index_name in [
+            "idx_issue_events_issue_time",
+            "idx_issue_events_type_time",
+            "idx_issue_snapshots_project_date",
+            "idx_issue_snapshots_source_date",
+        ] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                    [index_name],
+                    |row| row.get(0),
+                )
+                .expect("sqlite_master index query should succeed");
+            assert_eq!(exists, 1, "missing index {index_name}");
+        }
     }
 
     #[test]

@@ -22,6 +22,12 @@ export const commands = {
 	sourceCredentialSecretSet: (sourceId: string, kind: SourceCredentialKind, value: string) => typedError<string, string>(__TAURI_INVOKE("source_credential_secret_set", { sourceId, kind, value })),
 	sourceCredentialDelete: (credentialRef: string) => typedError<null, string>(__TAURI_INVOKE("source_credential_delete", { credentialRef })),
 	sourceConfigRemove: (sourceId: string) => typedError<null, string>(__TAURI_INVOKE("source_config_remove", { sourceId })),
+	/**
+	 *  Wipe every row scoped to (source, project) so the next sync re-fetches
+	 *  the project from scratch. Source config and credentials are untouched.
+	 *  See `sources::reset` for the full table list.
+	 */
+	jiraSourceResetProjectData: (sourceId: string, projectKey: string) => typedError<ResetJiraProjectCounts, string>(__TAURI_INVOKE("jira_source_reset_project_data", { sourceId, projectKey })),
 	jiraSourceTestConnection: (source: JiraSourceConfig, pendingPat: string | null) => typedError<JiraConnectionTestResult, string>(__TAURI_INVOKE("jira_source_test_connection", { source, pendingPat })),
 	jiraIssueIngestionRun: (sourceId: string, options: {
 	fetch_remote_links?: boolean,
@@ -56,6 +62,10 @@ export const commands = {
 	collectionViewSave: (view: CollectionViewSaveInput) => typedError<CollectionViewRecord, string>(__TAURI_INVOKE("collection_view_save", { view })),
 	collectionViewDelete: (id: string) => typedError<null, string>(__TAURI_INVOKE("collection_view_delete", { id })),
 	collectionViewsSeedDefaults: (input: CollectionViewSeedInput) => typedError<CollectionViewRecord[], string>(__TAURI_INVOKE("collection_views_seed_defaults", { input })),
+	jiraIssueStatusTimeline: (issueId: string) => typedError<JiraIssueStatusTransition[], string>(__TAURI_INVOKE("jira_issue_status_timeline", { issueId })),
+	issueSnapshotsQuery: (filter: IssueSnapshotQuery) => typedError<IssueSnapshotListItem[], string>(__TAURI_INVOKE("issue_snapshots_query", { filter })),
+	issueHistoryRetentionGet: () => typedError<IssueHistoryRetentionConfig, string>(__TAURI_INVOKE("issue_history_retention_get")),
+	issueHistoryRetentionSave: (config: IssueHistoryRetentionConfig) => typedError<null, string>(__TAURI_INVOKE("issue_history_retention_save", { config })),
 	auditLogList: (filter: AuditLogListFilter) => typedError<AuditLogEntry[], string>(__TAURI_INVOKE("audit_log_list", { filter })),
 	auditLogMarkReverted: (input: AuditLogMarkRevertedInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("audit_log_mark_reverted", { input })),
 	jiraUpdateTitle: (input: JiraUpdateTitleInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_update_title", { input })),
@@ -180,6 +190,40 @@ export type ConnectionTestSummary = {
 
 export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
 
+export type IssueHistoryRetentionConfig = {
+	version: number,
+	daily_days: number,
+	compact_to_weekly_after_days: number,
+	weekly_anchor: string,
+};
+
+export type IssueSnapshotListItem = {
+	issue_id: string,
+	snapshot_date: string,
+	key: string | null,
+	title: string,
+	status_name: string | null,
+	state: string,
+	assignee_display_name: string | null,
+	priority_name: string | null,
+	project_key: string | null,
+};
+
+export type IssueSnapshotQuery = {
+	snapshot_date: string,
+	source_id: string | null,
+	project_key: string | null,
+	status_name: string | null,
+	state: string | null,
+	assignee_person_id: string | null,
+	priority_name: string | null,
+	label: string | null,
+	sprint_name: string | null,
+	product_name: string | null,
+	customer_name: string | null,
+	limit: number | null,
+};
+
 export type JiraAddCommentInput = {
 	common: MutationCommonInput,
 	body: string,
@@ -263,6 +307,16 @@ export type JiraIssueListItem = {
 	labels: string[],
 };
 
+export type JiraIssueStatusTransition = {
+	event_id: string,
+	issue_id: string,
+	occurred_at: string,
+	actor_display_name: string | null,
+	from_status: string | null,
+	to_status: string | null,
+	complete: boolean,
+};
+
 export type JiraLinkAsDuplicateInput = {
 	common: MutationCommonInput,
 	target_issue_key: string,
@@ -318,6 +372,23 @@ export type MutationCommonInput = {
 	issue_key: string,
 	source_feature: string | null,
 	batch_id: string | null,
+};
+
+export type ResetJiraProjectCounts = {
+	work_items: number,
+	work_item_terms: number,
+	work_item_relationships: number,
+	work_item_comments: number,
+	jira_issues: number,
+	jira_issue_field_values: number,
+	jira_worklogs: number,
+	jira_remote_links: number,
+	jira_project_field_mappings: number,
+	issue_events: number,
+	issue_snapshots: number,
+	indexable_documents: number,
+	ingestion_cursors: number,
+	ingestion_runs: number,
 };
 
 export type ReverseCommonInput = {

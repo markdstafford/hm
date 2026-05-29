@@ -41,9 +41,8 @@ The error includes the status code and category. It does not include the PAT, `A
 
 **Future Jira ingestion implementer**
 - Can create a Jira API client from a normalized server URL and PAT value.
-- Can fetch one issue by key or id with `expand=changelog`.
+- Can fetch one issue by key or id with `expand=changelog`, which on Jira Data Center returns the changelog inline.
 - Can search issues with JQL through `/rest/api/2/search` and follow Jira pagination.
-- Can fetch an issue's changelog through `/rest/api/2/issue/{id}/changelog` and follow Jira pagination.
 - Can list accessible projects through `/rest/api/2/project`.
 - Can receive typed response structs for issues, changelog entries, projects, and users.
 **Elena tests a Jira source**
@@ -59,9 +58,8 @@ The error includes the status code and category. It does not include the PAT, `A
 
 - Add a reusable Rust Jira Data Center 10.3 REST client.
 - Support PAT authentication through `Authorization: Bearer `.
-- Support `GET /rest/api/2/issue/{id}` with `expand=changelog`.
+- Support `GET /rest/api/2/issue/{id}` with `expand=changelog`. This is the only changelog path used in production: on Jira Data Center the dedicated `/rest/api/2/issue/{id}/changelog` resource is unreliable (404s on some deployments, including `jira.mongodb.org`), and the inline `expand=changelog` payload contains the full history (bounded by the server-side `jira.changelog.history.max` cap; default 100 entries).
 - Support `GET /rest/api/2/search` with JQL and pagination.
-- Support `GET /rest/api/2/issue/{id}/changelog` with pagination.
 - Support `GET /rest/api/2/project` for accessible project listing and source setup.
 - Add strongly typed serde response structs for issue, changelog entry, project, and user data needed by planned ingestion.
 - Respect Jira rate-limit headers when present and use conservative behavior when headers are absent.
@@ -167,12 +165,10 @@ impl JiraApiClient {
     pub fn get_issue_with_changelog(&self, issue_id_or_key: &str) -> Result;
     pub fn search_issues_page(&self, request: JiraSearchRequest) -> Result;
     pub fn search_issues_all(&self, request: JiraSearchRequest) -> Result, JiraApiError>;
-    pub fn get_issue_changelog_page(&self, issue_id_or_key: &str, start_at: u32, max_results: u32) -> Result;
-    pub fn get_issue_changelog_all(&self, issue_id_or_key: &str) -> Result, JiraApiError>;
     pub fn list_projects(&self) -> Result, JiraApiError>;
 }
 ```
-Names may change during implementation, but the client must expose page-level methods and all-pages helpers. Page-level methods let later sync jobs checkpoint progress. All-pages helpers keep connection tests and small fixture tests simple.
+Names may change during implementation, but the client must expose page-level methods and all-pages helpers for search. Page-level methods let later sync jobs checkpoint progress. All-pages helpers keep connection tests and small fixture tests simple. Changelog history is fetched only through `get_issue_with_changelog` — the dedicated `/rest/api/2/issue/{id}/changelog` resource was tried during initial implementation but consistently 404s on Jira Data Center deployments (including `jira.mongodb.org`), so it was removed.
 ### HTTP behavior
 
 Use the checked-in `ureq` dependency unless implementation finds a clear reason to change. Keep requests blocking and contained in Rust command/background-worker code until a later ingestion scheduler chooses an async model.
@@ -197,10 +193,6 @@ Fetch one issue with embedded changelog data when Jira returns it
 `GET`
 `/rest/api/2/search?jql=...&startAt=...&maxResults=...`
 Search issues by JQL with pagination
-
-`GET`
-`/rest/api/2/issue/{id}/changelog?startAt=...&maxResults=...`
-Fetch complete changelog pages
 
 `GET`
 `/rest/api/2/project`

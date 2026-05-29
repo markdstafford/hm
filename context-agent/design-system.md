@@ -158,7 +158,7 @@ For any interactive component with accessibility requirements (focus management,
 
 | Component | Wraps | Purpose |
 | --- | --- | --- |
-| `Form` | native `<form>` | Layout + submit semantics + `Form.Section` (fieldset/legend) + `Form.Actions` (action bar) + `Form.Error` (form-level alert). |
+| `Form` | native `<form>` | Layout + submit semantics + `Form.Section` (fieldset/legend, optional `description` prop renders a `<p>` between legend and children) + `Form.Actions` (action bar) + `Form.Error` (form-level alert). |
 | `TextField` | native `<input>` | Single-line text input. |
 | `Field` | composed (label + control + help/error) | Form field wrapper. Generates an id via `useId` and exposes it via a `(id) => ReactNode` render-prop so the child input is properly associated with the label. |
 | `Select` | `@radix-ui/react-select` | Single-select dropdown. |

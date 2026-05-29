@@ -9,6 +9,58 @@ pub mod issues;
 pub mod settings;
 pub mod sources;
 
+/// Run `replay_missing_snapshots` for every configured Jira project at startup.
+///
+/// This fills any snapshot dates that were missed while hm was closed —
+/// before the user runs a manual sync.  Errors are logged and ignored;
+/// the function must never prevent the app from starting.
+fn startup_replay_missing_snapshots(conn: &rusqlite::Connection) {
+    use sources::config::{load_sources_config, SourceConfig};
+    use sources::jira_ingestion::now_utc_rfc3339;
+
+    let now = now_utc_rfc3339();
+    // Take the leading 10 characters (YYYY-MM-DD) as today's UTC date.
+    let today = match now.get(..10) {
+        Some(d) => d.to_string(),
+        None => return,
+    };
+
+    let cfg = match load_sources_config(conn) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[startup] could not load sources config for snapshot replay: {e}");
+            return;
+        }
+    };
+
+    for source in &cfg.sources {
+        let SourceConfig::Jira(jira) = source;
+        for project in &jira.projects {
+            match issues::snapshots::replay_missing_snapshots(
+                conn,
+                &jira.id,
+                &project.key,
+                &today,
+                &now,
+            ) {
+                Ok(result) if result.snapshots_written > 0 => {
+                    eprintln!(
+                        "[startup] replayed {} snapshot(s) for {} / {}",
+                        result.snapshots_written, jira.name, project.key
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!(
+                        "[startup] snapshot replay failed for {}/{}: {e}",
+                        jira.name, project.key
+                    );
+                }
+            }
+        }
+    }
+}
+
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri_specta::{collect_commands, Builder};
@@ -37,6 +89,7 @@ pub fn run() {
         commands::source_credential_secret_set,
         commands::source_credential_delete,
         commands::source_config_remove,
+        commands::jira_source_reset_project_data,
         commands::jira_source_test_connection,
         commands::jira_issue_ingestion_run,
         commands::jira_issue_ingestion_cancel,
@@ -47,6 +100,10 @@ pub fn run() {
         commands::collection_view_save,
         commands::collection_view_delete,
         commands::collection_views_seed_defaults,
+        commands::jira_issue_status_timeline,
+        commands::issue_snapshots_query,
+        commands::issue_history_retention_get,
+        commands::issue_history_retention_save,
         audit::commands::audit_log_list,
         audit::commands::audit_log_mark_reverted,
         mutations::jira_update_title::jira_update_title,
@@ -80,6 +137,11 @@ pub fn run() {
             std::fs::create_dir_all(path.parent().expect("db path has no parent"))
                 .expect("failed to create data dir");
             let conn = db::open_at(&path).expect("failed to open database");
+
+            // Best-effort startup snapshot replay: fills any days that were missed
+            // while hm was closed, before the first manual sync of the session.
+            startup_replay_missing_snapshots(&conn);
+
             app.manage(Mutex::new(conn));
 
             // Production keychain secret store (service namespace "hm")
@@ -131,6 +193,7 @@ mod tests {
                     commands::source_credential_secret_set,
                     commands::source_credential_delete,
                     commands::source_config_remove,
+                    commands::jira_source_reset_project_data,
                     commands::jira_source_test_connection,
                     commands::jira_issue_ingestion_run,
                     commands::jira_issue_ingestion_cancel,
@@ -141,6 +204,10 @@ mod tests {
                     commands::collection_view_save,
                     commands::collection_view_delete,
                     commands::collection_views_seed_defaults,
+                    commands::jira_issue_status_timeline,
+                    commands::issue_snapshots_query,
+                    commands::issue_history_retention_get,
+                    commands::issue_history_retention_save,
                     crate::audit::commands::audit_log_list,
                     crate::audit::commands::audit_log_mark_reverted,
                     crate::mutations::jira_update_title::jira_update_title,
