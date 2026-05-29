@@ -384,6 +384,35 @@ pub fn model_dimension(conn: &Connection, model_id: &str) -> Result<usize, Embed
     ))
 }
 
+/// Return the stored dimension for any embedding model with the same
+/// profile+model+runner combination, regardless of dimension. Returns `Ok(dim)`
+/// when a match exists, `Err` when no such model is in the DB yet.
+///
+/// Used to detect dimension mismatches when a query-text provider returns a
+/// vector whose dimension differs from what was previously stored for the same
+/// logical model family.
+pub fn stored_dimension_for_profile(
+    conn: &Connection,
+    provider_profile: &str,
+    provider_model: &str,
+    runner: &str,
+    distance_metric: &str,
+) -> Result<usize, EmbeddingError> {
+    use rusqlite::OptionalExtension;
+    let dim: Option<i64> = conn.query_row(
+        "SELECT dimension FROM embedding_models \
+          WHERE provider_profile = ?1 AND provider_model = ?2 AND runner = ?3 AND distance_metric = ?4 \
+          LIMIT 1",
+        rusqlite::params![provider_profile, provider_model, runner, distance_metric],
+        |r| r.get(0),
+    ).optional().map_err(EmbeddingError::from)?;
+
+    dim.map(|d| d as usize).ok_or_else(|| EmbeddingError::new(
+        EmbeddingErrorCategory::DimensionMismatch,
+        "No stored model found for this profile.",
+    ))
+}
+
 /// Test helper: seed a source system, work item, and indexable document.
 /// Available in test builds only, placed outside `mod tests` so other test modules can import it.
 #[cfg(test)]

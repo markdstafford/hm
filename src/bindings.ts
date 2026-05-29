@@ -79,6 +79,11 @@ export const commands = {
 	 *  `source_system_id` to scope the query to a single ingestion source.
 	 */
 	embeddingStatus: (sourceSystemId: string | null) => typedError<EmbeddingStatusSummary, string>(__TAURI_INVOKE("embedding_status", { sourceSystemId })),
+	/**
+	 *  Find nearest-neighbor embedding candidates for a document or query text.
+	 *  Pass exactly one of `query.document_id` or `query.query_text`.
+	 */
+	embeddingNearestNeighbors: (query: EmbeddingCandidateQuery) => typedError<EmbeddingCandidate[], string>(__TAURI_INVOKE("embedding_nearest_neighbors", { query })),
 	auditLogList: (filter: AuditLogListFilter) => typedError<AuditLogEntry[], string>(__TAURI_INVOKE("audit_log_list", { filter })),
 	auditLogMarkReverted: (input: AuditLogMarkRevertedInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("audit_log_mark_reverted", { input })),
 	jiraUpdateTitle: (input: JiraUpdateTitleInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_update_title", { input })),
@@ -202,6 +207,28 @@ export type ConnectionTestSummary = {
 };
 
 export type CredentialSource = { type: "Keychain"; key_ref: string } | { type: "Env"; var_name: string };
+
+export type EmbeddingCandidate = {
+	document_id: string,
+	entity_kind: string,
+	entity_id: string,
+	work_item_id: string | null,
+	source_system_id: string,
+	content_hash: string,
+	model_id: string,
+	distance: number | null,
+};
+
+export type EmbeddingCandidateQuery = {
+	document_id: string | null,
+	query_text: string | null,
+	source_system_id: string | null,
+	entity_kinds: string[],
+	work_item_kind: string | null,
+	limit: number,
+	exclude_entity_id: string | null,
+	include_self: boolean,
+};
 
 export type EmbeddingRunOptions = {
 	source_system_id: string | null,

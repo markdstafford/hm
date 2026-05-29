@@ -867,6 +867,59 @@ pub fn embedding_status(
         .map_err(|e| e.to_string())
 }
 
+/// Find nearest-neighbor embedding candidates for a document or query text.
+/// Pass exactly one of `query.document_id` or `query.query_text`.
+#[tauri::command]
+#[specta::specta]
+pub fn embedding_nearest_neighbors(
+    query: crate::embeddings::service::EmbeddingCandidateQuery,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<Vec<crate::embeddings::service::EmbeddingCandidate>, String> {
+    use crate::ai::config::load_ai_provider_config;
+    use crate::ai::resolver::resolve_for_profile_from_config;
+    use crate::embeddings::provider::{EmbeddingProvider, EmbeddingRequest, EmbeddingResponse};
+    use crate::embeddings::errors::EmbeddingError;
+
+    // Pre-load the AI provider config while holding the DB lock briefly, then
+    // release it. This avoids a deadlock: nearest_neighbors holds conn for the
+    // KNN query and the embedded call happens inside the same lock scope.
+    let ai_config = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        load_ai_provider_config(&conn).map_err(|e| e.to_string())?
+    };
+    let store_arc = store.0.clone();
+
+    struct PreloadedEmbeddingProvider {
+        ai_config: crate::ai::config::AiProviderConfig,
+        store: std::sync::Arc<dyn crate::settings::secrets::SecretStore + Send + Sync>,
+    }
+    impl EmbeddingProvider for PreloadedEmbeddingProvider {
+        fn embed(&self, request: EmbeddingRequest) -> Result<EmbeddingResponse, EmbeddingError> {
+            let resolved = resolve_for_profile_from_config(
+                self.ai_config.clone(),
+                self.store.as_ref(),
+                self.ai_config
+                    .routing
+                    .get(crate::embeddings::EMBEDDING_DEFAULT_ROUTE)
+                    .ok_or_else(|| EmbeddingError::new(
+                        crate::embeddings::errors::EmbeddingErrorCategory::ProviderRejected,
+                        "No AI profile routed for embeddings",
+                    ))?
+                    .as_str(),
+            )
+            .map_err(EmbeddingError::from)?;
+            crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::default()
+                .run(&resolved, request)
+        }
+    }
+
+    let provider = PreloadedEmbeddingProvider { ai_config, store: store_arc };
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    crate::embeddings::service::nearest_neighbors(&conn, &provider, query)
+        .map_err(|e| e.to_string())
+}
+
 // Ensure specta sees all source config types for TypeScript binding generation.
 // These types are used in the commands above but referenced here explicitly so
 // the specta type registry picks them up even if inference misses a variant.
@@ -900,6 +953,8 @@ const _: () = {
         _assert_specta::<crate::embeddings::service::EmbeddingRunSummary>();
         _assert_specta::<crate::embeddings::service::EmbeddingRunStatus>();
         _assert_specta::<crate::embeddings::service::EmbeddingStatusSummary>();
+        _assert_specta::<crate::embeddings::service::EmbeddingCandidateQuery>();
+        _assert_specta::<crate::embeddings::service::EmbeddingCandidate>();
     }
 };
 

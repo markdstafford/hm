@@ -56,7 +56,7 @@ pub struct EmbeddingCandidateQuery {
     pub source_system_id: Option<String>,
     pub entity_kinds: Vec<String>,
     pub work_item_kind: Option<String>,
-    pub limit: usize,
+    pub limit: u32,
     pub exclude_entity_id: Option<String>,
     pub include_self: bool,
 }
@@ -108,11 +108,25 @@ pub fn nearest_neighbors(
             "l2",
         );
         let vector = response.vectors.drain(..).next().ok_or_else(EmbeddingError::invalid_response)?;
+        // Check if this profile+model+runner combination has stored embeddings
+        // with a different dimension. `stable_model_id` encodes dimension in the
+        // id, so we look up by profile/model/runner instead of by model_id.
+        if let Ok(stored_dim) = crate::embeddings::repository::stored_dimension_for_profile(
+            conn,
+            &response.profile,
+            &response.model,
+            "OpenAiEmbeddings",
+            "l2",
+        ) {
+            if stored_dim != response.dimension {
+                return Err(EmbeddingError::dimension_mismatch());
+            }
+        }
         (vector, model_id)
     };
 
     // Get KNN candidates from sqlite-vec; over-fetch to allow for filtering/self-exclusion
-    let fetch_limit = if query.include_self { query.limit } else { query.limit + 1 };
+    let fetch_limit = if query.include_self { query.limit as usize } else { query.limit as usize + 1 };
     let raw_matches = crate::embeddings::sqlite_vec::nearest_by_vector(conn, &vector, fetch_limit)
         .unwrap_or_default(); // gracefully handle unavailable sqlite-vec
 
@@ -198,7 +212,7 @@ pub fn nearest_neighbors(
         .collect();
 
     candidates.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
-    candidates.truncate(query.limit);
+    candidates.truncate(query.limit as usize);
 
     Ok(candidates)
 }
@@ -745,6 +759,83 @@ mod tests {
         assert!(
             err.to_string().to_lowercase().contains("exactly one") || err.to_string().contains("InvalidQuery"),
             "should mention query requirement: {err}"
+        );
+    }
+
+    #[test]
+    fn nearest_neighbors_query_text_generates_vector_without_storing_query() {
+        let conn = open_with_embedding_schema();
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        // First embed doc_1 so there are neighbors to find
+        let provider = FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small");
+        let embed_opts = EmbeddingRunOptions {
+            source_system_id: None, entity_kind: None, limit: Some(10), force_rebuild: false,
+        };
+        refresh_embeddings_with_provider(&conn, &provider, embed_opts, "2026-01-01T00:00:00Z")
+            .expect("embed");
+
+        // Count documents/embeddings before query
+        let doc_count_before: i64 = conn.query_row(
+            "SELECT count(*) FROM indexable_documents", [], |r| r.get(0)
+        ).unwrap();
+        let emb_count_before: i64 = conn.query_row(
+            "SELECT count(*) FROM document_embeddings", [], |r| r.get(0)
+        ).unwrap();
+
+        // Query by text
+        let query = EmbeddingCandidateQuery {
+            document_id: None,
+            query_text: Some("login issue".into()),
+            source_system_id: None,
+            entity_kinds: vec![],
+            work_item_kind: None,
+            limit: 5,
+            exclude_entity_id: None,
+            include_self: true,
+        };
+        let _candidates = nearest_neighbors(&conn, &provider, query).expect("query text search");
+
+        // Counts unchanged — query text was not stored
+        let doc_count_after: i64 = conn.query_row(
+            "SELECT count(*) FROM indexable_documents", [], |r| r.get(0)
+        ).unwrap();
+        let emb_count_after: i64 = conn.query_row(
+            "SELECT count(*) FROM document_embeddings", [], |r| r.get(0)
+        ).unwrap();
+        assert_eq!(doc_count_before, doc_count_after);
+        assert_eq!(emb_count_before, emb_count_after);
+    }
+
+    #[test]
+    fn query_text_dimension_mismatch_fails_safely() {
+        let conn = open_with_embedding_schema();
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        // Embed with dimension 3
+        let provider3 = FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small");
+        let embed_opts = EmbeddingRunOptions {
+            source_system_id: None, entity_kind: None, limit: Some(10), force_rebuild: false,
+        };
+        refresh_embeddings_with_provider(&conn, &provider3, embed_opts, "2026-01-01T00:00:00Z")
+            .expect("embed");
+
+        // Now query with dimension 4 (mismatch) — same profile/model name but different dimension
+        let provider4 = FakeEmbeddingProvider::new(4, "embed-small", "text-embedding-3-small");
+        let query = EmbeddingCandidateQuery {
+            document_id: None,
+            query_text: Some("login issue".into()),
+            source_system_id: None,
+            entity_kinds: vec![],
+            work_item_kind: None,
+            limit: 5,
+            exclude_entity_id: None,
+            include_self: true,
+        };
+        let err = nearest_neighbors(&conn, &provider4, query).unwrap_err();
+        assert!(
+            err.to_string().contains("dimension"),
+            "error should mention dimension: {err}"
         );
     }
 
