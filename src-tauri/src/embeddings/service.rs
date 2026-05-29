@@ -659,8 +659,8 @@ mod tests {
             ).unwrap();
         }
 
-        // Embed all 3 using fake provider
-        let provider = FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small");
+        // Embed all 3 using fake provider — dimension must match the vec0 table DDL (1536)
+        let provider = FakeEmbeddingProvider::new(1536, "embed-small", "text-embedding-3-small");
         let options = EmbeddingRunOptions {
             source_system_id: None,
             entity_kind: None,

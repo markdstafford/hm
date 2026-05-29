@@ -296,13 +296,16 @@ pub fn write_embedding_batch(
             )
             .map_err(EmbeddingError::from)?;
 
-        // Write to sqlite-vec; silently ignore if the extension is unavailable in this env
         let vec_json = crate::embeddings::sqlite_vec::vector_to_json(vector);
-        conn.execute(
+        match conn.execute(
             "INSERT OR REPLACE INTO vec_document_embeddings (rowid, embedding_id, embedding) VALUES (?1, ?2, ?3)",
             rusqlite::params![rowid, emb_id, vec_json],
-        )
-        .unwrap_or_default();
+        ) {
+            Ok(_) => {}
+            // Silently skip only when sqlite-vec is unavailable (table does not exist).
+            Err(e) if e.to_string().contains("no such table") => {}
+            Err(e) => return Err(EmbeddingError::from(e)),
+        }
 
         // Mark the source document as fully embedded
         conn.execute(
