@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod audit;
 pub mod collections;
+pub mod embeddings;
 pub mod mutations;
 pub mod commands;
 pub mod db;
