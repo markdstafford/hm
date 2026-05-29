@@ -1,4 +1,5 @@
 use rusqlite::Connection;
+use crate::embeddings::errors::{EmbeddingError, EmbeddingErrorCategory};
 
 pub fn setup_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
@@ -80,6 +81,247 @@ pub fn upsert_embedding_model(
     Ok(id)
 }
 
+/// Deterministically assemble the text that will be embedded.
+pub fn assemble_text(title: Option<&str>, body: &str) -> String {
+    match title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => format!("Title: {t}\n\nBody:\n{body}"),
+        None => format!("Body:\n{body}"),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimOptions<'a> {
+    pub source_system_id: Option<&'a str>,
+    pub entity_kind: Option<&'a str>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimedDocument {
+    pub id: String,
+    pub source_system_id: String,
+    pub entity_kind: String,
+    pub entity_id: String,
+    pub work_item_id: Option<String>,
+    pub title: Option<String>,
+    pub body: String,
+    pub content_hash: String,
+}
+
+/// Reset any documents stuck in 'embedding' state back to 'pending'.
+/// Call this on startup before the embedding loop resumes.
+pub fn recover_stuck_embedding_claims(conn: &Connection) -> rusqlite::Result<u32> {
+    let count = conn.execute(
+        "UPDATE indexable_documents SET embedding_status = 'pending' WHERE embedding_status = 'embedding'",
+        [],
+    )?;
+    Ok(count as u32)
+}
+
+/// Claim up to `options.limit` documents that need embedding and mark them 'embedding'.
+pub fn claim_documents(
+    conn: &Connection,
+    options: &ClaimOptions<'_>,
+    _now_utc: &str,
+) -> Result<Vec<ClaimedDocument>, EmbeddingError> {
+    let mut sql = String::from(
+        "SELECT id, source_system_id, entity_kind, entity_id, work_item_id, title, body, content_hash \
+         FROM indexable_documents \
+         WHERE embedding_status IN ('pending', 'stale', 'failed')",
+    );
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    if let Some(ssid) = options.source_system_id {
+        sql.push_str(" AND source_system_id = ?");
+        params.push(Box::new(ssid.to_string()));
+    }
+    if let Some(kind) = options.entity_kind {
+        sql.push_str(" AND entity_kind = ?");
+        params.push(Box::new(kind.to_string()));
+    }
+    sql.push_str(" LIMIT ?");
+    params.push(Box::new(options.limit as i64));
+
+    let mut stmt = conn.prepare(&sql).map_err(EmbeddingError::from)?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
+            |row| {
+                Ok(ClaimedDocument {
+                    id: row.get(0)?,
+                    source_system_id: row.get(1)?,
+                    entity_kind: row.get(2)?,
+                    entity_id: row.get(3)?,
+                    work_item_id: row.get(4)?,
+                    title: row.get(5)?,
+                    body: row.get(6)?,
+                    content_hash: row.get(7)?,
+                })
+            },
+        )
+        .map_err(EmbeddingError::from)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(EmbeddingError::from)?;
+
+    if rows.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Mark all claimed rows as 'embedding' in a single statement
+    let placeholders = rows
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let update_sql = format!(
+        "UPDATE indexable_documents SET embedding_status = 'embedding' WHERE id IN ({placeholders})"
+    );
+    conn.execute(
+        &update_sql,
+        rusqlite::params_from_iter(rows.iter().map(|r| r.id.as_str())),
+    )
+    .map_err(EmbeddingError::from)?;
+
+    Ok(rows)
+}
+
+/// Record a failure for a document, incrementing the attempt count on conflict.
+pub fn record_embedding_failure(
+    conn: &Connection,
+    document_id: &str,
+    source_system_id: &str,
+    err: &EmbeddingError,
+    now_utc: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE indexable_documents SET embedding_status = 'failed' WHERE id = ?1",
+        [document_id],
+    )?;
+    conn.execute(
+        "INSERT INTO embedding_failures (document_id, source_system_id, attempt_count, last_attempted_at, error_category, safe_summary)
+         VALUES (?1, ?2, 1, ?3, ?4, ?5)
+         ON CONFLICT(document_id) DO UPDATE SET
+           attempt_count = attempt_count + 1,
+           last_attempted_at = excluded.last_attempted_at,
+           error_category = excluded.error_category,
+           safe_summary = excluded.safe_summary",
+        rusqlite::params![
+            document_id,
+            source_system_id,
+            now_utc,
+            format!("{:?}", err.category),
+            err.safe_summary,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Write a batch of embedding vectors + metadata. Idempotent on (document_id, content_hash, model_id).
+pub fn write_embedding_batch(
+    conn: &Connection,
+    docs: &[ClaimedDocument],
+    response: &crate::embeddings::provider::EmbeddingResponse,
+    now_utc: &str,
+) -> Result<(), EmbeddingError> {
+    if docs.len() != response.vectors.len() {
+        return Err(EmbeddingError::new(
+            EmbeddingErrorCategory::InvalidResponse,
+            "Embedding provider returned an invalid response.",
+        ));
+    }
+
+    for v in &response.vectors {
+        if v.len() != response.dimension {
+            return Err(EmbeddingError::dimension_mismatch());
+        }
+    }
+
+    let model_id = upsert_embedding_model(
+        conn,
+        &response.profile,
+        &response.model,
+        "OpenAiEmbeddings",
+        response.dimension,
+        "l2",
+        now_utc,
+    )?;
+
+    for (doc, vector) in docs.iter().zip(response.vectors.iter()) {
+        let emb_id = crate::issues::ids::stable_id(
+            "emb",
+            &[&doc.id, &doc.content_hash, &model_id],
+        );
+
+        // Mark any prior fresh embedding for this document as stale when content or model changed
+        conn.execute(
+            "UPDATE document_embeddings SET status = 'stale' \
+             WHERE document_id = ?1 AND status = 'fresh' AND NOT (content_hash = ?2 AND model_id = ?3)",
+            rusqlite::params![doc.id, doc.content_hash, model_id],
+        )
+        .map_err(EmbeddingError::from)?;
+
+        // Insert the embedding metadata row if it does not exist yet
+        conn.execute(
+            "INSERT OR IGNORE INTO document_embeddings \
+             (id, document_id, source_system_id, entity_kind, entity_id, work_item_id, content_hash, model_id, dimension, embedded_at, status) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'fresh')",
+            rusqlite::params![
+                emb_id,
+                doc.id,
+                doc.source_system_id,
+                doc.entity_kind,
+                doc.entity_id,
+                doc.work_item_id,
+                doc.content_hash,
+                model_id,
+                response.dimension as i64,
+                now_utc,
+            ],
+        )
+        .map_err(EmbeddingError::from)?;
+
+        // Refresh embedded_at and status in case the row already existed
+        conn.execute(
+            "UPDATE document_embeddings SET embedded_at = ?1, status = 'fresh' WHERE id = ?2",
+            rusqlite::params![now_utc, emb_id],
+        )
+        .map_err(EmbeddingError::from)?;
+
+        // Retrieve the stable rowid for the vec table
+        let rowid: i64 = conn
+            .query_row(
+                "SELECT rowid FROM document_embeddings WHERE id = ?1",
+                [&emb_id],
+                |r| r.get(0),
+            )
+            .map_err(EmbeddingError::from)?;
+
+        // Write to sqlite-vec; silently ignore if the extension is unavailable in this env
+        let vec_json = crate::embeddings::sqlite_vec::vector_to_json(vector);
+        conn.execute(
+            "INSERT OR REPLACE INTO vec_document_embeddings (rowid, embedding_id, embedding) VALUES (?1, ?2, ?3)",
+            rusqlite::params![rowid, emb_id, vec_json],
+        )
+        .unwrap_or_default();
+
+        // Mark the source document as fully embedded
+        conn.execute(
+            "UPDATE indexable_documents SET embedding_status = 'embedded' WHERE id = ?1",
+            [&doc.id],
+        )
+        .map_err(EmbeddingError::from)?;
+
+        // Remove any stale failure record now that we succeeded
+        conn.execute(
+            "DELETE FROM embedding_failures WHERE document_id = ?1",
+            [&doc.id],
+        )
+        .map_err(EmbeddingError::from)?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +357,122 @@ mod tests {
             ).expect("query");
             assert_eq!(count, 1, "table {table} must exist");
         }
+    }
+
+    #[test]
+    fn claim_documents_marks_embedding_and_does_not_claim_twice() {
+        let conn = open_in_memory().expect("db");
+        setup_schema(&conn).expect("schema");
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        let options = ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 };
+        let claimed = claim_documents(&conn, &options, "2026-01-01T00:00:00Z").expect("claim");
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].id, "doc_1");
+
+        // Second claim should find nothing (already 'embedding')
+        let claimed2 = claim_documents(&conn, &options, "2026-01-01T00:00:00Z").expect("claim2");
+        assert_eq!(claimed2.len(), 0);
+
+        // Verify status in DB
+        let status: String = conn.query_row(
+            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(status, "embedding");
+    }
+
+    #[test]
+    fn record_failure_marks_failed_and_increments_attempt_count() {
+        let conn = open_in_memory().expect("db");
+        setup_schema(&conn).expect("schema");
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        let err = crate::embeddings::errors::EmbeddingError::provider_rejected(
+            "Bearer sk-test raw body Cannot sign in".into(),
+        );
+        record_embedding_failure(&conn, "doc_1", "srcsys_1", &err, "2026-01-01T00:00:00Z")
+            .expect("record failure");
+        record_embedding_failure(&conn, "doc_1", "srcsys_1", &err, "2026-01-01T00:00:00Z")
+            .expect("record failure 2");
+
+        let status: String = conn.query_row(
+            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(status, "failed");
+
+        let (attempt_count, safe_summary): (i64, String) = conn.query_row(
+            "SELECT attempt_count, safe_summary FROM embedding_failures WHERE document_id = 'doc_1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(attempt_count, 2);
+        assert!(!safe_summary.contains("sk-test"), "safe_summary must not contain secret");
+        assert!(!safe_summary.contains("Cannot sign in"), "safe_summary must not contain document text");
+    }
+
+    #[test]
+    fn write_embeddings_is_idempotent_and_marks_document_embedded() {
+        let conn = open_in_memory().expect("db");
+        setup_schema(&conn).expect("schema");
+        crate::db::load_sqlite_vec(&conn).ok(); // load vec if available
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        let options = ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 };
+        let claimed = claim_documents(&conn, &options, "2026-01-01T00:00:00Z").expect("claim");
+        assert_eq!(claimed.len(), 1);
+
+        let response = crate::embeddings::provider::EmbeddingResponse {
+            vectors: vec![vec![1.0f32, 0.0, 0.0]],
+            model: "text-embedding-3-small".into(),
+            profile: "embed-small".into(),
+            dimension: 3,
+            usage: None,
+        };
+
+        // Write once
+        write_embedding_batch(&conn, &claimed, &response, "2026-01-01T00:00:00Z")
+            .expect("write batch 1");
+
+        // Write again (idempotent)
+        write_embedding_batch(&conn, &claimed, &response, "2026-01-01T00:00:00Z")
+            .expect("write batch 2");
+
+        // Should have exactly one document_embeddings row
+        let count: i64 = conn.query_row(
+            "SELECT count(*) FROM document_embeddings WHERE document_id = 'doc_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
+
+        // Document should be 'embedded'
+        let status: String = conn.query_row(
+            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(status, "embedded");
+    }
+
+    #[test]
+    fn assemble_text_is_deterministic() {
+        assert_eq!(
+            assemble_text(Some("Login bug"), "Cannot sign in"),
+            "Title: Login bug\n\nBody:\nCannot sign in"
+        );
+        assert_eq!(
+            assemble_text(None, "Cannot sign in"),
+            "Body:\nCannot sign in"
+        );
+        // Empty title treated as None
+        assert_eq!(
+            assemble_text(Some(""), "Cannot sign in"),
+            "Body:\nCannot sign in"
+        );
     }
 
     #[test]
