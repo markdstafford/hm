@@ -334,6 +334,19 @@ The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `Pro
 
 ---
 
+## Embedding pipeline (added 2026-05-29, issue #12)
+
+- `src-tauri/src/embeddings/errors.rs` defines safe embedding error categories. Display strings are redacted and must not include provider secrets, Authorization headers, raw provider bodies, or full document text.
+- `src-tauri/src/embeddings/provider.rs` defines `EmbeddingProvider`, embedding request/response DTOs, deterministic fake vectors for tests, and the ADR-006-backed `AiEmbeddingProvider` for `embedding.default`.
+- `src-tauri/src/ai/runners/openai_embeddings.rs` implements OpenAI-compatible `/embeddings` for profiles using `AiEndpointProtocol::OpenAiEmbeddingsCompatible` and `AiRunner::OpenAiEmbeddings`.
+- `src-tauri/src/embeddings/repository.rs` owns queue claiming from `indexable_documents`, model metadata in `embedding_models`, vector metadata in `document_embeddings`, and retry metadata in `embedding_failures`.
+- `src-tauri/src/embeddings/sqlite_vec.rs` isolates sqlite-vec virtual table creation and nearest-neighbor SQL.
+- `src-tauri/src/embeddings/service.rs` owns refresh summaries, status summaries, and source-neutral candidate generation. It returns vector candidates only; issue #13 owns duplicate scoring and structural reranking.
+- Route name: `embedding.default` resolves through the same credentials/endpoints/profiles/routing config as chat tasks. Chat-only profiles routed to `embedding.default` are rejected as unsupported.
+- Tauri commands: `embedding_refresh_run`, `embedding_status`, `embedding_nearest_neighbors`.
+
+---
+
 ## Jira issue history (added 2026-05-28, issue #11)
 
 - `src-tauri/src/issues/history.rs` — issue event/snapshot repository helpers, retention config load/save (`IssueHistoryRetentionConfig`, key `"issue_history.retention"`), snapshot job lifecycle, `coarse_state` helper, `IssueHistoryError` safe error type.

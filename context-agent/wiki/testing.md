@@ -341,6 +341,18 @@ Configure a Jira source to `http://127.0.0.1:<port>`, save a fake PAT through th
 
 ---
 
+## Embedding tests (added 2026-05-29, issue #12)
+
+- Run targeted embedding tests: `cargo test --manifest-path src-tauri/Cargo.toml embeddings:: -- --nocapture`
+- The deterministic fake provider in `src-tauri/src/embeddings/provider.rs` produces stable vectors from text and requires no network or provider credentials.
+- OpenAI-compatible embedding runner tests use `tiny_http`; they assert the Authorization header is sent but never print or persist the secret value.
+- sqlite-vec tests load the bundled extension through `crate::db::load_sqlite_vec`. If sqlite-vec cannot load in a sandbox, tests that exercise unavailable behavior return the safe `sqlite-vec is unavailable in this environment.` error rather than panic.
+- Candidate-generation tests use known fixture vectors and verify neighbor ordering, self-exclusion, source/entity filters, and missing fresh embedding errors.
+- Issue #13 consumes `EmbeddingCandidate` results and performs structural reranking/confidence scoring; issue #12 tests do not assert duplicate confidence.
+- `assert_safe_message` helper in `src-tauri/src/embeddings/errors.rs` (test-only) checks 7 forbidden strings: `Authorization`, `Bearer`, `sk-test-secret`, `api_key`, `raw provider body`, `Cannot sign in`, `Full issue text`.
+
+---
+
 ## Jira issue history tests (added 2026-05-28, issue #11)
 
 ### Targeted Rust commands
