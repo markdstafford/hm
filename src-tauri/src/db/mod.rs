@@ -23,12 +23,22 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     crate::issues::schema::setup_schema(conn)?;
     crate::audit::repository::setup_schema(conn)?;
     crate::embeddings::repository::setup_schema(conn)?;
+    // Best-effort: register the sqlite-vec extension globally so it is available
+    // for subsequent operations. The vec_document_embeddings virtual table is
+    // created by setup_vec_table (called separately in open_at for production, or
+    // lazily by write_embedding_batch when needed).
+    let _ = load_sqlite_vec(conn);
     Ok(())
 }
 
 pub fn open_at(path: &std::path::Path) -> Result<Connection> {
     let conn = Connection::open(path)?;
     setup_schema(&conn)?;
+    // Production startup: ensure the sqlite-vec virtual table exists.
+    // Silently ignored when sqlite-vec is unavailable (e.g. sandboxed CI).
+    if conn.query_row("SELECT vec_version()", [], |_| Ok(())).is_ok() {
+        let _ = crate::embeddings::sqlite_vec::setup_vec_table(&conn);
+    }
     Ok(conn)
 }
 
@@ -166,5 +176,89 @@ mod tests {
                 eprintln!("WARN: sqlite-vec extension did not load ({e}). See testing.md.");
             }
         }
+    }
+
+    #[test]
+    fn production_setup_path_creates_vec_table_and_vectors_are_searchable() {
+        // Use a temporary file to exercise the open_at production path (which
+        // calls setup_vec_table after setup_schema). This proves vectors are
+        // actually written and searchable end-to-end.
+        let tmp = std::env::temp_dir().join(format!(
+            "hm_test_production_vec_{}.db",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        let conn = match open_at(&tmp) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("SKIP: could not open temp DB ({e})");
+                return;
+            }
+        };
+
+        // Check if sqlite-vec was loaded by the production setup path
+        let vec_available = conn.query_row("SELECT vec_version()", [], |_| Ok(())).is_ok();
+        if !vec_available {
+            eprintln!("SKIP: sqlite-vec not available in this environment");
+            let _ = std::fs::remove_file(&tmp);
+            return;
+        }
+
+        // Verify vec_document_embeddings table exists after open_at (production path)
+        let table_count: i64 = conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='vec_document_embeddings'",
+            [],
+            |r| r.get(0),
+        ).expect("query");
+        assert_eq!(table_count, 1, "vec_document_embeddings must exist after open_at");
+
+        // Seed the minimum data needed to write an embedding
+        use crate::embeddings::repository::{seed_source_and_document, claim_documents, write_embedding_batch, ClaimOptions};
+        use crate::embeddings::provider::EmbeddingResponse;
+
+        seed_source_and_document(&conn, "doc_prod", "hash_prod");
+
+        let opts = ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 };
+        let claimed = claim_documents(&conn, &opts, "2026-01-01T00:00:00Z").expect("claim");
+        assert_eq!(claimed.len(), 1);
+
+        // Use dimension 1536 to match the production vec0 table DDL
+        let vec: Vec<f32> = (0..1536).map(|i| (i as f32) / 1536.0).collect();
+        let response = EmbeddingResponse {
+            vectors: vec![vec.clone()],
+            model: "text-embedding-3-small".into(),
+            profile: "embed-small".into(),
+            dimension: 1536,
+            usage: None,
+        };
+
+        // write_embedding_batch must succeed (not silently skip or mark without writing)
+        write_embedding_batch(&conn, &claimed, &response, "2026-01-01T00:00:00Z")
+            .expect("write_embedding_batch must succeed on the production setup path");
+
+        // Verify the vector row was actually written
+        let vec_count: i64 = conn.query_row(
+            "SELECT count(*) FROM vec_document_embeddings",
+            [],
+            |r| r.get(0),
+        ).expect("count vec rows");
+        assert_eq!(vec_count, 1, "vector row must be present after write_embedding_batch");
+
+        // Verify the document was marked embedded
+        let status: String = conn.query_row(
+            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_prod'",
+            [],
+            |r| r.get(0),
+        ).expect("doc status");
+        assert_eq!(status, "embedded");
+
+        // Verify nearest-neighbor search returns the vector
+        let neighbors = crate::embeddings::sqlite_vec::nearest_by_vector(&conn, &vec, 5)
+            .expect("nearest_by_vector must succeed when vec table exists");
+        assert_eq!(neighbors.len(), 1, "should find the written vector");
+
+        let _ = std::fs::remove_file(&tmp);
     }
 }

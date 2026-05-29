@@ -473,17 +473,39 @@ pub fn jira_issue_ingestion_run(
             // a per-project error the run row is already marked partial /
             // failed in the database. We log via eprintln for dev visibility
             // and continue with the next project.
-            if let Err(err) = service.ingest_project(
+            let ingestion_ok = service.ingest_project(
                 &db_access,
                 &source_system_id_for_worker,
                 project_key,
                 project_name,
                 &now,
                 &cancellation_for_worker,
-            ) {
-                eprintln!(
-                    "ingestion worker: project {project_key} failed: {err}"
-                );
+            ).is_ok();
+
+            if !ingestion_ok {
+                eprintln!("ingestion worker: project {project_key} failed");
+            }
+
+            // Best-effort post-ingestion embedding refresh. A provider failure
+            // must not roll back ingestion success — errors are logged only.
+            if ingestion_ok {
+                let store_for_embed = app_for_worker.state::<ManagedSecretStore>();
+                if let Ok(conn) = db.lock() {
+                    let embed_opts = crate::embeddings::service::EmbeddingRunOptions {
+                        source_system_id: Some(source_system_id_for_worker.clone()),
+                        entity_kind: None,
+                        limit: Some(25),
+                        force_rebuild: false,
+                    };
+                    if let Err(e) = crate::embeddings::service::refresh_embeddings(
+                        &conn,
+                        store_for_embed.0.as_ref(),
+                        embed_opts,
+                        &now_utc_rfc3339(),
+                    ) {
+                        eprintln!("embedding refresh after ingestion of {project_key} failed (non-fatal): {e}");
+                    }
+                }
             }
         }
 

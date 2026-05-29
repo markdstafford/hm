@@ -297,13 +297,34 @@ pub fn write_embedding_batch(
             .map_err(EmbeddingError::from)?;
 
         let vec_json = crate::embeddings::sqlite_vec::vector_to_json(vector);
+        // vec0 virtual tables don't support INSERT OR REPLACE for existing rowids.
+        // Delete any existing row first (ignore error — row may not exist yet or
+        // table may not exist yet, both handled below).
+        let _ = conn.execute(
+            "DELETE FROM vec_document_embeddings WHERE rowid = ?1",
+            rusqlite::params![rowid],
+        );
         match conn.execute(
-            "INSERT OR REPLACE INTO vec_document_embeddings (rowid, embedding_id, embedding) VALUES (?1, ?2, ?3)",
+            "INSERT INTO vec_document_embeddings (rowid, embedding_id, embedding) VALUES (?1, ?2, ?3)",
             rusqlite::params![rowid, emb_id, vec_json],
         ) {
             Ok(_) => {}
-            // Silently skip only when sqlite-vec is unavailable (table does not exist).
-            Err(e) if e.to_string().contains("no such table") => {}
+            Err(e) if e.to_string().contains("no such table") => {
+                // Table missing: attempt to create it using the actual response
+                // dimension, then retry once. This handles first-write startup
+                // without requiring a separate setup step. If sqlite-vec is
+                // unavailable, setup_vec_table_with_dimension returns
+                // SqliteVecUnavailable and we propagate it without marking the
+                // document embedded.
+                crate::embeddings::sqlite_vec::setup_vec_table_with_dimension(
+                    conn,
+                    response.dimension,
+                )?;
+                conn.execute(
+                    "INSERT INTO vec_document_embeddings (rowid, embedding_id, embedding) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![rowid, emb_id, vec_json],
+                ).map_err(EmbeddingError::from)?;
+            }
             Err(e) => return Err(EmbeddingError::from(e)),
         }
 
@@ -353,22 +374,28 @@ pub fn fresh_embedding_for_document(
         Some(r) => r,
     };
 
-    // Get the vector from vec_document_embeddings
-    let vec_result: Option<String> = conn.query_row(
+    // Get the vector from vec_document_embeddings.
+    // sqlite-vec stores vectors as packed little-endian f32 bytes (BLOB), not JSON.
+    let vec_result: Option<Vec<u8>> = conn.query_row(
         "SELECT embedding FROM vec_document_embeddings WHERE embedding_id = ?1",
         [&emb_id],
         |r| r.get(0),
     ).optional().map_err(EmbeddingError::from)?;
 
-    let Some(vec_json) = vec_result else {
+    let Some(vec_bytes) = vec_result else {
         return Err(EmbeddingError::new(
             EmbeddingErrorCategory::MissingFreshEmbedding,
             "Embedding unavailable: vector data not found.",
         ));
     };
 
-    let vector: Vec<f32> = serde_json::from_str(&vec_json)
-        .map_err(|_| EmbeddingError::invalid_response())?;
+    if vec_bytes.len() % 4 != 0 {
+        return Err(EmbeddingError::invalid_response());
+    }
+    let vector: Vec<f32> = vec_bytes
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect();
 
     Ok(Some((emb_id, model_id, dimension as usize, vector)))
 }

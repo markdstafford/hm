@@ -127,8 +127,7 @@ pub fn nearest_neighbors(
 
     // Get KNN candidates from sqlite-vec; over-fetch to allow for filtering/self-exclusion
     let fetch_limit = if query.include_self { query.limit as usize } else { query.limit as usize + 1 };
-    let raw_matches = crate::embeddings::sqlite_vec::nearest_by_vector(conn, &vector, fetch_limit)
-        .unwrap_or_default(); // gracefully handle unavailable sqlite-vec
+    let raw_matches = crate::embeddings::sqlite_vec::nearest_by_vector(conn, &vector, fetch_limit)?;
 
     if raw_matches.is_empty() {
         return Ok(vec![]);
@@ -138,48 +137,65 @@ pub fn nearest_neighbors(
     let rowids: Vec<i64> = raw_matches.iter().map(|(r, _)| *r).collect();
     let distance_map: std::collections::HashMap<i64, f32> = raw_matches.into_iter().collect();
 
-    let placeholders = rowids
+    // Build parameterized query. Params vector is populated in lock-step with
+    // the placeholders added to `sql` below.
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = rowids
+        .iter()
+        .map(|r| Box::new(*r) as Box<dyn rusqlite::ToSql>)
+        .collect();
+
+    let rowid_placeholders = rowids
         .iter()
         .enumerate()
         .map(|(i, _)| format!("?{}", i + 1))
         .collect::<Vec<_>>()
         .join(", ");
     let model_param_idx = rowids.len() + 1;
+    params.push(Box::new(model_id));
+
+    // LEFT JOIN work_items to support work_item_kind filter
     let mut sql = format!(
         "SELECT de.rowid, de.document_id, de.entity_kind, de.entity_id, de.work_item_id, \
                 de.source_system_id, de.content_hash, de.model_id \
          FROM document_embeddings de \
-         WHERE de.rowid IN ({placeholders}) \
+         LEFT JOIN work_items wi ON wi.id = de.work_item_id \
+         WHERE de.rowid IN ({rowid_placeholders}) \
            AND de.status = 'fresh' \
            AND de.model_id = ?{model_param_idx}"
     );
 
     if let Some(ssid) = &query.source_system_id {
-        let ssid_escaped = ssid.replace('\'', "''");
-        sql.push_str(&format!(" AND de.source_system_id = '{ssid_escaped}'"));
+        let idx = params.len() + 1;
+        sql.push_str(&format!(" AND de.source_system_id = ?{idx}"));
+        params.push(Box::new(ssid.clone()));
     }
     if !query.entity_kinds.is_empty() {
-        let kinds: Vec<String> = query.entity_kinds.iter()
-            .map(|k| format!("'{}'", k.replace('\'', "''")))
+        let start = params.len() + 1;
+        let kind_placeholders: Vec<String> = (start..start + query.entity_kinds.len())
+            .map(|i| format!("?{i}"))
             .collect();
-        sql.push_str(&format!(" AND de.entity_kind IN ({})", kinds.join(", ")));
+        sql.push_str(&format!(" AND de.entity_kind IN ({})", kind_placeholders.join(", ")));
+        for k in &query.entity_kinds {
+            params.push(Box::new(k.clone()));
+        }
+    }
+    if let Some(wk) = &query.work_item_kind {
+        let idx = params.len() + 1;
+        sql.push_str(&format!(" AND wi.item_type = ?{idx}"));
+        params.push(Box::new(wk.clone()));
     }
     if let Some(eid) = &query.exclude_entity_id {
-        let eid_escaped = eid.replace('\'', "''");
-        sql.push_str(&format!(" AND de.entity_id != '{eid_escaped}'"));
+        let idx = params.len() + 1;
+        sql.push_str(&format!(" AND de.entity_id != ?{idx}"));
+        params.push(Box::new(eid.clone()));
     }
     if !query.include_self {
         if let Some(doc_id) = &query.document_id {
-            let doc_escaped = doc_id.replace('\'', "''");
-            sql.push_str(&format!(" AND de.document_id != '{doc_escaped}'"));
+            let idx = params.len() + 1;
+            sql.push_str(&format!(" AND de.document_id != ?{idx}"));
+            params.push(Box::new(doc_id.clone()));
         }
     }
-
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = rowids
-        .iter()
-        .map(|r| Box::new(*r) as Box<dyn rusqlite::ToSql>)
-        .collect();
-    params.push(Box::new(model_id));
 
     let mut stmt = conn.prepare(&sql).map_err(EmbeddingError::from)?;
     let rows = stmt
@@ -231,13 +247,17 @@ pub fn refresh_embeddings_with_provider(
         let mut sql = String::from(
             "UPDATE indexable_documents SET embedding_status = 'pending' WHERE embedding_status = 'embedded'",
         );
+        let mut rebuild_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(ref ssid) = options.source_system_id {
-            sql.push_str(&format!(" AND source_system_id = '{ssid}'"));
+            sql.push_str(" AND source_system_id = ?");
+            rebuild_params.push(Box::new(ssid.clone()));
         }
         if let Some(ref kind) = options.entity_kind {
-            sql.push_str(&format!(" AND entity_kind = '{kind}'"));
+            sql.push_str(" AND entity_kind = ?");
+            rebuild_params.push(Box::new(kind.clone()));
         }
-        conn.execute(&sql, []).map_err(EmbeddingError::from)?;
+        conn.execute(&sql, rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())))
+            .map_err(EmbeddingError::from)?;
     }
 
     let limit = options.limit.unwrap_or(25).max(1) as usize;
@@ -346,13 +366,17 @@ pub fn refresh_embeddings(
         let mut sql = String::from(
             "UPDATE indexable_documents SET embedding_status = 'pending' WHERE embedding_status = 'embedded'",
         );
+        let mut rebuild_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(ref ssid) = options.source_system_id {
-            sql.push_str(&format!(" AND source_system_id = '{ssid}'"));
+            sql.push_str(" AND source_system_id = ?");
+            rebuild_params.push(Box::new(ssid.clone()));
         }
         if let Some(ref kind) = options.entity_kind {
-            sql.push_str(&format!(" AND entity_kind = '{kind}'"));
+            sql.push_str(" AND entity_kind = ?");
+            rebuild_params.push(Box::new(kind.clone()));
         }
-        conn.execute(&sql, []).map_err(EmbeddingError::from)?;
+        conn.execute(&sql, rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())))
+            .map_err(EmbeddingError::from)?;
     }
 
     let limit = options.limit.unwrap_or(25).max(1) as usize;
@@ -447,59 +471,79 @@ pub fn embedding_status(
     conn: &rusqlite::Connection,
     source_system_id: Option<&str>,
 ) -> Result<EmbeddingStatusSummary, EmbeddingError> {
-    let mut sql = String::from(
-        "SELECT embedding_status, count(*) FROM indexable_documents",
-    );
-    if let Some(ssid) = source_system_id {
-        sql.push_str(&format!(" WHERE source_system_id = '{ssid}'"));
-    }
-    sql.push_str(" GROUP BY embedding_status");
-
-    let mut stmt = conn.prepare(&sql).map_err(EmbeddingError::from)?;
     let mut pending = 0u32;
     let mut embedding = 0u32;
     let mut embedded = 0u32;
     let mut stale = 0u32;
     let mut failed = 0u32;
 
-    let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
-        .map_err(EmbeddingError::from)?;
-
-    for row in rows {
-        let (status, count) = row.map_err(EmbeddingError::from)?;
-        let c = count as u32;
-        match status.as_str() {
-            "pending" => pending = c,
-            "embedding" => embedding = c,
-            "embedded" => embedded = c,
-            "stale" => stale = c,
-            "failed" => failed = c,
-            _ => {}
+    if let Some(ssid) = source_system_id {
+        let mut stmt = conn.prepare(
+            "SELECT embedding_status, count(*) FROM indexable_documents \
+             WHERE source_system_id = ? GROUP BY embedding_status",
+        ).map_err(EmbeddingError::from)?;
+        let rows = stmt.query_map([ssid], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            .map_err(EmbeddingError::from)?;
+        for row in rows {
+            let (status, count) = row.map_err(EmbeddingError::from)?;
+            let c = count as u32;
+            match status.as_str() {
+                "pending" => pending = c,
+                "embedding" => embedding = c,
+                "embedded" => embedded = c,
+                "stale" => stale = c,
+                "failed" => failed = c,
+                _ => {}
+            }
+        }
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT embedding_status, count(*) FROM indexable_documents GROUP BY embedding_status",
+        ).map_err(EmbeddingError::from)?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            .map_err(EmbeddingError::from)?;
+        for row in rows {
+            let (status, count) = row.map_err(EmbeddingError::from)?;
+            let c = count as u32;
+            match status.as_str() {
+                "pending" => pending = c,
+                "embedding" => embedding = c,
+                "embedded" => embedded = c,
+                "stale" => stale = c,
+                "failed" => failed = c,
+                _ => {}
+            }
         }
     }
 
-    let last_sql = if let Some(ssid) = source_system_id {
-        format!(
-            "SELECT MAX(embedded_at) FROM document_embeddings WHERE source_system_id = '{ssid}'"
-        )
+    let last_embedding_refresh: Option<String> = if let Some(ssid) = source_system_id {
+        conn.query_row(
+            "SELECT MAX(embedded_at) FROM document_embeddings WHERE source_system_id = ?",
+            [ssid],
+            |r| r.get(0),
+        ).unwrap_or(None)
     } else {
-        "SELECT MAX(embedded_at) FROM document_embeddings".into()
+        conn.query_row(
+            "SELECT MAX(embedded_at) FROM document_embeddings",
+            [],
+            |r| r.get(0),
+        ).unwrap_or(None)
     };
-    let last_embedding_refresh: Option<String> = conn
-        .query_row(&last_sql, [], |r| r.get(0))
-        .unwrap_or(None);
 
-    let warning_sql = if let Some(ssid) = source_system_id {
-        format!(
-            "SELECT safe_summary FROM embedding_failures WHERE source_system_id = '{ssid}' ORDER BY last_attempted_at DESC LIMIT 1"
-        )
+    let warning: Option<String> = if let Some(ssid) = source_system_id {
+        conn.query_row(
+            "SELECT safe_summary FROM embedding_failures \
+             WHERE source_system_id = ? ORDER BY last_attempted_at DESC LIMIT 1",
+            [ssid],
+            |r| r.get(0),
+        ).unwrap_or(None)
     } else {
-        "SELECT safe_summary FROM embedding_failures ORDER BY last_attempted_at DESC LIMIT 1".into()
+        conn.query_row(
+            "SELECT safe_summary FROM embedding_failures ORDER BY last_attempted_at DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        ).unwrap_or(None)
     };
-    let warning: Option<String> = conn
-        .query_row(&warning_sql, [], |r| r.get(0))
-        .unwrap_or(None);
 
     Ok(EmbeddingStatusSummary {
         pending,
@@ -876,5 +920,114 @@ mod tests {
 
         assert_eq!(summary.embedded, 1);
         assert!(matches!(summary.status, EmbeddingRunStatus::Complete));
+    }
+
+    #[test]
+    fn source_system_id_with_quotes_does_not_break_force_rebuild() {
+        // Regression: source_system_id containing a quote must not corrupt SQL
+        let conn = open_with_embedding_schema();
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        let provider = FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small");
+        let opts = EmbeddingRunOptions {
+            source_system_id: Some("srcsys'injection".into()),
+            entity_kind: None,
+            limit: Some(10),
+            force_rebuild: true,
+        };
+        // Must not panic or return a SQL error — it simply matches zero rows because
+        // no source has this synthetic id.
+        let summary = refresh_embeddings_with_provider(&conn, &provider, opts, "2026-01-01T00:00:00Z")
+            .expect("force_rebuild with quote in source_system_id must not error");
+        assert_eq!(summary.embedded, 0); // no matching documents for the injected id
+    }
+
+    #[test]
+    fn entity_kind_with_quotes_does_not_break_force_rebuild() {
+        let conn = open_with_embedding_schema();
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        let provider = FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small");
+        let opts = EmbeddingRunOptions {
+            source_system_id: None,
+            entity_kind: Some("jira_issue' OR '1'='1".into()),
+            limit: Some(10),
+            force_rebuild: true,
+        };
+        let summary = refresh_embeddings_with_provider(&conn, &provider, opts, "2026-01-01T00:00:00Z")
+            .expect("force_rebuild with quote in entity_kind must not error");
+        assert_eq!(summary.embedded, 0);
+    }
+
+    #[test]
+    fn nearest_neighbors_filters_by_work_item_kind() {
+        let conn = open_with_embedding_schema();
+
+        let vec_available = crate::db::load_sqlite_vec(&conn).is_ok();
+        if !vec_available {
+            eprintln!("SKIP: sqlite-vec not available");
+            return;
+        }
+        crate::embeddings::sqlite_vec::setup_vec_table(&conn).expect("vec table");
+
+        // Seed source + two work items with different item_types
+        conn.execute(
+            "INSERT OR IGNORE INTO source_systems (id, kind, display_name, created_at, updated_at) \
+             VALUES ('srcsys_1', 'jira', 'Jira', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO work_items (id, source_system_id, source_kind, upstream_id, title, state, item_type, last_seen_at, raw_updated_hash, created_at, updated_at) \
+             VALUES ('wi_bug', 'srcsys_1', 'jira_issue', '1001', 'Bug report', 'open', 'Bug', '2026-01-01T00:00:00Z', 'raw', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO work_items (id, source_system_id, source_kind, upstream_id, title, state, item_type, last_seen_at, raw_updated_hash, created_at, updated_at) \
+             VALUES ('wi_task', 'srcsys_1', 'jira_issue', '1002', 'Task item', 'open', 'Task', '2026-01-01T00:00:00Z', 'raw', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Insert one doc per work item
+        conn.execute(
+            "INSERT INTO indexable_documents (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+             VALUES ('doc_bug', 'srcsys_1', 'jira_issue', 'wi_bug', 'wi_bug', 'Bug', 'bug body', '{}', 'hash_bug', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO indexable_documents (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+             VALUES ('doc_task', 'srcsys_1', 'jira_issue', 'wi_task', 'wi_task', 'Task', 'task body', '{}', 'hash_task', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Embed both docs using dimension 1536 to match the vec0 table DDL
+        let provider = FakeEmbeddingProvider::new(1536, "embed-small", "text-embedding-3-small");
+        let opts = EmbeddingRunOptions {
+            source_system_id: None, entity_kind: None, limit: Some(10), force_rebuild: false,
+        };
+        refresh_embeddings_with_provider(&conn, &provider, opts, "2026-01-01T00:00:00Z")
+            .expect("embed both");
+
+        // Search by text (no stored doc), filtered to Bug kind only
+        let query = EmbeddingCandidateQuery {
+            document_id: None,
+            query_text: Some("bug".into()),
+            source_system_id: None,
+            entity_kinds: vec![],
+            work_item_kind: Some("Bug".into()),
+            limit: 5,
+            exclude_entity_id: None,
+            include_self: true,
+        };
+        let candidates = nearest_neighbors(&conn, &provider, query).expect("neighbors");
+
+        // All returned candidates must have Bug work items
+        assert!(!candidates.is_empty(), "should return at least one Bug candidate");
+        for c in &candidates {
+            assert_eq!(
+                c.work_item_id.as_deref(),
+                Some("wi_bug"),
+                "work_item_kind filter should exclude Task candidates"
+            );
+        }
     }
 }

@@ -1,23 +1,31 @@
 use crate::embeddings::errors::{EmbeddingError, EmbeddingErrorCategory};
 
-/// Set up the sqlite-vec virtual table for document embeddings.
-/// The dimension argument must match the embedding model's dimension.
-/// For initial schema setup we create with dimension 1536 (OpenAI small default);
-/// actual queries must match the stored model dimension.
+/// Set up the sqlite-vec virtual table for document embeddings using the default
+/// production dimension (1536 — OpenAI text-embedding-3-small).
 pub fn setup_vec_table(conn: &rusqlite::Connection) -> Result<(), EmbeddingError> {
+    setup_vec_table_with_dimension(conn, 1536)
+}
+
+/// Set up the sqlite-vec virtual table with an explicit dimension.
+///
+/// The table is created with `IF NOT EXISTS`, so calling this when a table with
+/// a different dimension was already created is a silent no-op. Callers that
+/// need a specific dimension should ensure the table does not already exist with
+/// a different dimension before calling.
+pub fn setup_vec_table_with_dimension(
+    conn: &rusqlite::Connection,
+    dimension: usize,
+) -> Result<(), EmbeddingError> {
     crate::db::load_sqlite_vec(conn).map_err(|_| {
         EmbeddingError::new(
             EmbeddingErrorCategory::SqliteVecUnavailable,
             "sqlite-vec is unavailable in this environment.",
         )
     })?;
-    // We use a flexible vec0 table. The actual dimension is checked at query time.
-    // sqlite-vec 0.1.9 requires the dimension in the DDL; we use a single table
-    // and rely on content-hash/model_id filtering to keep incompatible vectors separate.
-    conn.execute_batch(
+    conn.execute_batch(&format!(
         "CREATE VIRTUAL TABLE IF NOT EXISTS vec_document_embeddings
-         USING vec0(embedding_id TEXT, embedding FLOAT[1536]);",
-    )
+         USING vec0(embedding_id TEXT, embedding FLOAT[{dimension}]);"
+    ))
     .map_err(|_| EmbeddingError::new(
         EmbeddingErrorCategory::SqliteVecUnavailable,
         "sqlite-vec is unavailable in this environment.",
@@ -29,6 +37,10 @@ pub fn vector_to_json(vector: &[f32]) -> String {
 }
 
 /// Insert or replace a vector row. The rowid is a stable integer from document_embeddings.
+///
+/// Uses DELETE + INSERT because vec0 virtual tables don't support INSERT OR REPLACE
+/// when a row with the same rowid already exists — it raises a storage error instead
+/// of overwriting.
 pub fn upsert_vector(
     conn: &rusqlite::Connection,
     rowid: i64,
@@ -36,8 +48,13 @@ pub fn upsert_vector(
     vector: &[f32],
 ) -> Result<(), EmbeddingError> {
     let vec_json = vector_to_json(vector);
+    // Ignore errors from DELETE (e.g. row doesn't exist yet).
+    let _ = conn.execute(
+        "DELETE FROM vec_document_embeddings WHERE rowid = ?1",
+        rusqlite::params![rowid],
+    );
     conn.execute(
-        "INSERT OR REPLACE INTO vec_document_embeddings (rowid, embedding_id, embedding) VALUES (?1, ?2, ?3)",
+        "INSERT INTO vec_document_embeddings (rowid, embedding_id, embedding) VALUES (?1, ?2, ?3)",
         rusqlite::params![rowid, embedding_id, vec_json],
     )
     .map_err(EmbeddingError::from)?;
