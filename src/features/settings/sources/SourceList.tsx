@@ -75,7 +75,7 @@ export function SourceList({
           const statusMessage = progress ? progress.message : "Not synced";
           let progressLine: string | null = null;
           if (progress) {
-            if (typeof progress.total_issues === "number") {
+            if (running && typeof progress.total_issues === "number") {
               progressLine = `Progress: ${progress.saved_issues} of ${progress.total_issues} issues saved`;
               if (
                 typeof progress.current_page === "number" &&
