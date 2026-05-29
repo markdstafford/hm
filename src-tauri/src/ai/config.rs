@@ -33,6 +33,7 @@ pub struct AiCredentialConfig {
 pub enum AiEndpointProtocol {
     AnthropicMessages,
     OpenAiChatCompletionsCompatible,
+    OpenAiEmbeddingsCompatible,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -47,6 +48,7 @@ pub struct AiEndpointConfig {
 pub enum AiRunner {
     AnthropicMessages,
     OpenAiChatCompletions,
+    OpenAiEmbeddings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -231,6 +233,10 @@ fn validate_supported_combination(
             AiEndpointProtocol::OpenAiChatCompletionsCompatible,
             AiRunner::OpenAiChatCompletions,
             AiExecutionMode::DirectApi
+        ) | (
+            AiEndpointProtocol::OpenAiEmbeddingsCompatible,
+            AiRunner::OpenAiEmbeddings,
+            AiExecutionMode::DirectApi
         )
     );
     if !ok {
@@ -349,6 +355,15 @@ impl AiProviderConfig {
                     "routing task {:?} references unknown profile {:?}",
                     task_name, profile_ref
                 )));
+            }
+            if task_name == "embedding.default" {
+                let profile = self.profiles.iter().find(|p| p.name == *profile_ref).expect("profile exists because we checked above");
+                if profile.runner != AiRunner::OpenAiEmbeddings {
+                    return Err(AiError::InvalidConfig(format!(
+                        "routing task embedding.default references profile {:?}, which cannot create embeddings",
+                        profile_ref
+                    )));
+                }
             }
         }
 
@@ -679,6 +694,56 @@ mod tests {
                 "expected 'unsupported config version' in: {msg}"
             );
         }
+    }
+
+    fn embedding_config() -> AiProviderConfig {
+        AiProviderConfig {
+            version: 1,
+            credentials: vec![AiCredentialConfig {
+                name: "openai-prod".into(),
+                kind: AiCredentialKind::BearerToken,
+                source: CredentialSource::Keychain { key_ref: "ai.credentials.openai-prod".into() },
+            }],
+            endpoints: vec![AiEndpointConfig {
+                name: "embeddings-gateway".into(),
+                protocol: AiEndpointProtocol::OpenAiEmbeddingsCompatible,
+                base_url: "https://api.openai.com/v1".into(),
+                credential_ref: "openai-prod".into(),
+            }],
+            profiles: vec![AiProfileConfig {
+                name: "embed-small".into(),
+                endpoint_ref: "embeddings-gateway".into(),
+                model: "text-embedding-3-small".into(),
+                runner: AiRunner::OpenAiEmbeddings,
+                execution_mode: AiExecutionMode::DirectApi,
+                settings: crate::commands::JsonValue(serde_json::json!({ "dimensions": 3 })),
+            }],
+            routing: BTreeMap::from([("embedding.default".into(), "embed-small".into())]),
+        }
+    }
+
+    #[test]
+    fn validation_accepts_embedding_default_route_to_embedding_profile() {
+        embedding_config().validate().expect("embedding route should validate");
+    }
+
+    #[test]
+    fn validation_rejects_chat_profile_for_embedding_default_route() {
+        let mut config = valid_openai_config();
+        config.routing.insert("embedding.default".into(), "chat-fast".into());
+        let err = config.validate().expect_err("chat profile must not serve embedding.default");
+        let msg = err.to_string();
+        assert!(msg.contains("embedding.default"), "error should mention embedding.default");
+        assert!(msg.contains("cannot create embeddings"), "error should mention cannot create embeddings");
+        assert!(!msg.contains("sk-"), "error must not contain secret");
+    }
+
+    #[test]
+    fn validation_rejects_embedding_runner_on_chat_endpoint() {
+        let mut config = embedding_config();
+        config.endpoints[0].protocol = AiEndpointProtocol::OpenAiChatCompletionsCompatible;
+        let err = config.validate().expect_err("runner/protocol mismatch must fail");
+        assert!(err.to_string().contains("unsupported"), "error should contain 'unsupported'");
     }
 
     #[test]

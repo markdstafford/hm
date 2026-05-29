@@ -20,6 +20,11 @@ impl AiRunnerClient for DirectApiRunner {
             (crate::ai::config::AiRunner::OpenAiChatCompletions, crate::ai::config::AiExecutionMode::DirectApi) => {
                 openai_chat_completions::OpenAiChatCompletionsRunner::default().run(resolved, request)
             }
+            (crate::ai::config::AiRunner::OpenAiEmbeddings, _) => {
+                Err(AiError::InvalidConfig(
+                    "OpenAiEmbeddings runner is not yet implemented in DirectApiRunner".into(),
+                ))
+            }
         }
     }
 }
