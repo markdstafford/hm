@@ -322,6 +322,27 @@ pub fn write_embedding_batch(
     Ok(())
 }
 
+/// Test helper: seed a source system, work item, and indexable document.
+/// Available in test builds only, placed outside `mod tests` so other test modules can import it.
+#[cfg(test)]
+pub(crate) fn seed_source_and_document(conn: &Connection, document_id: &str, content_hash: &str) {
+    conn.execute(
+        "INSERT OR IGNORE INTO source_systems (id, kind, display_name, created_at, updated_at) \
+         VALUES ('srcsys_1', 'jira', 'Jira', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        [],
+    ).unwrap();
+    conn.execute(
+        "INSERT OR IGNORE INTO work_items (id, source_system_id, source_kind, upstream_id, title, state, last_seen_at, raw_updated_hash, created_at, updated_at) \
+         VALUES ('wi_1', 'srcsys_1', 'jira_issue', '1001', 'Login bug', 'open', '2026-01-01T00:00:00Z', 'raw', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        [],
+    ).unwrap();
+    conn.execute(
+        "INSERT OR IGNORE INTO indexable_documents (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+         VALUES (?1, 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', 'Login bug', 'Cannot sign in', '{}', ?2, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        rusqlite::params![document_id, content_hash],
+    ).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
