@@ -38,6 +38,7 @@ pub struct ResetJiraProjectCounts {
     pub jira_project_field_mappings: u32,
     pub issue_events: u32,
     pub issue_snapshots: u32,
+    pub document_embeddings: u32,
     pub indexable_documents: u32,
     pub ingestion_cursors: u32,
     pub ingestion_runs: u32,
@@ -54,6 +55,47 @@ pub fn reset_jira_project_data(
     let mut counts = ResetJiraProjectCounts::default();
 
     // Tables that reference work_items via FK — delete leaves first.
+
+    // Delete sqlite-vec vector rows before document_embeddings metadata.
+    // vec_document_embeddings is a virtual table with no FK cascade, so we
+    // delete its rows explicitly. Ignore "no such table" (sqlite-vec may not
+    // be loaded in all environments).
+    let vec_delete_result = tx.execute(
+        "DELETE FROM vec_document_embeddings \
+         WHERE embedding_id IN ( \
+             SELECT de.id FROM document_embeddings de \
+             WHERE de.document_id IN ( \
+                 SELECT id FROM indexable_documents \
+                 WHERE work_item_id IN ( \
+                     SELECT id FROM work_items \
+                     WHERE source_system_id = ?1 AND project_key = ?2 \
+                 ) \
+             ) \
+         )",
+        params![source_system_id, project_key],
+    );
+    if let Err(ref e) = vec_delete_result {
+        if !e.to_string().contains("no such table") {
+            return Err(vec_delete_result.unwrap_err());
+        }
+        // sqlite-vec unavailable — skip vec cleanup silently
+    }
+
+    // Delete embedding metadata before indexable_documents.
+    // document_embeddings has ON DELETE CASCADE from indexable_documents, but we
+    // delete explicitly here to capture the count.
+    counts.document_embeddings = tx.execute(
+        "DELETE FROM document_embeddings \
+         WHERE document_id IN ( \
+             SELECT id FROM indexable_documents \
+             WHERE work_item_id IN ( \
+                 SELECT id FROM work_items \
+                 WHERE source_system_id = ?1 AND project_key = ?2 \
+             ) \
+         )",
+        params![source_system_id, project_key],
+    )? as u32;
+
     counts.indexable_documents = tx.execute(
         "DELETE FROM indexable_documents \
          WHERE work_item_id IN ( \
@@ -428,5 +470,71 @@ mod tests {
         let counts =
             reset_jira_project_data(&mut conn, "srcsys_1", "GHOST").expect("reset no-op");
         assert_eq!(counts, ResetJiraProjectCounts::default());
+    }
+
+    #[test]
+    fn reset_also_deletes_vec_document_embedding_rows() {
+        let mut conn = open();
+
+        // Load sqlite-vec; skip test if unavailable
+        if crate::db::load_sqlite_vec(&conn).is_err() {
+            eprintln!("SKIP: sqlite-vec not available");
+            return;
+        }
+        crate::embeddings::sqlite_vec::setup_vec_table_with_dimension(&conn, 3)
+            .expect("vec table setup");
+        crate::embeddings::repository::setup_schema(&conn)
+            .expect("embedding schema");
+
+        seed_source(&conn, "srcsys_1");
+        seed_work_item(&conn, "wi_a1", "srcsys_1", "AMP", "1001", "AMP-1");
+
+        // Seed an indexable document and embedding metadata row
+        conn.execute(
+            "INSERT INTO indexable_documents(id, source_system_id, entity_kind, entity_id, work_item_id, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+             VALUES ('doc_a1','srcsys_1','jira_issue','wi_a1','wi_a1','b','{}','h','pending','now','now')",
+            [],
+        ).unwrap();
+
+        // Seed embedding_models row required by FK
+        conn.execute(
+            "INSERT INTO embedding_models (id, provider_profile, provider_model, runner, dimension, distance_metric, created_at, last_used_at) \
+             VALUES ('model_1', 'embed-small', 'text-embedding-3-small', 'OpenAiEmbeddings', 3, 'l2', 'now', 'now')",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO document_embeddings (id, document_id, source_system_id, entity_kind, entity_id, work_item_id, content_hash, model_id, dimension, embedded_at, status) \
+             VALUES ('emb_1', 'doc_a1', 'srcsys_1', 'jira_issue', 'wi_a1', 'wi_a1', 'h', 'model_1', 3, 'now', 'fresh')",
+            [],
+        ).unwrap();
+
+        // Seed the vec row (rowid 1 matches first embedding_models row)
+        let rowid: i64 = conn.query_row(
+            "SELECT rowid FROM document_embeddings WHERE id = 'emb_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        crate::embeddings::sqlite_vec::upsert_vector(&conn, rowid, "emb_1", &[1.0f32, 0.0, 0.0])
+            .expect("upsert vec row");
+
+        // Verify vec row exists before reset
+        let vec_before: i64 = conn.query_row(
+            "SELECT count(*) FROM vec_document_embeddings",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(vec_before, 1, "vec row should exist before reset");
+
+        // Run reset
+        reset_jira_project_data(&mut conn, "srcsys_1", "AMP").expect("reset");
+
+        // Verify vec row was deleted
+        let vec_after: i64 = conn.query_row(
+            "SELECT count(*) FROM vec_document_embeddings",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(vec_after, 0, "vec rows must be deleted on project reset");
     }
 }

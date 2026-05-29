@@ -4,6 +4,7 @@ use crate::ai::service::{AiRequest, AiResponse};
 
 pub mod anthropic_messages;
 pub mod openai_chat_completions;
+pub mod openai_embeddings;
 
 pub trait AiRunnerClient: Send + Sync {
     fn run(&self, resolved: &ResolvedAiProvider, request: AiRequest) -> Result<AiResponse, AiError>;
@@ -19,6 +20,11 @@ impl AiRunnerClient for DirectApiRunner {
             }
             (crate::ai::config::AiRunner::OpenAiChatCompletions, crate::ai::config::AiExecutionMode::DirectApi) => {
                 openai_chat_completions::OpenAiChatCompletionsRunner::default().run(resolved, request)
+            }
+            (crate::ai::config::AiRunner::OpenAiEmbeddings, _) => {
+                Err(AiError::InvalidConfig(
+                    "OpenAiEmbeddings runner is not yet implemented in DirectApiRunner".into(),
+                ))
             }
         }
     }

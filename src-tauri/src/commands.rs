@@ -473,17 +473,73 @@ pub fn jira_issue_ingestion_run(
             // a per-project error the run row is already marked partial /
             // failed in the database. We log via eprintln for dev visibility
             // and continue with the next project.
-            if let Err(err) = service.ingest_project(
+            let ingestion_ok = service.ingest_project(
                 &db_access,
                 &source_system_id_for_worker,
                 project_key,
                 project_name,
                 &now,
                 &cancellation_for_worker,
-            ) {
-                eprintln!(
-                    "ingestion worker: project {project_key} failed: {err}"
-                );
+            ).is_ok();
+
+            if !ingestion_ok {
+                eprintln!("ingestion worker: project {project_key} failed");
+            }
+
+            // Best-effort post-ingestion embedding refresh. A provider failure
+            // must not roll back ingestion success — errors are logged only.
+            // The DB mutex is held in two brief scopes; the provider HTTP call
+            // happens between them so the mutex is not held during network I/O.
+            if ingestion_ok {
+                let store_for_embed = app_for_worker.state::<ManagedSecretStore>();
+                let embed_now = now_utc_rfc3339();
+                let embed_opts = crate::embeddings::service::EmbeddingRunOptions {
+                    source_system_id: Some(source_system_id_for_worker.clone()),
+                    entity_kind: None,
+                    limit: Some(25),
+                    force_rebuild: false,
+                };
+
+                // Phase 1: claim docs + resolve AI config (brief lock).
+                let phase1 = db.lock().ok().and_then(|conn| {
+                    let batch = crate::embeddings::service::prepare_refresh_batch(
+                        &conn, &embed_opts, &embed_now,
+                    ).ok()??;
+                    let resolved = crate::ai::resolver::resolve_for_task(
+                        &conn, store_for_embed.0.as_ref(),
+                        crate::embeddings::EMBEDDING_DEFAULT_ROUTE,
+                    ).ok()?;
+                    Some((batch, resolved))
+                }); // ← DB mutex released here
+
+                if let Some((batch, resolved)) = phase1 {
+                    // Phase 2: HTTP call (no DB lock held).
+                    let request = crate::embeddings::provider::EmbeddingRequest {
+                        input: batch.texts.clone(),
+                    };
+                    match crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::default()
+                        .run(&resolved, request)
+                    {
+                        Ok(response) => {
+                            // Phase 3: write results (brief lock).
+                            if let Ok(conn) = db.lock() {
+                                if let Err(e) = crate::embeddings::service::complete_refresh_batch(
+                                    &conn, &batch, response, &embed_now,
+                                ) {
+                                    eprintln!("embedding write after ingestion of {project_key} failed (non-fatal): {e}");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("embedding provider call after ingestion of {project_key} failed (non-fatal): {e}");
+                            if let Ok(conn) = db.lock() {
+                                crate::embeddings::service::record_batch_provider_failure(
+                                    &conn, &batch, &e, &embed_now,
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -834,6 +890,167 @@ pub(crate) fn issue_history_retention_save_to_conn(
     crate::issues::history::save_retention_config(conn, config).map_err(|e| e.to_string())
 }
 
+// ── Embedding commands ────────────────────────────────────────────────────────
+
+/// Trigger a batch embedding refresh. Processes up to `options.limit` pending
+/// documents (default 25 per call) using the configured AI embedding provider.
+/// Returns a summary with counts and status. Failures are non-fatal: documents
+/// revert to pending and the summary's `safe_error` field carries a
+/// sanitised description.
+///
+/// The DB mutex is held in two short scopes only:
+///   Phase 1 — claim documents + resolve AI provider config.
+///   Phase 3 — write vectors + update document status.
+/// The provider HTTP call (Phase 2) happens between these scopes with no lock held.
+#[tauri::command]
+#[specta::specta]
+pub fn embedding_refresh_run(
+    options: crate::embeddings::service::EmbeddingRunOptions,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<crate::embeddings::service::EmbeddingRunSummary, String> {
+    use crate::ai::resolver::resolve_for_task;
+    use crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner;
+    use crate::embeddings::provider::EmbeddingRequest;
+    use crate::embeddings::service::{
+        complete_refresh_batch, prepare_refresh_batch, record_batch_provider_failure,
+        EmbeddingRunStatus, EmbeddingRunSummary,
+    };
+    use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
+
+    let now = now_utc_rfc3339();
+
+    // Phase 1: claim documents + resolve AI provider config (brief DB lock).
+    let (batch, resolved) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let batch = prepare_refresh_batch(&conn, &options, &now).map_err(|e| e.to_string())?;
+        let Some(batch) = batch else {
+            return Ok(EmbeddingRunSummary {
+                status: EmbeddingRunStatus::Complete,
+                scanned: 0,
+                embedded: 0,
+                skipped: 0,
+                failed: 0,
+                model_id: String::new(),
+                dimension: 0,
+                safe_error: None,
+            });
+        };
+        let resolved = resolve_for_task(&conn, store.0.as_ref(), EMBEDDING_DEFAULT_ROUTE)
+            .map_err(|e| e.to_string())?;
+        (batch, resolved)
+    }; // ← DB mutex released here
+
+    // Phase 2: provider HTTP call (no DB lock held).
+    let request = EmbeddingRequest { input: batch.texts.clone() };
+    let response = match OpenAiEmbeddingsRunner::default().run(&resolved, request) {
+        Ok(r) => r,
+        Err(e) => {
+            let conn = db.lock().map_err(|s| s.to_string())?;
+            return Ok(record_batch_provider_failure(&conn, &batch, &e, &now));
+        }
+    };
+
+    // Phase 3: write vectors + update status (brief DB lock).
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    complete_refresh_batch(&conn, &batch, response, &now).map_err(|e| e.to_string())
+}
+
+/// Return counts of indexable documents by embedding status. Pass
+/// `source_system_id` to scope the query to a single ingestion source.
+#[tauri::command]
+#[specta::specta]
+pub fn embedding_status(
+    source_system_id: Option<String>,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<crate::embeddings::service::EmbeddingStatusSummary, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    crate::embeddings::service::embedding_status(&conn, source_system_id.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+/// Find nearest-neighbor embedding candidates for a document or query text.
+/// Pass exactly one of `query.document_id` or `query.query_text`.
+///
+/// The DB mutex is held in two brief scopes only:
+///   Phase 1 — load AI provider config (document_id path also reads the stored vector).
+///   Phase 3 — sqlite-vec KNN query.
+/// For the query_text path, the provider HTTP call (Phase 2) runs between these
+/// scopes with no lock held.
+#[tauri::command]
+#[specta::specta]
+pub fn embedding_nearest_neighbors(
+    query: crate::embeddings::service::EmbeddingCandidateQuery,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+    store: tauri::State<'_, ManagedSecretStore>,
+) -> Result<Vec<crate::embeddings::service::EmbeddingCandidate>, String> {
+    use crate::ai::resolver::resolve_for_task;
+    use crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner;
+    use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
+    use crate::embeddings::service::{
+        embed_query_text_unlocked, nearest_neighbors_by_precomputed_vector,
+    };
+    use crate::embeddings::errors::EmbeddingError;
+    use crate::embeddings::provider::FakeEmbeddingProvider;
+
+    match (&query.document_id, &query.query_text) {
+        (None, None) | (Some(_), Some(_)) => {
+            return Err(EmbeddingError::new(
+                crate::embeddings::errors::EmbeddingErrorCategory::InvalidQuery,
+                "Exactly one of document_id or query_text must be provided.",
+            ).to_string());
+        }
+        _ => {}
+    }
+
+    if query.document_id.is_some() {
+        // document_id path: no provider call needed — stored vector used directly.
+        // A single brief DB lock covers both the vector lookup and the KNN query.
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        return crate::embeddings::service::nearest_neighbors(
+            &conn,
+            &FakeEmbeddingProvider::new(0, "", ""), // provider unused for document_id path
+            query,
+        ).map_err(|e| e.to_string());
+    }
+
+    // query_text path: 3-phase approach.
+
+    // Phase 1: resolve AI provider config (brief DB lock).
+    let resolved = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        resolve_for_task(&conn, store.0.as_ref(), EMBEDDING_DEFAULT_ROUTE)
+            .map_err(|e| e.to_string())?
+    }; // ← DB mutex released here
+
+    // Phase 2: embed query text (no DB lock held).
+    struct ResolvedProvider<'a>(&'a crate::ai::resolver::ResolvedAiProvider);
+    impl crate::embeddings::provider::EmbeddingProvider for ResolvedProvider<'_> {
+        fn embed(
+            &self,
+            request: crate::embeddings::provider::EmbeddingRequest,
+        ) -> Result<crate::embeddings::provider::EmbeddingResponse, EmbeddingError> {
+            OpenAiEmbeddingsRunner::default().run(self.0, request)
+        }
+    }
+
+    let text = query.query_text.as_deref().unwrap_or("");
+    let provider_ref = ResolvedProvider(&resolved);
+    let (query_vector, _model_id, query_dimension) =
+        embed_query_text_unlocked(&provider_ref, text).map_err(|e| e.to_string())?;
+
+    // Phase 3: KNN query (brief DB lock).
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    nearest_neighbors_by_precomputed_vector(
+        &conn,
+        &query_vector,
+        query_dimension,
+        &resolved.profile.name,
+        &resolved.profile.model,
+        &query,
+    ).map_err(|e| e.to_string())
+}
+
 // Ensure specta sees all source config types for TypeScript binding generation.
 // These types are used in the commands above but referenced here explicitly so
 // the specta type registry picks them up even if inference misses a variant.
@@ -863,6 +1080,12 @@ const _: () = {
         _assert_specta::<crate::issues::history::IssueSnapshotQuery>();
         _assert_specta::<crate::issues::history::IssueSnapshotListItem>();
         _assert_specta::<crate::issues::history::IssueHistoryRetentionConfig>();
+        _assert_specta::<crate::embeddings::service::EmbeddingRunOptions>();
+        _assert_specta::<crate::embeddings::service::EmbeddingRunSummary>();
+        _assert_specta::<crate::embeddings::service::EmbeddingRunStatus>();
+        _assert_specta::<crate::embeddings::service::EmbeddingStatusSummary>();
+        _assert_specta::<crate::embeddings::service::EmbeddingCandidateQuery>();
+        _assert_specta::<crate::embeddings::service::EmbeddingCandidate>();
     }
 };
 

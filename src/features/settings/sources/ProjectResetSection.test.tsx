@@ -47,6 +47,7 @@ const EMPTY_COUNTS = {
   jira_project_field_mappings: 0,
   issue_events: 0,
   issue_snapshots: 0,
+  document_embeddings: 0,
   indexable_documents: 0,
   ingestion_cursors: 0,
   ingestion_runs: 0,

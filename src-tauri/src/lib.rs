@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod audit;
 pub mod collections;
+pub mod embeddings;
 pub mod mutations;
 pub mod commands;
 pub mod db;
@@ -104,6 +105,9 @@ pub fn run() {
         commands::issue_snapshots_query,
         commands::issue_history_retention_get,
         commands::issue_history_retention_save,
+        commands::embedding_refresh_run,
+        commands::embedding_status,
+        commands::embedding_nearest_neighbors,
         audit::commands::audit_log_list,
         audit::commands::audit_log_mark_reverted,
         mutations::jira_update_title::jira_update_title,
@@ -208,6 +212,9 @@ mod tests {
                     commands::issue_snapshots_query,
                     commands::issue_history_retention_get,
                     commands::issue_history_retention_save,
+                    commands::embedding_refresh_run,
+                    commands::embedding_status,
+                    commands::embedding_nearest_neighbors,
                     crate::audit::commands::audit_log_list,
                     crate::audit::commands::audit_log_mark_reverted,
                     crate::mutations::jira_update_title::jira_update_title,
