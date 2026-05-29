@@ -38,6 +38,7 @@ pub struct ResetJiraProjectCounts {
     pub jira_project_field_mappings: u32,
     pub issue_events: u32,
     pub issue_snapshots: u32,
+    pub document_embeddings: u32,
     pub indexable_documents: u32,
     pub ingestion_cursors: u32,
     pub ingestion_runs: u32,
@@ -54,6 +55,25 @@ pub fn reset_jira_project_data(
     let mut counts = ResetJiraProjectCounts::default();
 
     // Tables that reference work_items via FK — delete leaves first.
+
+    // Delete embedding metadata before indexable_documents.
+    // document_embeddings has ON DELETE CASCADE from indexable_documents, but we
+    // delete explicitly here to capture the count.
+    // NOTE: vec_document_embeddings (sqlite-vec virtual table) rows are NOT
+    // cascade-deleted and will be orphaned until a future cleanup pass adds
+    // explicit vec row deletion here.
+    counts.document_embeddings = tx.execute(
+        "DELETE FROM document_embeddings \
+         WHERE document_id IN ( \
+             SELECT id FROM indexable_documents \
+             WHERE work_item_id IN ( \
+                 SELECT id FROM work_items \
+                 WHERE source_system_id = ?1 AND project_key = ?2 \
+             ) \
+         )",
+        params![source_system_id, project_key],
+    )? as u32;
+
     counts.indexable_documents = tx.execute(
         "DELETE FROM indexable_documents \
          WHERE work_item_id IN ( \

@@ -22,6 +22,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     crate::collections::views::setup_schema(conn)?;
     crate::issues::schema::setup_schema(conn)?;
     crate::audit::repository::setup_schema(conn)?;
+    crate::embeddings::repository::setup_schema(conn)?;
     Ok(())
 }
 
