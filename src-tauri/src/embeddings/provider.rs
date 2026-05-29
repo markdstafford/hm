@@ -52,6 +52,23 @@ impl EmbeddingProvider for FakeEmbeddingProvider {
     }
 }
 
+#[derive(Default)]
+pub struct AiEmbeddingProvider;
+
+impl AiEmbeddingProvider {
+    pub fn embed_for_default_route(
+        &self,
+        conn: &rusqlite::Connection,
+        store: &dyn crate::settings::secrets::SecretStore,
+        request: EmbeddingRequest,
+    ) -> Result<EmbeddingResponse, EmbeddingError> {
+        let resolved = crate::ai::resolver::resolve_for_task(conn, store, crate::embeddings::EMBEDDING_DEFAULT_ROUTE)
+            .map_err(EmbeddingError::from)?;
+        crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::default()
+            .run(&resolved, request)
+    }
+}
+
 fn deterministic_vector(text: &str, dimension: usize) -> Vec<f32> {
     let mut state: u64 = 0xcbf29ce484222325;
     for byte in text.as_bytes() {
