@@ -199,6 +199,10 @@ pub struct SuppressionInput {
 
 /// Insert a new pending suggestion, superseding any prior pending row for the
 /// same (engine_id, suppression_key_json). Returns the new suggestion id.
+///
+/// Both the suppression UPDATE and the new INSERT are wrapped in a single
+/// transaction so a crash between them cannot leave the old row suppressed
+/// without a replacement row existing.
 pub fn insert_or_supersede_pending(
     conn: &Connection,
     input: &SuggestionInsert,
@@ -207,8 +211,15 @@ pub fn insert_or_supersede_pending(
     let key_json = canonical_suppression_key_json(&input.suppression_key)?;
     let payload_str = serde_json::to_string(&input.payload_json).map_err(|_| GardenerError::database())?;
 
-    // Find any existing pending row for this (engine_id, key_json)
-    let existing_id: Option<String> = conn
+    // Begin an explicit transaction so the suppression UPDATE and the INSERT
+    // are atomic. unchecked_transaction() does not borrow conn mutably, which
+    // is safe here because we own the connection for the duration of the call.
+    let tx = conn.unchecked_transaction().map_err(|_| GardenerError::database())?;
+
+    // Find any existing *pending* row for this (engine_id, key_json).
+    // Terminal rows (applied, rejected, suppressed) are intentionally excluded
+    // so they are not disturbed by a later scan for the same key.
+    let existing_id: Option<String> = tx
         .query_row(
             "SELECT id FROM gardener_suggestions
              WHERE engine_id = ?1 AND suppression_key_json = ?2
@@ -220,19 +231,19 @@ pub fn insert_or_supersede_pending(
         .optional()
         .map_err(|_| GardenerError::database())?;
 
-    // Mark old as suppressed + superseded
+    // Mark old pending row as suppressed + superseded
     if let Some(ref old_id) = existing_id {
-        conn.execute(
+        tx.execute(
             "UPDATE gardener_suggestions
              SET state = 'suppressed', superseded_by = ?1, updated_at = ?2, terminal_at = ?2
-             WHERE id = ?3",
+             WHERE id = ?3 AND state = 'pending'",
             params![input.id, now, old_id],
         )
         .map_err(|_| GardenerError::database())?;
     }
 
-    // Insert the new row
-    conn.execute(
+    // Insert the new pending row
+    tx.execute(
         "INSERT INTO gardener_suggestions
          (id, engine_id, category, state, action_id, source_id,
           target_source_kind, target_upstream_id, target_display_key,
@@ -259,6 +270,8 @@ pub fn insert_or_supersede_pending(
         ],
     )
     .map_err(|_| GardenerError::database())?;
+
+    tx.commit().map_err(|_| GardenerError::database())?;
 
     Ok(input.id.clone())
 }
@@ -755,6 +768,42 @@ mod tests {
         advance_watermark(&conn, "eng-1", "src-1", "page", "100", "2026-01-02T00:00:00Z").expect("advance2");
         let after2 = read_watermark(&conn, "eng-1", "src-1", "page").expect("read after2");
         assert_eq!(after2.as_deref(), Some("100"));
+    }
+
+    #[test]
+    fn terminal_suggestion_is_not_superseded_by_new_pending() {
+        let conn = open_test_db();
+        let now = "2026-01-01T00:00:00Z";
+        let later = "2026-01-01T01:00:00Z";
+
+        let first = make_insert("sug-terminal-1", "reference", 60);
+
+        // Insert the first suggestion then transition it to rejected (terminal)
+        let first_id = insert_or_supersede_pending(&conn, &first, now).expect("first insert");
+        transition_suggestion(&conn, &first_id, SuggestionState::Rejected, now)
+            .expect("transition to rejected");
+
+        // Insert a new suggestion with the same engine + suppression key
+        let second = make_insert("sug-terminal-2", "reference", 60);
+        let second_id = insert_or_supersede_pending(&conn, &second, later).expect("second insert");
+
+        // The rejected row must remain rejected — it must not be suppressed
+        let rejected_state: String = conn
+            .query_row(
+                "SELECT state FROM gardener_suggestions WHERE id = ?1",
+                params![&first_id],
+                |r| r.get(0),
+            )
+            .expect("query rejected row");
+        assert_eq!(rejected_state, "rejected", "terminal row must remain rejected, not suppressed");
+
+        // The new pending row should be present
+        let pending = list_pending_suggestions(&conn).expect("list pending");
+        assert!(
+            pending.iter().any(|s| s.id == second_id),
+            "new pending suggestion should be visible"
+        );
+        assert_eq!(pending.len(), 1, "only one pending suggestion should exist");
     }
 
     #[test]
