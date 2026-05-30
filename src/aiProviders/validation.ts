@@ -13,8 +13,11 @@ function isSecretShapedKey(key: string): boolean {
     // Multi-segment patterns like "api_key" are already in the list as a
     // joined string; check the key directly first, then check segment membership.
     if (key.toLowerCase().includes(sk) && !sk.includes("_")) {
-      // Single-word secret: must appear as an exact segment, not a substring
-      // of a longer word (e.g. "token" must not match "tokens").
+      // Single-word entries (e.g. "token") use exact segment matching to avoid
+      // false positives on keys like "max_estimated_tokens_per_request" where
+      // "token" appears as a substring of a longer segment. Multi-word entries
+      // (e.g. "api_key") use substring matching because they are specific enough
+      // that a substring hit reliably indicates a secret-shaped key.
       return segments.some((seg) => seg === sk);
     }
     return key.toLowerCase().includes(sk);

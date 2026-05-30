@@ -465,7 +465,7 @@ export function ProfileForm({
                 onValueChange={(v) => update("existingEndpointRef", v)}
                 options={config.endpoints.map((e) => ({
                   value: e.name,
-                  label: `${e.name} — ${e.protocol === "AnthropicMessages" ? "anthropic" : "openai"} · ${e.credential_ref}`,
+                  label: `${e.name} — ${e.protocol === "AnthropicMessages" ? "anthropic" : e.protocol === "OpenAiEmbeddingsCompatible" ? "openai_embeddings" : "openai"} · ${e.credential_ref}`,
                 }))}
               />
             )}
