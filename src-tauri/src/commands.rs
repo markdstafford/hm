@@ -488,19 +488,20 @@ pub fn jira_issue_ingestion_run(
 
             // Best-effort post-ingestion embedding refresh. A provider failure
             // must not roll back ingestion success — errors are logged only.
-            // The DB mutex is held in two brief scopes; the provider HTTP call
-            // happens between them so the mutex is not held during network I/O.
+            // The DB mutex is held in two brief scopes per batch; the provider
+            // HTTP call happens between them so the mutex is not held during
+            // network I/O.
             if ingestion_ok {
                 let store_for_embed = app_for_worker.state::<ManagedSecretStore>();
                 let embed_now = now_utc_rfc3339();
                 let embed_opts = crate::embeddings::service::EmbeddingRunOptions {
                     source_system_id: Some(source_system_id_for_worker.clone()),
                     entity_kind: None,
-                    limit: Some(25),
+                    limit: Some(500),
                     force_rebuild: false,
                 };
 
-                // Phase 1: claim docs + resolve AI config (brief lock).
+                // Phase 1: claim docs + resolve AI config + split into batches (brief lock).
                 let phase1 = db.lock().ok().and_then(|conn| {
                     let batch = crate::embeddings::service::prepare_refresh_batch(
                         &conn, &embed_opts, &embed_now,
@@ -513,29 +514,36 @@ pub fn jira_issue_ingestion_run(
                 }); // ← DB mutex released here
 
                 if let Some((batch, resolved)) = phase1 {
-                    // Phase 2: HTTP call (no DB lock held).
-                    let request = crate::embeddings::provider::EmbeddingRequest {
-                        input: batch.texts.clone(),
-                    };
-                    match crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::default()
-                        .run(&resolved, request)
-                    {
-                        Ok(response) => {
-                            // Phase 3: write results (brief lock).
-                            if let Ok(conn) = db.lock() {
-                                if let Err(e) = crate::embeddings::service::complete_refresh_batch(
-                                    &conn, &batch, response, &embed_now,
-                                ) {
-                                    eprintln!("embedding write after ingestion of {project_key} failed (non-fatal): {e}");
+                    // Loop over text batches: for each batch, release lock → HTTP → re-acquire → write.
+                    for text_batch in &batch.text_batches {
+                        // Phase 2: HTTP call (no DB lock held).
+                        let request = crate::embeddings::provider::EmbeddingRequest {
+                            input: text_batch.texts.clone(),
+                        };
+                        match crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::default()
+                            .run(&resolved, request)
+                        {
+                            Ok(response) => {
+                                // Phase 3: write this batch's results (brief lock).
+                                if let Ok(conn) = db.lock() {
+                                    if let Err(e) = crate::embeddings::service::complete_text_batch(
+                                        &conn, text_batch, response, &embed_now,
+                                    ) {
+                                        eprintln!("embedding write after ingestion of {project_key} failed (non-fatal): {e}");
+                                        break;
+                                    }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            eprintln!("embedding provider call after ingestion of {project_key} failed (non-fatal): {e}");
-                            if let Ok(conn) = db.lock() {
-                                crate::embeddings::service::record_batch_provider_failure(
-                                    &conn, &batch, &e, &embed_now,
-                                );
+                            Err(e) => {
+                                eprintln!("embedding provider call after ingestion of {project_key} failed (non-fatal): {e}");
+                                if let Ok(conn) = db.lock() {
+                                    for doc in &text_batch.docs {
+                                        let _ = crate::embeddings::repository::record_embedding_failure(
+                                            &conn, &doc.id, &doc.source_system_id, &e, &embed_now,
+                                        );
+                                    }
+                                }
+                                break;
                             }
                         }
                     }
@@ -937,14 +945,15 @@ pub fn embedding_refresh_run(
     use crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner;
     use crate::embeddings::provider::EmbeddingRequest;
     use crate::embeddings::service::{
-        complete_refresh_batch, prepare_refresh_batch, record_batch_provider_failure,
+        prepare_refresh_batch, complete_text_batch,
         EmbeddingRunStatus, EmbeddingRunSummary,
     };
+    use crate::embeddings::repository::record_embedding_failure;
     use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
 
     let now = now_utc_rfc3339();
 
-    // Phase 1: claim documents + resolve AI provider config (brief DB lock).
+    // Phase 1: claim documents + split into batches + resolve AI provider config (brief DB lock).
     let (batch, resolved) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let batch = prepare_refresh_batch(&conn, &options, &now).map_err(|e| e.to_string())?;
@@ -965,19 +974,78 @@ pub fn embedding_refresh_run(
         (batch, resolved)
     }; // ← DB mutex released here
 
-    // Phase 2: provider HTTP call (no DB lock held).
-    let request = EmbeddingRequest { input: batch.texts.clone() };
-    let response = match OpenAiEmbeddingsRunner::default().run(&resolved, request) {
-        Ok(r) => r,
-        Err(e) => {
-            let conn = db.lock().map_err(|s| s.to_string())?;
-            return Ok(record_batch_provider_failure(&conn, &batch, &e, &now));
+    // Loop: for each text batch — release lock → provider HTTP → re-acquire → checkpoint.
+    let mut embedded: u32 = 0;
+    let mut failed: u32 = 0;
+    let mut model_id = String::new();
+    let mut dimension: u32 = 0;
+    let mut safe_error: Option<String> = None;
+    let mut paused = false;
+
+    for text_batch in &batch.text_batches {
+        // Phase 2: provider HTTP call (no DB lock held).
+        let request = EmbeddingRequest { input: text_batch.texts.clone() };
+        let response = match OpenAiEmbeddingsRunner::default().run(&resolved, request) {
+            Ok(r) => r,
+            Err(e) => {
+                let conn = db.lock().map_err(|s| s.to_string())?;
+                for doc in &text_batch.docs {
+                    let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &e, &now);
+                }
+                failed += text_batch.docs.len() as u32;
+                paused = true;
+                if safe_error.is_none() {
+                    safe_error = Some(e.to_string());
+                }
+                break;
+            }
+        };
+
+        // Phase 3: write this batch's vectors + update status (brief DB lock).
+        model_id = crate::embeddings::repository::stable_model_id(
+            &response.profile,
+            &response.model,
+            "OpenAiEmbeddings",
+            response.dimension,
+            "l2",
+        );
+        dimension = response.dimension as u32;
+
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        match complete_text_batch(&conn, text_batch, response, &now) {
+            Ok(_) => {
+                embedded += text_batch.docs.len() as u32;
+            }
+            Err(e) => {
+                for doc in &text_batch.docs {
+                    let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &e, &now);
+                }
+                failed += text_batch.docs.len() as u32;
+                paused = true;
+                if safe_error.is_none() {
+                    safe_error = Some(e.to_string());
+                }
+                break;
+            }
         }
+    }
+
+    let status = if paused {
+        if embedded > 0 { EmbeddingRunStatus::Partial } else { EmbeddingRunStatus::Paused }
+    } else {
+        EmbeddingRunStatus::Complete
     };
 
-    // Phase 3: write vectors + update status (brief DB lock).
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    complete_refresh_batch(&conn, &batch, response, &now).map_err(|e| e.to_string())
+    Ok(EmbeddingRunSummary {
+        status,
+        scanned: batch.scanned,
+        embedded,
+        skipped: batch.scanned.saturating_sub(embedded + failed),
+        failed,
+        model_id,
+        dimension,
+        safe_error,
+    })
 }
 
 /// Return counts of indexable documents by embedding status. Pass

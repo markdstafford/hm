@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use crate::embeddings::errors::{EmbeddingError, EmbeddingErrorCategory};
+use crate::embeddings::limits::{EmbeddingBatchLimits, TextBatch, split_claimed_documents};
 use crate::embeddings::provider::{EmbeddingProvider, EmbeddingRequest};
 use crate::embeddings::repository::{
     assemble_text, claim_documents, recover_stuck_embedding_claims,
@@ -344,7 +345,6 @@ pub fn refresh_embeddings_with_provider(
     };
 
     let claimed = claim_documents(conn, &claim_opts, now_utc)?;
-    let scanned = claimed.len() as u32;
 
     if claimed.is_empty() {
         return Ok(EmbeddingRunSummary {
@@ -359,73 +359,67 @@ pub fn refresh_embeddings_with_provider(
         });
     }
 
-    // Assemble text for each claimed document
+    // Assemble text for each claimed document and split into provider-sized batches
     let texts: Vec<String> = claimed
         .iter()
         .map(|doc| assemble_text(doc.title.as_deref(), &doc.body))
         .collect();
+    let limits = EmbeddingBatchLimits::default();
+    let text_batches = split_claimed_documents(claimed, texts, &limits);
+    let scanned: u32 = text_batches.iter().map(|b| b.docs.len() as u32).sum();
 
-    let request = EmbeddingRequest { input: texts };
+    let mut acc = RefreshAccumulator::new(scanned);
 
-    // Call provider (DB lock is NOT held here)
-    let response = match provider.embed(request) {
-        Ok(r) => r,
-        Err(e) => {
-            for doc in &claimed {
-                let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+    for text_batch in &text_batches {
+        let request = EmbeddingRequest { input: text_batch.texts.clone() };
+
+        // Call provider — no DB lock is held here (conn is passed but not locked
+        // inside this function; the caller holds no mutex in tests).
+        let response = match provider.embed(request) {
+            Ok(r) => r,
+            Err(e) => {
+                // Record failure for all docs in this batch
+                for doc in &text_batch.docs {
+                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+                }
+                acc.failed += text_batch.docs.len() as u32;
+                acc.paused = true;
+                if acc.safe_error.is_none() {
+                    acc.safe_error = Some(e.to_string());
+                }
+                break;
             }
-            return Ok(EmbeddingRunSummary {
-                status: EmbeddingRunStatus::Paused,
-                scanned,
-                embedded: 0,
-                skipped: 0,
-                failed: scanned,
-                model_id: String::new(),
-                dimension: 0,
-                safe_error: Some(e.to_string()),
-            });
-        }
-    };
+        };
 
-    let model_id = crate::embeddings::repository::stable_model_id(
-        &response.profile,
-        &response.model,
-        "OpenAiEmbeddings",
-        response.dimension,
-        "l2",
-    );
-    let dimension = response.dimension as u32;
+        // Checkpoint: write this batch's vectors immediately
+        acc.model_id = crate::embeddings::repository::stable_model_id(
+            &response.profile,
+            &response.model,
+            "OpenAiEmbeddings",
+            response.dimension,
+            "l2",
+        );
+        acc.dimension = response.dimension as u32;
 
-    // Write vectors and update status
-    match write_embedding_batch(conn, &claimed, &response, now_utc) {
-        Ok(()) => {}
-        Err(e) => {
-            for doc in &claimed {
-                let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+        match write_embedding_batch(conn, &text_batch.docs, &response, now_utc) {
+            Ok(()) => {
+                acc.embedded += text_batch.docs.len() as u32;
             }
-            return Ok(EmbeddingRunSummary {
-                status: EmbeddingRunStatus::Paused,
-                scanned,
-                embedded: 0,
-                skipped: 0,
-                failed: scanned,
-                model_id,
-                dimension,
-                safe_error: Some(e.to_string()),
-            });
+            Err(e) => {
+                for doc in &text_batch.docs {
+                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+                }
+                acc.failed += text_batch.docs.len() as u32;
+                acc.paused = true;
+                if acc.safe_error.is_none() {
+                    acc.safe_error = Some(e.to_string());
+                }
+                break;
+            }
         }
     }
 
-    Ok(EmbeddingRunSummary {
-        status: EmbeddingRunStatus::Complete,
-        scanned,
-        embedded: scanned,
-        skipped: 0,
-        failed: 0,
-        model_id,
-        dimension,
-        safe_error: None,
-    })
+    Ok(acc.finish())
 }
 
 pub fn refresh_embeddings(
@@ -434,7 +428,8 @@ pub fn refresh_embeddings(
     options: EmbeddingRunOptions,
     now_utc: &str,
 ) -> Result<EmbeddingRunSummary, EmbeddingError> {
-    let provider = crate::embeddings::provider::AiEmbeddingProvider::default();
+    use crate::embeddings::provider::AiEmbeddingProvider;
+    let provider = AiEmbeddingProvider::default();
 
     recover_stuck_embedding_claims(conn).map_err(EmbeddingError::from)?;
 
@@ -463,95 +458,71 @@ pub fn refresh_embeddings(
     };
 
     let claimed = claim_documents(conn, &claim_opts, now_utc)?;
-    let scanned = claimed.len() as u32;
 
     if claimed.is_empty() {
         return Ok(EmbeddingRunSummary {
             status: EmbeddingRunStatus::Complete,
-            scanned: 0,
-            embedded: 0,
-            skipped: 0,
-            failed: 0,
-            model_id: String::new(),
-            dimension: 0,
-            safe_error: None,
+            scanned: 0, embedded: 0, skipped: 0, failed: 0,
+            model_id: String::new(), dimension: 0, safe_error: None,
         });
     }
 
-    let texts: Vec<String> = claimed
-        .iter()
+    let texts: Vec<String> = claimed.iter()
         .map(|doc| assemble_text(doc.title.as_deref(), &doc.body))
         .collect();
-    let request = EmbeddingRequest { input: texts };
+    let limits = EmbeddingBatchLimits::default();
+    let text_batches = split_claimed_documents(claimed, texts, &limits);
+    let scanned: u32 = text_batches.iter().map(|b| b.docs.len() as u32).sum();
 
-    let response = match provider.embed_for_default_route(conn, store, request) {
-        Ok(r) => r,
-        Err(e) => {
-            for doc in &claimed {
-                let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+    let mut acc = RefreshAccumulator::new(scanned);
+
+    for text_batch in &text_batches {
+        let request = EmbeddingRequest { input: text_batch.texts.clone() };
+
+        let response = match provider.embed_for_default_route(conn, store, request) {
+            Ok(r) => r,
+            Err(e) => {
+                for doc in &text_batch.docs {
+                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+                }
+                acc.failed += text_batch.docs.len() as u32;
+                acc.paused = true;
+                if acc.safe_error.is_none() { acc.safe_error = Some(e.to_string()); }
+                break;
             }
-            return Ok(EmbeddingRunSummary {
-                status: EmbeddingRunStatus::Paused,
-                scanned,
-                embedded: 0,
-                skipped: 0,
-                failed: scanned,
-                model_id: String::new(),
-                dimension: 0,
-                safe_error: Some(e.to_string()),
-            });
-        }
-    };
+        };
 
-    let model_id = crate::embeddings::repository::stable_model_id(
-        &response.profile,
-        &response.model,
-        "OpenAiEmbeddings",
-        response.dimension,
-        "l2",
-    );
-    let dimension = response.dimension as u32;
+        acc.model_id = crate::embeddings::repository::stable_model_id(
+            &response.profile, &response.model, "OpenAiEmbeddings", response.dimension, "l2",
+        );
+        acc.dimension = response.dimension as u32;
 
-    match write_embedding_batch(conn, &claimed, &response, now_utc) {
-        Ok(()) => {}
-        Err(e) => {
-            for doc in &claimed {
-                let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+        match write_embedding_batch(conn, &text_batch.docs, &response, now_utc) {
+            Ok(()) => { acc.embedded += text_batch.docs.len() as u32; }
+            Err(e) => {
+                for doc in &text_batch.docs {
+                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+                }
+                acc.failed += text_batch.docs.len() as u32;
+                acc.paused = true;
+                if acc.safe_error.is_none() { acc.safe_error = Some(e.to_string()); }
+                break;
             }
-            return Ok(EmbeddingRunSummary {
-                status: EmbeddingRunStatus::Paused,
-                scanned,
-                embedded: 0,
-                skipped: 0,
-                failed: scanned,
-                model_id,
-                dimension,
-                safe_error: Some(e.to_string()),
-            });
         }
     }
 
-    Ok(EmbeddingRunSummary {
-        status: EmbeddingRunStatus::Complete,
-        scanned,
-        embedded: scanned,
-        skipped: 0,
-        failed: 0,
-        model_id,
-        dimension,
-        safe_error: None,
-    })
+    Ok(acc.finish())
 }
 
 /// Batch prepared during Phase 1 of a scoped refresh run.
-/// Holds the claimed documents so Phase 3 can write their results.
+/// Split into `TextBatch` slices so each slice fits within provider limits.
 pub struct PreparedRefreshBatch {
-    pub claimed: Vec<crate::embeddings::repository::ClaimedDocument>,
-    pub texts: Vec<String>,
+    pub text_batches: Vec<TextBatch>,
     pub scanned: u32,
 }
 
-/// Phase 1 of a scoped refresh: recover stuck claims, apply force_rebuild, claim documents.
+/// Phase 1 of a scoped refresh: recover stuck claims, apply force_rebuild, claim documents,
+/// and split into provider-sized `TextBatch` slices.
 ///
 /// Call with a brief DB lock. Release the lock before calling the embedding provider.
 /// Returns `None` when there are no documents to embed.
@@ -595,20 +566,53 @@ pub fn prepare_refresh_batch(
         .iter()
         .map(|doc| assemble_text(doc.title.as_deref(), &doc.body))
         .collect();
-    let scanned = claimed.len() as u32;
 
-    Ok(Some(PreparedRefreshBatch { claimed, texts, scanned }))
+    let limits = EmbeddingBatchLimits::default();
+    let text_batches = split_claimed_documents(claimed, texts, &limits);
+    let scanned = text_batches.iter().map(|b| b.docs.len() as u32).sum();
+
+    Ok(Some(PreparedRefreshBatch { text_batches, scanned }))
 }
 
-/// Phase 3 of a scoped refresh: write embedding vectors and update document status.
+/// Phase 3 of a scoped refresh for a single `TextBatch`: write embedding vectors and
+/// update document status.
 ///
 /// Call with a brief DB lock after the provider HTTP call has completed.
+pub fn complete_text_batch(
+    conn: &rusqlite::Connection,
+    batch: &TextBatch,
+    response: crate::embeddings::provider::EmbeddingResponse,
+    now_utc: &str,
+) -> Result<(String, u32), EmbeddingError> {
+    let model_id = crate::embeddings::repository::stable_model_id(
+        &response.profile,
+        &response.model,
+        "OpenAiEmbeddings",
+        response.dimension,
+        "l2",
+    );
+    let dimension = response.dimension as u32;
+    write_embedding_batch(conn, &batch.docs, &response, now_utc)?;
+    Ok((model_id, dimension))
+}
+
+/// Complete all text batches in a `PreparedRefreshBatch` using a single provider response.
+///
+/// This is only useful when the caller has already made a single-shot provider call
+/// covering all documents in the batch. For multi-batch loops, use `complete_text_batch`
+/// per slice instead.
+#[allow(dead_code)]
 pub fn complete_refresh_batch(
     conn: &rusqlite::Connection,
     batch: &PreparedRefreshBatch,
     response: crate::embeddings::provider::EmbeddingResponse,
     now_utc: &str,
 ) -> Result<EmbeddingRunSummary, EmbeddingError> {
+    // Collect all docs from all text_batches.
+    let all_docs: Vec<crate::embeddings::repository::ClaimedDocument> = batch.text_batches.iter()
+        .flat_map(|tb| tb.docs.iter().cloned())
+        .collect();
+
     let model_id = crate::embeddings::repository::stable_model_id(
         &response.profile,
         &response.model,
@@ -618,7 +622,7 @@ pub fn complete_refresh_batch(
     );
     let dimension = response.dimension as u32;
 
-    match write_embedding_batch(conn, &batch.claimed, &response, now_utc) {
+    match write_embedding_batch(conn, &all_docs, &response, now_utc) {
         Ok(()) => Ok(EmbeddingRunSummary {
             status: EmbeddingRunStatus::Complete,
             scanned: batch.scanned,
@@ -630,7 +634,7 @@ pub fn complete_refresh_batch(
             safe_error: None,
         }),
         Err(e) => {
-            for doc in &batch.claimed {
+            for doc in &all_docs {
                 let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
             }
             Ok(EmbeddingRunSummary {
@@ -647,16 +651,19 @@ pub fn complete_refresh_batch(
     }
 }
 
-/// Record provider failures for all documents in a batch.
+/// Record provider failures for all documents in a prepared batch.
 /// Call with a brief DB lock when the provider HTTP call returns an error.
+#[allow(dead_code)]
 pub fn record_batch_provider_failure(
     conn: &rusqlite::Connection,
     batch: &PreparedRefreshBatch,
     err: &EmbeddingError,
     now_utc: &str,
 ) -> EmbeddingRunSummary {
-    for doc in &batch.claimed {
-        let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, err, now_utc);
+    for tb in &batch.text_batches {
+        for doc in &tb.docs {
+            let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, err, now_utc);
+        }
     }
     EmbeddingRunSummary {
         status: EmbeddingRunStatus::Paused,
@@ -667,6 +674,53 @@ pub fn record_batch_provider_failure(
         model_id: String::new(),
         dimension: 0,
         safe_error: Some(err.to_string()),
+    }
+}
+
+/// Accumulates results across multiple provider batches within a single refresh run.
+struct RefreshAccumulator {
+    scanned: u32,
+    embedded: u32,
+    failed: u32,
+    model_id: String,
+    dimension: u32,
+    safe_error: Option<String>,
+    paused: bool,
+}
+
+impl RefreshAccumulator {
+    fn new(scanned: u32) -> Self {
+        Self {
+            scanned,
+            embedded: 0,
+            failed: 0,
+            model_id: String::new(),
+            dimension: 0,
+            safe_error: None,
+            paused: false,
+        }
+    }
+
+    fn finish(self) -> EmbeddingRunSummary {
+        let status = if self.paused {
+            if self.embedded > 0 {
+                EmbeddingRunStatus::Partial
+            } else {
+                EmbeddingRunStatus::Paused
+            }
+        } else {
+            EmbeddingRunStatus::Complete
+        };
+        EmbeddingRunSummary {
+            status,
+            scanned: self.scanned,
+            embedded: self.embedded,
+            skipped: self.scanned.saturating_sub(self.embedded + self.failed),
+            failed: self.failed,
+            model_id: self.model_id,
+            dimension: self.dimension,
+            safe_error: self.safe_error,
+        }
     }
 }
 
@@ -1289,16 +1343,23 @@ mod tests {
         }; // lock released here
 
         // Phase 2: provider call (no lock held — verified inside embed()).
-        let request = EmbeddingRequest { input: batch.texts.clone() };
+        // With the new batching structure, use the first (and only) text batch.
+        let first_batch = &batch.text_batches[0];
+        let request = EmbeddingRequest { input: first_batch.texts.clone() };
         let response = provider.embed(request).expect("embed");
 
         // Phase 3: write results (brief lock).
         let conn = db.lock().expect("phase 3 lock");
-        let summary = complete_refresh_batch(&conn, &batch, response, now)
+        let (_, _) = complete_text_batch(&conn, first_batch, response, now)
             .expect("complete batch");
 
-        assert_eq!(summary.embedded, 1);
-        assert!(matches!(summary.status, EmbeddingRunStatus::Complete));
+        // Verify by checking DB state
+        let status: String = conn.query_row(
+            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(status, "embedded");
     }
 
     /// Regression test: prove that `embed_query_text_unlocked` does not require
@@ -1311,5 +1372,182 @@ mod tests {
         assert_eq!(dimension, 3);
         assert_eq!(vector.len(), 3);
         assert!(!model_id.is_empty());
+    }
+
+    #[test]
+    fn refresh_splits_200_documents_into_multiple_provider_requests() {
+        use std::sync::{Arc, Mutex};
+
+        let conn = open_with_embedding_schema();
+
+        // This test writes embedding vectors and requires sqlite-vec.
+        if crate::db::load_sqlite_vec(&conn).is_err() {
+            eprintln!("SKIP: sqlite-vec not available");
+            return;
+        }
+
+        // Seed source + work item
+        conn.execute(
+            "INSERT OR IGNORE INTO source_systems (id, kind, display_name, created_at, updated_at) \
+             VALUES ('srcsys_1', 'jira', 'Jira', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO work_items (id, source_system_id, source_kind, upstream_id, title, state, last_seen_at, raw_updated_hash, created_at, updated_at) \
+             VALUES ('wi_1', 'srcsys_1', 'jira_issue', '1001', 'Login bug', 'open', '2026-01-01T00:00:00Z', 'raw', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Seed 200 documents
+        for i in 0..200 {
+            conn.execute(
+                "INSERT OR IGNORE INTO indexable_documents \
+                 (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+                 VALUES (?1, 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', ?2, ?3, '{}', ?4, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![
+                    format!("doc_{i}"),
+                    format!("Issue {i}"),
+                    format!("Body of issue {i}"),
+                    format!("hash_{i}"),
+                ],
+            ).unwrap();
+        }
+
+        // Provider that records how many inputs each call received
+        let call_sizes: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
+        let call_sizes_clone = call_sizes.clone();
+
+        struct CountingProvider {
+            call_sizes: Arc<Mutex<Vec<usize>>>,
+            inner: FakeEmbeddingProvider,
+        }
+        impl EmbeddingProvider for CountingProvider {
+            fn embed(&self, req: EmbeddingRequest) -> Result<crate::embeddings::provider::EmbeddingResponse, EmbeddingError> {
+                self.call_sizes.lock().unwrap().push(req.input.len());
+                self.inner.embed(req)
+            }
+        }
+
+        let provider = CountingProvider {
+            call_sizes: call_sizes_clone,
+            inner: FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small"),
+        };
+
+        let options = EmbeddingRunOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: Some(200),
+            force_rebuild: false,
+        };
+
+        let summary = refresh_embeddings_with_provider(
+            &conn, &provider, options, "2026-01-01T00:00:00Z",
+        ).expect("refresh");
+
+        let sizes = call_sizes.lock().unwrap().clone();
+        assert_eq!(sizes, vec![96, 96, 8], "expected three provider calls with sizes [96, 96, 8], got {:?}", sizes);
+        assert_eq!(summary.scanned, 200);
+        assert_eq!(summary.embedded, 200);
+        assert_eq!(summary.failed, 0);
+        assert!(matches!(summary.status, EmbeddingRunStatus::Complete));
+    }
+
+    #[test]
+    fn refresh_checkpoints_successes_before_rate_limit_pause() {
+        use std::sync::{Arc, Mutex};
+
+        let conn = open_with_embedding_schema();
+
+        // This test writes embedding vectors and requires sqlite-vec.
+        if crate::db::load_sqlite_vec(&conn).is_err() {
+            eprintln!("SKIP: sqlite-vec not available");
+            return;
+        }
+
+        // Seed source + work item
+        conn.execute(
+            "INSERT OR IGNORE INTO source_systems (id, kind, display_name, created_at, updated_at) \
+             VALUES ('srcsys_1', 'jira', 'Jira', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO work_items (id, source_system_id, source_kind, upstream_id, title, state, last_seen_at, raw_updated_hash, created_at, updated_at) \
+             VALUES ('wi_1', 'srcsys_1', 'jira_issue', '1001', 'Login bug', 'open', '2026-01-01T00:00:00Z', 'raw', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        ).unwrap();
+
+        // Seed 100 documents (splits into batches of 96 + 4)
+        for i in 0..100 {
+            conn.execute(
+                "INSERT OR IGNORE INTO indexable_documents \
+                 (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+                 VALUES (?1, 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', ?2, ?3, '{}', ?4, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![
+                    format!("doc_{i}"),
+                    format!("Issue {i}"),
+                    format!("Body of issue {i}"),
+                    format!("hash_{i}"),
+                ],
+            ).unwrap();
+        }
+
+        // Provider that succeeds on the first call and returns rate-limited on the second
+        let call_count: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+        let call_count_clone = call_count.clone();
+
+        struct RateLimitOnSecondCall {
+            call_count: Arc<Mutex<u32>>,
+            inner: FakeEmbeddingProvider,
+        }
+        impl EmbeddingProvider for RateLimitOnSecondCall {
+            fn embed(&self, req: EmbeddingRequest) -> Result<crate::embeddings::provider::EmbeddingResponse, EmbeddingError> {
+                let mut count = self.call_count.lock().unwrap();
+                *count += 1;
+                if *count >= 2 {
+                    Err(EmbeddingError::provider_rate_limited(Some(60)))
+                } else {
+                    self.inner.embed(req)
+                }
+            }
+        }
+
+        let provider = RateLimitOnSecondCall {
+            call_count: call_count_clone,
+            inner: FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small"),
+        };
+
+        let options = EmbeddingRunOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: Some(100),
+            force_rebuild: false,
+        };
+
+        let summary = refresh_embeddings_with_provider(
+            &conn, &provider, options, "2026-01-01T00:00:00Z",
+        ).expect("refresh");
+
+        // 96 embedded (first batch), 4 failed (second batch hit rate limit)
+        assert_eq!(summary.scanned, 100, "scanned should be 100");
+        assert_eq!(summary.embedded, 96, "first batch of 96 should succeed");
+        assert_eq!(summary.failed, 4, "second batch of 4 should fail");
+        assert!(
+            matches!(summary.status, EmbeddingRunStatus::Partial),
+            "status should be Partial when some embedded and some failed, got {:?}", summary.status
+        );
+
+        // Verify DB state: 96 rows embedded, 4 rows failed
+        let embedded_count: i64 = conn.query_row(
+            "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'embedded'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        let failed_count: i64 = conn.query_row(
+            "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'failed'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(embedded_count, 96, "96 docs should have embedding_status=embedded");
+        assert_eq!(failed_count, 4, "4 docs should have embedding_status=failed");
     }
 }
