@@ -108,6 +108,11 @@ export const commands = {
 	jiraLinkAsDuplicate: (input: JiraLinkAsDuplicateInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_link_as_duplicate", { input })),
 	jiraLinkAsDuplicateReverse: (input: JiraReverseMutationInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_link_as_duplicate_reverse", { input })),
 	jiraAddComment: (input: JiraAddCommentInput) => typedError<AuditLogEntry, string>(__TAURI_INVOKE("jira_add_comment", { input })),
+	hygieneSuggestionsList: (filter: {
+	limit: number | null,
+} | null) => typedError<HygieneSuggestionDto[], string>(__TAURI_INVOKE("hygiene_suggestions_list", { filter })),
+	gardenerRunOnDemand: (input: GardenerOnDemandInput) => typedError<GardenerRunSummary, string>(__TAURI_INVOKE("gardener_run_on_demand", { input })),
+	gardenerRecordSuppression: (input: GardenerRecordSuppressionInput) => typedError<string, string>(__TAURI_INVOKE("gardener_record_suppression", { input })),
 };
 
 /* Types */
@@ -273,6 +278,74 @@ export type EmbeddingStatusSummary = {
 	failed: number,
 	last_embedding_refresh: string | null,
 	warning: string | null,
+};
+
+export type EngineRunSummary = {
+	engine_id: string,
+	status: GardenerRunStatus,
+	scanned: number,
+	emitted: number,
+	suppressed: number,
+	coalesced: boolean,
+	safe_error: string | null,
+};
+
+export type GardenerOnDemandInput = {
+	engine_id: string,
+	source_id: string | null,
+	target_upstream_id: string | null,
+};
+
+export type GardenerRecordSuppressionInput = {
+	engine_id: string,
+	key_kind: string,
+	source_id: string,
+	source_kind: string,
+	upstream_id: string,
+	reason: string,
+};
+
+export type GardenerRunStatus = "complete" | "partial" | "skipped" | "coalesced" | "failed";
+
+export type GardenerRunSummary = {
+	trigger: GardenerTrigger,
+	status: GardenerRunStatus,
+	engines: EngineRunSummary[],
+	safe_error: string | null,
+};
+
+export type GardenerTrigger = "scheduled" | "on_demand";
+
+export type HygieneIssueRefDto = {
+	key: string,
+	title: string,
+	status: string | null,
+	assignee: string | null,
+	updated_at: string | null,
+	body: string | null,
+	labels: string[],
+};
+
+export type HygieneProposedChangeDto = {
+	title: string | null,
+	body: string | null,
+	labels: string[],
+};
+
+export type HygieneSuggestionDto = {
+	id: string,
+	category: string,
+	action: string,
+	confidence: number,
+	rationale: string,
+	target: HygieneIssueRefDto,
+	duplicate_of: HygieneIssueRefDto | null,
+	last_activity_at: string | null,
+	proposed: HygieneProposedChangeDto | null,
+};
+
+export type HygieneSuggestionsListFilter = {
+	limit: number | null,
 };
 
 export type IssueHistoryRetentionConfig = {
