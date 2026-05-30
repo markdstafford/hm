@@ -261,7 +261,7 @@ describe("SourcesCategory", () => {
       data: {
         run_id: "run_noop",
         status: "succeeded",
-        phase: null,
+        phase: "",
         saved_issues: 0,
         total_issues: 0,
         current_page: null,
