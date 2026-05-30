@@ -248,15 +248,23 @@ fn validate_supported_combination(
     Ok(())
 }
 
+fn looks_like_secret_key(key: &str) -> bool {
+    let key_lower = key.to_ascii_lowercase();
+    let segments: Vec<&str> = key_lower.split(['_', '-']).collect();
+    // Multi-word needles: substring match is sufficient (e.g. "api_key" won't false-positive on "max_inputs_per_request")
+    // Single-word needles like "token": use exact segment match to avoid false positives
+    // on keys like "max_estimated_tokens_per_request" which contain "token" as a substring of "tokens"
+    let multi_word = ["api_key", "authorization"];
+    let single_word = ["token", "secret", "password"];
+    multi_word.iter().any(|needle| key_lower.contains(needle))
+        || single_word.iter().any(|needle| segments.iter().any(|s| s == needle))
+}
+
 fn validate_settings_no_secrets(value: &serde_json::Value, path: &str) -> Result<(), AiError> {
     match value {
         serde_json::Value::Object(map) => {
             for (key, val) in map {
-                let key_lower = key.to_ascii_lowercase();
-                if ["api_key", "token", "secret", "authorization", "password"]
-                    .iter()
-                    .any(|needle| key_lower.contains(needle))
-                {
+                if looks_like_secret_key(key) {
                     return Err(AiError::InvalidConfig(format!(
                         "profile settings key looks like a secret — store credentials via credential_ref instead: {path}.{key}"
                     )));
@@ -700,25 +708,30 @@ mod tests {
         AiProviderConfig {
             version: 1,
             credentials: vec![AiCredentialConfig {
-                name: "openai-prod".into(),
-                kind: AiCredentialKind::BearerToken,
-                source: CredentialSource::Keychain { key_ref: "ai.credentials.openai-prod".into() },
+                name: "grove".into(),
+                kind: AiCredentialKind::ApiKey,
+                source: CredentialSource::Keychain { key_ref: "ai.credentials.grove".into() },
             }],
             endpoints: vec![AiEndpointConfig {
-                name: "embeddings-gateway".into(),
+                name: "grove-embeddings".into(),
                 protocol: AiEndpointProtocol::OpenAiEmbeddingsCompatible,
-                base_url: "https://api.openai.com/v1".into(),
-                credential_ref: "openai-prod".into(),
+                base_url: "https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1".into(),
+                credential_ref: "grove".into(),
             }],
             profiles: vec![AiProfileConfig {
-                name: "embed-small".into(),
-                endpoint_ref: "embeddings-gateway".into(),
-                model: "text-embedding-3-small".into(),
+                name: "grove-embed-v4".into(),
+                endpoint_ref: "grove-embeddings".into(),
+                model: "embed-v-4-0".into(),
                 runner: AiRunner::OpenAiEmbeddings,
                 execution_mode: AiExecutionMode::DirectApi,
-                settings: crate::commands::JsonValue(serde_json::json!({ "dimensions": 3 })),
+                settings: crate::commands::JsonValue(serde_json::json!({
+                    "max_inputs_per_request": 96,
+                    "max_estimated_tokens_per_request": 8000,
+                    "max_batches_per_run": 50,
+                    "rate_limit_backoff_seconds": 60
+                })),
             }],
-            routing: BTreeMap::from([("embedding.default".into(), "embed-small".into())]),
+            routing: BTreeMap::from([("embedding.default".into(), "grove-embed-v4".into())]),
         }
     }
 

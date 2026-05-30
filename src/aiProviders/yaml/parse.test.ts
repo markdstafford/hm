@@ -164,6 +164,43 @@ profiles:
     expect(() => yamlToConfig(bad, PREVIOUS)).toThrow(/api_key|secret/i);
   });
 
+  const GROVE_EMBEDDING_FRAGMENT = `credentials:
+  - name: grove
+    type: api_key
+    value: \${KEYCHAIN:ai.credentials.grove}
+endpoints:
+  - name: grove-embeddings
+    protocol: openai_embeddings
+    base_url: https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1
+    credential: grove
+profiles:
+  - name: grove-embed-v4
+    endpoint: grove-embeddings
+    model: embed-v-4-0
+    runner: openai_embeddings
+    max_inputs_per_request: 96
+    max_estimated_tokens_per_request: 8000
+    max_batches_per_run: 50
+    rate_limit_backoff_seconds: 60
+routing:
+  embedding.default: grove-embed-v4
+`;
+
+  it("parses a Grove OpenAI-compatible embedding profile and route", () => {
+    const cfg = yamlToConfig(GROVE_EMBEDDING_FRAGMENT, PREVIOUS);
+    expect(cfg.endpoints[0].protocol).toBe("OpenAiEmbeddingsCompatible");
+    expect(cfg.profiles[0].runner).toBe("OpenAiEmbeddings");
+    expect(cfg.profiles[0].model).toBe("embed-v-4-0");
+    expect(cfg.profiles[0].settings).toMatchObject({
+      _yaml_runner: "openai_embeddings",
+      max_inputs_per_request: 96,
+      max_estimated_tokens_per_request: 8000,
+      max_batches_per_run: 50,
+      rate_limit_backoff_seconds: 60,
+    });
+    expect(cfg.routing["embedding.default"]).toBe("grove-embed-v4");
+  });
+
   it("does not unwrap when the root already has known keys", () => {
     // Pathological mix: top-level routing and a stray ai: key. We must read
     // the top-level routing and not the inner ai.routing — otherwise users

@@ -106,9 +106,7 @@ mod tests {
 
     #[test]
     fn provider_error_display_redacts_secret_and_document_text() {
-        let err = EmbeddingError::provider_rejected(
-            "Bearer sk-test-secret Authorization raw body Cannot sign in".into(),
-        );
+        let err = EmbeddingError::provider_rejected();
         let msg = err.to_string();
         assert!(msg.contains("Embedding provider rejected the request"), "should contain safe message");
         assert!(!msg.contains("sk-test-secret"), "must not contain secret");

@@ -55,6 +55,42 @@ describe("configToYaml", () => {
     expect(yaml).toMatch(/routing:\s+question\.answer: grove-sonnet/);
   });
 
+  it("emits OpenAI embeddings protocol and runner aliases", () => {
+    const config: AiProviderConfig = {
+      version: 1,
+      credentials: SAMPLE.credentials,
+      endpoints: [
+        {
+          name: "grove-embeddings",
+          protocol: "OpenAiEmbeddingsCompatible",
+          base_url: "https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1",
+          credential_ref: "grove",
+        },
+      ],
+      profiles: [
+        {
+          name: "grove-embed-v4",
+          endpoint_ref: "grove-embeddings",
+          model: "embed-v-4-0",
+          runner: "OpenAiEmbeddings",
+          execution_mode: "DirectApi",
+          settings: {
+            max_inputs_per_request: 96,
+            max_estimated_tokens_per_request: 8000,
+            max_batches_per_run: 50,
+            rate_limit_backoff_seconds: 60,
+          },
+        },
+      ],
+      routing: { "embedding.default": "grove-embed-v4" },
+    };
+    const yaml = configToYaml(config);
+    expect(yaml).toContain("protocol: openai_embeddings");
+    expect(yaml).toContain("runner: openai_embeddings");
+    expect(yaml).toContain("model: embed-v-4-0");
+    expect(yaml).toMatch(/routing:\s+embedding\.default: grove-embed-v4/);
+  });
+
   it("preserves the _yaml_runner hint when present", () => {
     const config: AiProviderConfig = {
       ...SAMPLE,

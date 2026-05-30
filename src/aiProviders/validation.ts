@@ -3,7 +3,26 @@ import type { AiProviderConfig } from "./types";
 const NAME_PATTERN = /^[A-Za-z0-9._-]+$/;
 const TASK_SEGMENT_PATTERN = /^[a-z0-9_-]+$/;
 const ENV_VAR_PATTERN = /^[A-Z0-9_]+$/;
+// Match whole word segments (split on _ and -) so "tokens" in
+// "max_estimated_tokens_per_request" does not trigger on the "token" entry.
 const SECRET_SHAPED_KEYS = ["api_key", "token", "secret", "authorization", "password"];
+
+function isSecretShapedKey(key: string): boolean {
+  const segments = key.toLowerCase().split(/[_-]/);
+  return SECRET_SHAPED_KEYS.some((sk) => {
+    // Multi-segment patterns like "api_key" are already in the list as a
+    // joined string; check the key directly first, then check segment membership.
+    if (key.toLowerCase().includes(sk) && !sk.includes("_")) {
+      // Single-word entries (e.g. "token") use exact segment matching to avoid
+      // false positives on keys like "max_estimated_tokens_per_request" where
+      // "token" appears as a substring of a longer segment. Multi-word entries
+      // (e.g. "api_key") use substring matching because they are specific enough
+      // that a substring hit reliably indicates a secret-shaped key.
+      return segments.some((seg) => seg === sk);
+    }
+    return key.toLowerCase().includes(sk);
+  });
+}
 
 export function validateAiProviderConfig(config: AiProviderConfig): string[] {
   const errors: string[] = [];
@@ -64,6 +83,12 @@ export function validateAiProviderConfig(config: AiProviderConfig): string[] {
     if (!isValidTaskName(taskName)) errors.push(`Invalid task name: ${taskName}`);
     const profileExists = config.profiles.some(p => p.name === profileName);
     if (!profileExists) errors.push(`Missing profile reference: ${profileName}`);
+    if (taskName === "embedding.default") {
+      const profile = config.profiles.find((p) => p.name === profileName);
+      if (profile && profile.runner !== "OpenAiEmbeddings") {
+        errors.push(`routing task embedding.default references profile "${profileName}", which cannot create embeddings`);
+      }
+    }
   }
 
   return errors;
@@ -107,13 +132,14 @@ function isValidTaskName(name: string): boolean {
 function isSupportedCombo(protocol: string, runner: string, executionMode: string): boolean {
   return (
     (protocol === "AnthropicMessages" && runner === "AnthropicMessages" && executionMode === "DirectApi") ||
-    (protocol === "OpenAiChatCompletionsCompatible" && runner === "OpenAiChatCompletions" && executionMode === "DirectApi")
+    (protocol === "OpenAiChatCompletionsCompatible" && runner === "OpenAiChatCompletions" && executionMode === "DirectApi") ||
+    (protocol === "OpenAiEmbeddingsCompatible" && runner === "OpenAiEmbeddings" && executionMode === "DirectApi")
   );
 }
 
 function checkSettingsForSecrets(obj: Record<string, unknown>, errors: string[]) {
   for (const [key, value] of Object.entries(obj)) {
-    if (SECRET_SHAPED_KEYS.some(sk => key.toLowerCase().includes(sk))) {
+    if (isSecretShapedKey(key)) {
       errors.push(`Secret-shaped settings key: ${key}`);
     }
     walkSettingsValue(value, errors);

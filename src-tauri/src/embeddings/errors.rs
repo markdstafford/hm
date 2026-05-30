@@ -8,6 +8,7 @@ pub enum EmbeddingErrorCategory {
     UnsupportedProfile,
     ProviderRejected,
     ProviderUnavailable,
+    ProviderRateLimited,
     InvalidResponse,
     DimensionMismatch,
     Storage,
@@ -20,13 +21,14 @@ pub enum EmbeddingErrorCategory {
 pub struct EmbeddingError {
     pub category: EmbeddingErrorCategory,
     pub safe_summary: String,
+    pub retry_after_seconds: Option<u64>,
 }
 
 impl EmbeddingError {
     pub fn new(category: EmbeddingErrorCategory, safe_summary: impl Into<String>) -> Self {
-        Self { category, safe_summary: safe_summary.into() }
+        Self { category, safe_summary: safe_summary.into(), retry_after_seconds: None }
     }
-    pub fn provider_rejected(_detail: String) -> Self {
+    pub fn provider_rejected() -> Self {
         Self::new(EmbeddingErrorCategory::ProviderRejected, "Embedding provider rejected the request: Check the selected credential and model.")
     }
     pub fn unsupported_profile() -> Self {
@@ -43,6 +45,16 @@ impl EmbeddingError {
     }
     pub fn invalid_response() -> Self {
         Self::new(EmbeddingErrorCategory::InvalidResponse, "Embedding provider returned an invalid response.")
+    }
+    pub fn provider_rate_limited(retry_after_seconds: Option<u64>) -> Self {
+        let seconds = retry_after_seconds.unwrap_or(60).max(60);
+        Self {
+            category: EmbeddingErrorCategory::ProviderRateLimited,
+            safe_summary: format!(
+                "Embedding paused: provider rate limit reached. Retry after at least {seconds} seconds."
+            ),
+            retry_after_seconds: Some(seconds),
+        }
     }
 }
 
@@ -94,9 +106,7 @@ mod tests {
 
     #[test]
     fn provider_rejected_redacts_secret_and_document_text() {
-        let err = EmbeddingError::provider_rejected(
-            "Bearer sk-test-secret Authorization raw provider body Cannot sign in Full issue text".into(),
-        );
+        let err = EmbeddingError::provider_rejected();
         assert_safe_message(&err.to_string());
         assert!(err.to_string().contains("Embedding provider rejected"));
     }
@@ -124,5 +134,13 @@ mod tests {
         let rusqlite_err = rusqlite::Error::QueryReturnedNoRows;
         let err = EmbeddingError::from(rusqlite_err);
         assert_safe_message(&err.to_string());
+    }
+
+    #[test]
+    fn rate_limited_message_is_safe_and_carries_retry_delay() {
+        let err = EmbeddingError::provider_rate_limited(Some(30));
+        assert_eq!(err.retry_after_seconds, Some(60));
+        assert_safe_message(&err.to_string());
+        assert!(err.to_string().contains("Embedding paused"));
     }
 }

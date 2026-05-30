@@ -23,6 +23,10 @@ ai:
       protocol: openai
       base_url: https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1
       credential: grove
+    - name: grove-embeddings
+      protocol: openai_embeddings
+      base_url: https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1
+      credential: grove
   profiles:
     - name: grove-haiku-4.5-low
       endpoint: grove-anthropic
@@ -73,7 +77,16 @@ ai:
       runner: openai_agent_sdk
       openai:
         reasoning_effort: high
+    - name: grove-embed-v4
+      endpoint: grove-embeddings
+      model: embed-v-4-0
+      runner: openai_embeddings
+      max_inputs_per_request: 96
+      max_estimated_tokens_per_request: 8000
+      max_batches_per_run: 50
+      rate_limit_backoff_seconds: 60
   routing:
+    embedding.default: grove-embed-v4
     intent.classify: grove-gpt-5.4-nano
     pr.title_generate: grove-gpt-5.4-nano
     artifact.create: grove-gpt-5.5-high

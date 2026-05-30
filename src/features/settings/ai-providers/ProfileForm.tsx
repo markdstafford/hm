@@ -27,6 +27,7 @@ export const ROUTING_TASKS = [
   "implementation.review.final",
   "question.answer",
   "issue.triage",
+  "embedding.default",
 ] as const;
 
 type Mode = "create" | "edit";
@@ -75,6 +76,12 @@ const PROTOCOL_OPTIONS: {
     label: "OpenAI Chat Completions",
     defaultBaseUrl: "https://api.openai.com/v1",
     defaultRunner: "OpenAiChatCompletions",
+  },
+  {
+    value: "OpenAiEmbeddingsCompatible",
+    label: "OpenAI Embeddings",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    defaultRunner: "OpenAiEmbeddings",
   },
 ];
 
@@ -253,7 +260,7 @@ function applyCascade(
   if (originalProfile && originalProfile.runner !== runner) {
     delete settings._yaml_runner;
   }
-  if (state.effort) {
+  if (state.effort && runner !== "OpenAiEmbeddings") {
     if (runner === "AnthropicMessages") settings.effort = state.effort;
     else settings.reasoning_effort = state.effort;
   }
@@ -458,7 +465,7 @@ export function ProfileForm({
                 onValueChange={(v) => update("existingEndpointRef", v)}
                 options={config.endpoints.map((e) => ({
                   value: e.name,
-                  label: `${e.name} — ${e.protocol === "AnthropicMessages" ? "anthropic" : "openai"} · ${e.credential_ref}`,
+                  label: `${e.name} — ${e.protocol === "AnthropicMessages" ? "anthropic" : e.protocol === "OpenAiEmbeddingsCompatible" ? "openai_embeddings" : "openai"} · ${e.credential_ref}`,
                 }))}
               />
             )}
@@ -602,25 +609,27 @@ export function ProfileForm({
               id={id}
               value={state.model}
               onChange={(e) => update("model", e.target.value)}
-              placeholder="claude-sonnet-4-6"
+              placeholder={state.runner === "OpenAiEmbeddings" ? "embed-v-4-0" : "claude-sonnet-4-6"}
             />
           )}
         </Field>
-        <Field label="Effort hint (optional)" help="Maps to anthropic.effort or openai.reasoning_effort.">
-          {() => (
-            <Select
-              aria-label="Effort"
-              value={state.effort || "__none"}
-              onValueChange={(v) => update("effort", v === "__none" ? "" : v)}
-              options={[
-                { value: "__none", label: "(none)" },
-                { value: "low", label: "low" },
-                { value: "medium", label: "medium" },
-                { value: "high", label: "high" },
-              ]}
-            />
-          )}
-        </Field>
+        {state.runner !== "OpenAiEmbeddings" && (
+          <Field label="Effort hint (optional)" help="Maps to anthropic.effort or openai.reasoning_effort.">
+            {() => (
+              <Select
+                aria-label="Effort"
+                value={state.effort || "__none"}
+                onValueChange={(v) => update("effort", v === "__none" ? "" : v)}
+                options={[
+                  { value: "__none", label: "(none)" },
+                  { value: "low", label: "low" },
+                  { value: "medium", label: "medium" },
+                  { value: "high", label: "high" },
+                ]}
+              />
+            )}
+          </Field>
+        )}
       </Form.Section>
 
       <Form.Section label="Routing" description="Pick which workflow tasks route to this profile. Checking a task currently routed elsewhere will reassign it.">
