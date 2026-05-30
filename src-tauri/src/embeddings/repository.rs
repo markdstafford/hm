@@ -42,11 +42,19 @@ pub fn setup_schema(conn: &Connection) -> rusqlite::Result<()> {
           source_system_id TEXT NOT NULL REFERENCES source_systems(id) ON DELETE CASCADE,
           attempt_count INTEGER NOT NULL,
           last_attempted_at TEXT NOT NULL,
+          retry_after_utc TEXT,
           error_category TEXT NOT NULL,
           safe_summary TEXT NOT NULL
         );",
-    )
+    )?;
+    // Migration: add retry_after_utc to existing databases that predate this column.
+    let _ = conn.execute(
+        "ALTER TABLE embedding_failures ADD COLUMN retry_after_utc TEXT",
+        [],
+    );
+    Ok(())
 }
+
 
 pub fn stable_model_id(
     provider_profile: &str,
@@ -122,14 +130,25 @@ pub fn recover_stuck_embedding_claims(conn: &Connection) -> rusqlite::Result<u32
 pub fn claim_documents(
     conn: &Connection,
     options: &ClaimOptions<'_>,
-    _now_utc: &str,
+    now_utc: &str,
 ) -> Result<Vec<ClaimedDocument>, EmbeddingError> {
     let mut sql = String::from(
         "SELECT id, source_system_id, entity_kind, entity_id, work_item_id, title, body, content_hash \
          FROM indexable_documents \
-         WHERE embedding_status IN ('pending', 'stale', 'failed')",
+         WHERE (\
+           embedding_status IN ('pending', 'stale') \
+           OR (\
+             embedding_status = 'failed' \
+             AND NOT EXISTS (\
+               SELECT 1 FROM embedding_failures ef \
+               WHERE ef.document_id = indexable_documents.id \
+                 AND ef.retry_after_utc IS NOT NULL \
+                 AND ef.retry_after_utc > ?\
+             )\
+           )\
+         )",
     );
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now_utc.to_string())];
     if let Some(ssid) = options.source_system_id {
         sql.push_str(" AND source_system_id = ?");
         params.push(Box::new(ssid.to_string()));
@@ -185,6 +204,91 @@ pub fn claim_documents(
     Ok(rows)
 }
 
+/// Parse an RFC3339 timestamp (UTC, no offset) and add `seconds`, returning a new RFC3339 string.
+/// Only supports UTC timestamps in the form "YYYY-MM-DDTHH:MM:SSZ".
+fn add_seconds_to_rfc3339(now_utc: &str, seconds: u64) -> Option<String> {
+    // Parse "YYYY-MM-DDTHH:MM:SSZ" or "YYYY-MM-DDTHH:MM:SS+00:00"
+    let s = now_utc.trim_end_matches('Z').trim_end_matches("+00:00");
+    let (date_part, time_part) = s.split_once('T')?;
+    let mut date_parts = date_part.splitn(3, '-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    let month: i64 = date_parts.next()?.parse().ok()?;
+    let day: i64 = date_parts.next()?.parse().ok()?;
+    let mut time_parts = time_part.splitn(3, ':');
+    let hour: i64 = time_parts.next()?.parse().ok()?;
+    let min: i64 = time_parts.next()?.parse().ok()?;
+    let sec: i64 = time_parts.next()?.trim_end_matches('Z').parse().ok()?;
+
+    // Days per month (non-leap year); we use a simple epoch seconds approach.
+    // Convert to a rough unix-seconds offset from a fixed epoch, add, convert back.
+    // Since we only need relative arithmetic (adding seconds), use total seconds.
+    let days_in_month = |y: i64, m: i64| -> i64 {
+        match m {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+            2 => 28,
+            _ => 30,
+        }
+    };
+
+    // Days since a reference epoch (year 0) — Julian Day Number approximation
+    let days_from_epoch = |y: i64, m: i64, d: i64| -> i64 {
+        let y1 = y - 1;
+        let leap_days = y1 / 4 - y1 / 100 + y1 / 400;
+        let day_of_year: i64 = (1..m).map(|mo| days_in_month(y, mo)).sum::<i64>() + d;
+        y1 * 365 + leap_days + day_of_year
+    };
+
+    let epoch_day = days_from_epoch(year, month, day);
+    let total_secs = epoch_day * 86400 + hour * 3600 + min * 60 + sec + seconds as i64;
+
+    let mut remaining = total_secs;
+    let new_sec = remaining % 60;
+    remaining /= 60;
+    let new_min = remaining % 60;
+    remaining /= 60;
+    let new_hour = remaining % 24;
+    remaining /= 24; // remaining is now total days
+
+    // Convert days back to Y-M-D
+    // Rough inverse: start from approximate year, then adjust
+    let approx_year = remaining / 365;
+    let mut y = approx_year;
+    loop {
+        let days_up_to_y = days_from_epoch(y + 1, 1, 1) - 1;
+        if days_up_to_y < remaining {
+            y += 1;
+        } else {
+            break;
+        }
+    }
+    loop {
+        let days_start_of_y = days_from_epoch(y, 1, 1);
+        if remaining < days_start_of_y {
+            y -= 1;
+        } else {
+            break;
+        }
+    }
+    let mut day_of_year = remaining - days_from_epoch(y, 1, 1) + 1;
+    let mut m = 1i64;
+    loop {
+        let dim = days_in_month(y, m);
+        if day_of_year > dim {
+            day_of_year -= dim;
+            m += 1;
+        } else {
+            break;
+        }
+    }
+    let d = day_of_year;
+
+    Some(format!(
+        "{y:04}-{m:02}-{d:02}T{new_hour:02}:{new_min:02}:{new_sec:02}Z"
+    ))
+}
+
 /// Record a failure for a document, incrementing the attempt count on conflict.
 pub fn record_embedding_failure(
     conn: &Connection,
@@ -193,22 +297,27 @@ pub fn record_embedding_failure(
     err: &EmbeddingError,
     now_utc: &str,
 ) -> rusqlite::Result<()> {
+    let retry_after_utc = err
+        .retry_after_seconds
+        .and_then(|seconds| add_seconds_to_rfc3339(now_utc, seconds));
     conn.execute(
         "UPDATE indexable_documents SET embedding_status = 'failed' WHERE id = ?1",
         [document_id],
     )?;
     conn.execute(
-        "INSERT INTO embedding_failures (document_id, source_system_id, attempt_count, last_attempted_at, error_category, safe_summary)
-         VALUES (?1, ?2, 1, ?3, ?4, ?5)
+        "INSERT INTO embedding_failures (document_id, source_system_id, attempt_count, last_attempted_at, retry_after_utc, error_category, safe_summary)
+         VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6)
          ON CONFLICT(document_id) DO UPDATE SET
            attempt_count = attempt_count + 1,
            last_attempted_at = excluded.last_attempted_at,
+           retry_after_utc = excluded.retry_after_utc,
            error_category = excluded.error_category,
            safe_summary = excluded.safe_summary",
         rusqlite::params![
             document_id,
             source_system_id,
             now_utc,
+            retry_after_utc,
             format!("{:?}", err.category),
             err.safe_summary,
         ],
@@ -596,6 +705,31 @@ mod tests {
             |r| r.get(0),
         ).unwrap();
         assert_eq!(status, "embedded");
+    }
+
+    #[test]
+    fn failed_documents_are_not_reclaimed_until_retry_after() {
+        let conn = crate::db::open_in_memory().expect("db");
+        setup_schema(&conn).expect("schema");
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+        let err = crate::embeddings::errors::EmbeddingError::provider_rate_limited(Some(120));
+        record_embedding_failure(&conn, "doc_1", "srcsys_1", &err, "2026-01-01T00:00:00Z")
+            .expect("record failure");
+
+        let before = claim_documents(
+            &conn,
+            &ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 },
+            "2026-01-01T00:01:00Z",
+        ).expect("claim before retry");
+        assert!(before.is_empty());
+
+        let after = claim_documents(
+            &conn,
+            &ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 },
+            "2026-01-01T00:02:01Z",
+        ).expect("claim after retry");
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].id, "doc_1");
     }
 
     #[test]
