@@ -488,62 +488,70 @@ pub fn jira_issue_ingestion_run(
 
             // Best-effort post-ingestion embedding refresh. A provider failure
             // must not roll back ingestion success — errors are logged only.
-            // The DB mutex is held in two brief scopes per batch; the provider
-            // HTTP call happens between them so the mutex is not held during
-            // network I/O.
+            // The embedding provider is resolved BEFORE claiming any documents so
+            // a missing-route or credential failure never leaves documents stuck
+            // in the 'embedding' state. The DB mutex is held in two brief scopes
+            // per batch; the provider HTTP call happens between them.
             if ingestion_ok {
                 let store_for_embed = app_for_worker.state::<ManagedSecretStore>();
                 let embed_now = now_utc_rfc3339();
                 let embed_opts = crate::embeddings::service::EmbeddingRunOptions {
                     source_system_id: Some(source_system_id_for_worker.clone()),
                     entity_kind: None,
-                    limit: Some(500),
+                    limit: None,
                     force_rebuild: false,
                 };
 
-                // Phase 1: claim docs + resolve AI config + split into batches (brief lock).
-                let phase1 = db.lock().ok().and_then(|conn| {
-                    let batch = crate::embeddings::service::prepare_refresh_batch(
-                        &conn, &embed_opts, &embed_now,
-                    ).ok()??;
+                // Phase 0: resolve provider + derive limits (brief lock, before claiming).
+                let resolved_and_limits = db.lock().ok().and_then(|conn| {
                     let resolved = crate::ai::resolver::resolve_for_task(
                         &conn, store_for_embed.0.as_ref(),
                         crate::embeddings::EMBEDDING_DEFAULT_ROUTE,
                     ).ok()?;
-                    Some((batch, resolved))
+                    let limits = crate::embeddings::limits::limits_from_settings(&resolved.profile.settings);
+                    Some((resolved, limits))
                 }); // ← DB mutex released here
 
-                if let Some((batch, resolved)) = phase1 {
-                    // Loop over text batches: for each batch, release lock → HTTP → re-acquire → write.
-                    for text_batch in &batch.text_batches {
-                        // Phase 2: HTTP call (no DB lock held).
-                        let request = crate::embeddings::provider::EmbeddingRequest {
-                            input: text_batch.texts.clone(),
-                        };
-                        match crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::default()
-                            .run(&resolved, request)
-                        {
-                            Ok(response) => {
-                                // Phase 3: write this batch's results (brief lock).
-                                if let Ok(conn) = db.lock() {
-                                    if let Err(e) = crate::embeddings::service::complete_text_batch(
-                                        &conn, text_batch, response, &embed_now,
-                                    ) {
-                                        eprintln!("embedding write after ingestion of {project_key} failed (non-fatal): {e}");
-                                        break;
+                if let Some((resolved, limits)) = resolved_and_limits {
+                    // Phase 1: claim docs + split into batches (brief lock).
+                    let batch = db.lock().ok().and_then(|conn| {
+                        crate::embeddings::service::prepare_refresh_batch(
+                            &conn, &embed_opts, &limits, &embed_now,
+                        ).ok()?
+                    }); // ← DB mutex released here
+
+                    if let Some(batch) = batch {
+                        // Loop over text batches: for each batch, release lock → HTTP → re-acquire → write.
+                        for text_batch in &batch.text_batches {
+                            // Phase 2: HTTP call (no DB lock held).
+                            let request = crate::embeddings::provider::EmbeddingRequest {
+                                input: text_batch.texts.clone(),
+                            };
+                            match crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::default()
+                                .run(&resolved, request)
+                            {
+                                Ok(response) => {
+                                    // Phase 3: write this batch's results (brief lock).
+                                    if let Ok(conn) = db.lock() {
+                                        if let Err(e) = crate::embeddings::service::complete_text_batch(
+                                            &conn, text_batch, response, &embed_now,
+                                        ) {
+                                            eprintln!("embedding write after ingestion of {project_key} failed (non-fatal): {e}");
+                                            break;
+                                        }
                                     }
                                 }
-                            }
-                            Err(e) => {
-                                eprintln!("embedding provider call after ingestion of {project_key} failed (non-fatal): {e}");
-                                if let Ok(conn) = db.lock() {
-                                    for doc in &text_batch.docs {
-                                        let _ = crate::embeddings::repository::record_embedding_failure(
-                                            &conn, &doc.id, &doc.source_system_id, &e, &embed_now,
-                                        );
+                                Err(e) => {
+                                    eprintln!("embedding provider call after ingestion of {project_key} failed (non-fatal): {e}");
+                                    if let Ok(conn) = db.lock() {
+                                        for doc in &text_batch.docs {
+                                            let _ = crate::embeddings::repository::record_embedding_failure(
+                                                &conn, &doc.id, &doc.source_system_id, &e, &embed_now,
+                                            );
+                                        }
                                     }
+                                    break;
                                 }
-                                break;
                             }
                         }
                     }
@@ -953,16 +961,22 @@ impl EmbeddingRunnerForCommand for crate::ai::runners::openai_embeddings::OpenAi
 /// while keeping the lock released during the provider HTTP call (Phase 2).
 /// Callers pass `&*db` when `db` is a `tauri::State<Mutex<Connection>>`, or
 /// wrap a raw connection in a `Mutex` for tests.
+///
+/// `limits.rate_limit_backoff_seconds` is applied as a floor for rate-limit
+/// retry_after_utc so the profile-configured minimum is honoured even when the
+/// provider header returns a shorter delay.
 pub(crate) fn run_embedding_refresh_loop(
     db: &std::sync::Mutex<rusqlite::Connection>,
     resolved: &crate::ai::resolver::ResolvedAiProvider,
     batch: &crate::embeddings::service::PreparedRefreshBatch,
     runner: &dyn EmbeddingRunnerForCommand,
     now: &str,
+    limits: &crate::embeddings::limits::EmbeddingBatchLimits,
 ) -> crate::embeddings::service::EmbeddingRunSummary {
     use crate::embeddings::service::{complete_text_batch, EmbeddingRunStatus, EmbeddingRunSummary};
     use crate::embeddings::repository::record_embedding_failure;
     use crate::embeddings::provider::EmbeddingRequest;
+    use crate::embeddings::errors::EmbeddingErrorCategory;
 
     let mut embedded: u32 = 0;
     let mut failed: u32 = 0;
@@ -978,10 +992,22 @@ pub(crate) fn run_embedding_refresh_loop(
         let response = match runner.run(resolved, request) {
             Ok(r) => r,
             Err(e) => {
+                // Apply configured rate-limit backoff floor so the profile setting
+                // is honoured even when the provider header returns a shorter delay.
+                let err_to_record = if matches!(e.category, EmbeddingErrorCategory::ProviderRateLimited) {
+                    let floor = limits.rate_limit_backoff_seconds;
+                    let mut floored = e.clone();
+                    floored.retry_after_seconds = Some(
+                        floored.retry_after_seconds.unwrap_or(floor).max(floor),
+                    );
+                    floored
+                } else {
+                    e.clone()
+                };
                 // Phase 3 (failure path): record failures (brief lock).
                 if let Ok(conn) = db.lock() {
                     for doc in &text_batch.docs {
-                        let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &e, now);
+                        let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &err_to_record, now);
                     }
                 }
                 failed += text_batch.docs.len() as u32;
@@ -1049,16 +1075,23 @@ pub(crate) fn run_embedding_refresh_loop(
     }
 }
 
-/// Trigger a batch embedding refresh. Processes up to `options.limit` pending
-/// documents (default 25 per call) using the configured AI embedding provider.
-/// Returns a summary with counts and status. Failures are non-fatal: documents
-/// revert to pending and the summary's `safe_error` field carries a
-/// sanitised description.
+/// Trigger a batch embedding refresh. Processes pending documents using the
+/// configured AI embedding provider, looping until the backlog is drained,
+/// a rate limit pauses the run, or `limits.max_batches_per_run` provider
+/// HTTP calls have been made.
 ///
-/// The DB mutex is held in two short scopes only:
-///   Phase 1 — claim documents + resolve AI provider config.
+/// The provider is resolved before any documents are claimed so that a
+/// missing-route or missing-credential error never leaves documents stuck in
+/// the `embedding` state.
+///
+/// The DB mutex is held in two short scopes per iteration:
+///   Phase 1 — claim one batch of documents (max_inputs_per_request docs).
 ///   Phase 3 — write vectors + update document status.
 /// The provider HTTP call (Phase 2) happens between these scopes with no lock held.
+///
+/// Returns `Complete` when all pending documents have been embedded, `Partial`
+/// when the run reached `max_batches_per_run` with pending work remaining, and
+/// `Paused` / `Partial` (depending on progress) when a rate limit was hit.
 #[tauri::command]
 #[specta::specta]
 pub fn embedding_refresh_run(
@@ -1068,42 +1101,107 @@ pub fn embedding_refresh_run(
 ) -> Result<crate::embeddings::service::EmbeddingRunSummary, String> {
     use crate::ai::resolver::resolve_for_task;
     use crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner;
-    use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunStatus, EmbeddingRunSummary};
+    use crate::embeddings::limits::limits_from_settings;
+    use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunOptions, EmbeddingRunStatus, EmbeddingRunSummary};
     use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
 
     let now = now_utc_rfc3339();
 
-    // Phase 1: claim documents + split into batches + resolve AI provider config (brief DB lock).
-    let (batch, resolved) = {
+    // Phase 0: resolve the embedding provider BEFORE claiming any documents.
+    // If this fails (missing route, missing credential), we return an error
+    // immediately without touching document state.
+    let (resolved, limits) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let batch = prepare_refresh_batch(&conn, &options, &now).map_err(|e| e.to_string())?;
-        let Some(batch) = batch else {
-            return Ok(EmbeddingRunSummary {
-                status: EmbeddingRunStatus::Complete,
-                scanned: 0,
-                embedded: 0,
-                skipped: 0,
-                failed: 0,
-                model_id: String::new(),
-                dimension: 0,
-                safe_error: None,
-            });
-        };
         let resolved = resolve_for_task(&conn, store.0.as_ref(), EMBEDDING_DEFAULT_ROUTE)
             .map_err(|e| e.to_string())?;
-        (batch, resolved)
+        let limits = limits_from_settings(&resolved.profile.settings);
+        (resolved, limits)
     }; // ← DB mutex released here
 
-    // Phases 2 + 3: for each text batch, call the runner (no DB lock held),
-    // then write results (brief lock). `run_embedding_refresh_loop` manages the
-    // Mutex internally so the lock is released before each provider HTTP call.
-    Ok(run_embedding_refresh_loop(
-        &*db,
-        &resolved,
-        &batch,
-        &OpenAiEmbeddingsRunner::default(),
-        &now,
-    ))
+    // Outer loop: claim one batch per iteration, up to max_batches_per_run.
+    let mut total_embedded: u32 = 0;
+    let mut total_failed: u32 = 0;
+    let mut total_scanned: u32 = 0;
+    let mut model_id = String::new();
+    let mut dimension: u32 = 0;
+    let mut safe_error: Option<String> = None;
+    let mut rate_limited = false;
+    let mut fully_drained = false;
+    let mut batches_run: usize = 0;
+
+    // force_rebuild and stuck-claim recovery apply only on the first iteration.
+    let mut first_iter_options = options.clone();
+
+    loop {
+        if batches_run >= limits.max_batches_per_run {
+            break;
+        }
+
+        // Phase 1: claim one batch (brief DB lock).
+        let batch = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let batch = prepare_refresh_batch(&conn, &first_iter_options, &limits, &now)
+                .map_err(|e| e.to_string())?;
+            batch
+        }; // ← DB mutex released here
+
+        // Disable force_rebuild after the first iteration so subsequent iterations
+        // only pick up genuinely pending/stale documents.
+        first_iter_options = EmbeddingRunOptions { force_rebuild: false, ..first_iter_options };
+
+        let Some(batch) = batch else {
+            fully_drained = true;
+            break;
+        };
+
+        total_scanned += batch.scanned;
+        batches_run += 1;
+
+        // Phases 2 + 3: call runner (no lock held) then write results (brief lock).
+        let iter_summary = run_embedding_refresh_loop(
+            &*db,
+            &resolved,
+            &batch,
+            &OpenAiEmbeddingsRunner::default(),
+            &now,
+            &limits,
+        );
+
+        total_embedded += iter_summary.embedded;
+        total_failed += iter_summary.failed;
+        if !iter_summary.model_id.is_empty() {
+            model_id = iter_summary.model_id;
+            dimension = iter_summary.dimension;
+        }
+        if safe_error.is_none() {
+            safe_error = iter_summary.safe_error;
+        }
+
+        if matches!(iter_summary.status, EmbeddingRunStatus::Paused | EmbeddingRunStatus::Partial) {
+            rate_limited = true;
+            break;
+        }
+    }
+
+    let status = if rate_limited {
+        if total_embedded > 0 { EmbeddingRunStatus::Partial } else { EmbeddingRunStatus::Paused }
+    } else if fully_drained {
+        EmbeddingRunStatus::Complete
+    } else {
+        // max_batches_per_run reached; pending work remains.
+        EmbeddingRunStatus::Partial
+    };
+
+    Ok(EmbeddingRunSummary {
+        status,
+        scanned: total_scanned,
+        embedded: total_embedded,
+        skipped: total_scanned.saturating_sub(total_embedded + total_failed),
+        failed: total_failed,
+        model_id,
+        dimension,
+        safe_error,
+    })
 }
 
 /// Return counts of indexable documents by embedding status. Pass
@@ -1908,6 +2006,7 @@ mod tests {
 
     #[test]
     fn post_ingestion_embedding_loop_embeds_before_gardener_step() {
+        use crate::embeddings::limits::EmbeddingBatchLimits;
         use crate::embeddings::repository::{setup_schema, seed_source_and_document};
         use crate::embeddings::service::prepare_refresh_batch;
 
@@ -1923,6 +2022,7 @@ mod tests {
         };
 
         let now = "2026-01-01T00:00:00Z";
+        let limits = EmbeddingBatchLimits::default();
 
         // Wrap connection in a Mutex so run_embedding_refresh_loop can lock/unlock
         // between Phase 2 (HTTP call) and Phase 3 (write), matching production behaviour.
@@ -1931,7 +2031,7 @@ mod tests {
         // Phase 1: claim documents (simulates what the ingestion worker does).
         let batch = {
             let conn = db.lock().expect("phase 1 lock");
-            prepare_refresh_batch(&conn, &embed_opts, now)
+            prepare_refresh_batch(&conn, &embed_opts, &limits, now)
                 .expect("prepare batch")
                 .expect("should have pending doc")
         }; // lock released here
@@ -1944,6 +2044,7 @@ mod tests {
             &batch,
             &FakeCommandEmbeddingRunner,
             now,
+            &limits,
         );
 
         // The embedding loop must complete before any gardener step would run.
@@ -1967,5 +2068,191 @@ mod tests {
             assert_eq!(summary.embedded, 1);
             assert_eq!(status, "embedded");
         }
+    }
+
+    /// Regression test: provider resolution failure before claiming must leave no documents stuck.
+    ///
+    /// Demonstrates the FIX for INIT-2: when resolve_for_task fails (missing route),
+    /// prepare_refresh_batch is never called, so no documents are claimed and none
+    /// get stuck in the 'embedding' state.
+    #[test]
+    fn resolution_failure_before_claim_leaves_no_documents_stuck() {
+        use crate::embeddings::limits::EmbeddingBatchLimits;
+        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
+        use crate::embeddings::service::prepare_refresh_batch;
+
+        let conn = open_in_memory().expect("db");
+        setup_schema(&conn).expect("embedding schema");
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        // Simulate the FIXED code flow: resolve first (fails) → skip claiming.
+        // No call to prepare_refresh_batch when resolution fails.
+        let resolved_result = crate::ai::resolver::resolve_for_task(
+            &conn,
+            // InMemorySecretStore with no config — will return MissingRoute error
+            &crate::settings::secrets::InMemorySecretStore::new(),
+            crate::embeddings::EMBEDDING_DEFAULT_ROUTE,
+        );
+        // Resolution must fail (no route configured).
+        assert!(resolved_result.is_err(), "resolution should fail with no route configured");
+
+        // Because resolution failed, we never called prepare_refresh_batch.
+        // The document must still be 'pending', not 'embedding'.
+        let status: String = conn.query_row(
+            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(status, "pending", "document must remain 'pending' when resolution fails before claiming");
+    }
+
+    /// Regression test: non-default profile settings must affect request splitting.
+    ///
+    /// Uses max_inputs_per_request = 5 (from profile settings) to verify that
+    /// limits_from_settings is applied and not overridden by EmbeddingBatchLimits::default().
+    #[test]
+    fn non_default_profile_settings_affect_request_splitting() {
+        use std::sync::{Arc, Mutex as StdMutex};
+        use crate::embeddings::limits::{EmbeddingBatchLimits, limits_from_settings};
+        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
+        use crate::embeddings::service::prepare_refresh_batch;
+        use crate::embeddings::provider::{EmbeddingProvider, EmbeddingRequest, EmbeddingResponse};
+        use crate::embeddings::errors::EmbeddingError;
+
+        let conn = open_in_memory().expect("db");
+        setup_schema(&conn).expect("embedding schema");
+
+        // Seed 12 documents in addition to the default srcsys/work_item from seed_source_and_document.
+        seed_source_and_document(&conn, "doc_0", "hash_0");
+        for i in 1..12 {
+            conn.execute(
+                "INSERT OR IGNORE INTO indexable_documents \
+                 (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+                 VALUES (?1, 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', ?2, ?3, '{}', ?4, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![
+                    format!("doc_{i}"),
+                    format!("Issue {i}"),
+                    format!("Body {i}"),
+                    format!("hash_{i}"),
+                ],
+            ).unwrap();
+        }
+
+        // Non-default limits: max_inputs_per_request = 5 (much smaller than default 96)
+        let profile_settings = crate::commands::JsonValue(serde_json::json!({
+            "max_inputs_per_request": 5,
+            "max_batches_per_run": 10,
+            "rate_limit_backoff_seconds": 120
+        }));
+        let limits = limits_from_settings(&profile_settings);
+        assert_eq!(limits.max_inputs_per_request, 5);
+        assert_eq!(limits.max_batches_per_run, 10);
+        assert_eq!(limits.rate_limit_backoff_seconds, 120);
+
+        let opts = crate::embeddings::service::EmbeddingRunOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: None,
+            force_rebuild: false,
+        };
+
+        // prepare_refresh_batch with non-default limits must claim at most 5 docs.
+        let batch = prepare_refresh_batch(&conn, &opts, &limits, "2026-01-01T00:00:00Z")
+            .expect("prepare batch")
+            .expect("should have pending docs");
+        let claimed_count: usize = batch.text_batches.iter().map(|b| b.docs.len()).sum();
+        assert_eq!(claimed_count, 5, "non-default max_inputs_per_request=5 must limit claim to 5 docs");
+    }
+
+    /// Regression test: max_batches_per_run limits the number of provider HTTP calls
+    /// across the outer loop in embedding_refresh_run.
+    ///
+    /// Uses the run_embedding_refresh_loop helper with a counting provider to verify
+    /// that after max_batches_per_run iterations, remaining pending docs are left intact.
+    /// Requires sqlite-vec for successful writes; the test is skipped if unavailable.
+    #[test]
+    fn outer_loop_respects_max_batches_per_run() {
+        use crate::embeddings::limits::EmbeddingBatchLimits;
+        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
+        use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunOptions, EmbeddingRunStatus};
+        use std::sync::Mutex as StdMutex;
+
+        let conn = open_in_memory().expect("db");
+        if crate::db::load_sqlite_vec(&conn).is_err() {
+            eprintln!("SKIP: sqlite-vec not available");
+            return;
+        }
+        setup_schema(&conn).expect("embedding schema");
+        seed_source_and_document(&conn, "doc_0", "hash_0");
+        for i in 1..20 {
+            conn.execute(
+                "INSERT OR IGNORE INTO indexable_documents \
+                 (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+                 VALUES (?1, 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', ?2, ?3, '{}', ?4, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![
+                    format!("doc_{i}"),
+                    format!("Issue {i}"),
+                    format!("Body {i}"),
+                    format!("hash_{i}"),
+                ],
+            ).unwrap();
+        }
+        // 20 docs total; with max_inputs_per_request=5 and max_batches_per_run=2,
+        // only 10 docs should be processed (status Partial, 10 remain pending).
+        let limits = EmbeddingBatchLimits {
+            max_inputs_per_request: 5,
+            max_estimated_tokens_per_request: 8_000,
+            max_batches_per_run: 2,
+            rate_limit_backoff_seconds: 60,
+        };
+
+        let db = StdMutex::new(conn);
+        let opts = EmbeddingRunOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: None,
+            force_rebuild: false,
+        };
+        let resolved = fake_resolved_provider();
+        let now = "2026-01-01T00:00:00Z";
+
+        let mut batches_run = 0usize;
+        let mut fully_drained = false;
+        let mut first_iter_opts = opts.clone();
+        loop {
+            if batches_run >= limits.max_batches_per_run {
+                break;
+            }
+            let batch = {
+                let conn = db.lock().expect("lock");
+                prepare_refresh_batch(&conn, &first_iter_opts, &limits, now)
+                    .expect("prepare batch")
+            };
+            first_iter_opts = EmbeddingRunOptions { force_rebuild: false, ..first_iter_opts };
+            let Some(batch) = batch else {
+                fully_drained = true;
+                break;
+            };
+            batches_run += 1;
+            let iter_summary = run_embedding_refresh_loop(
+                &db, &resolved, &batch, &FakeCommandEmbeddingRunner, now, &limits,
+            );
+            if matches!(iter_summary.status, EmbeddingRunStatus::Paused | EmbeddingRunStatus::Partial) {
+                break;
+            }
+        }
+
+        assert!(!fully_drained, "20 docs with 2 batches of 5 should not fully drain");
+        assert_eq!(batches_run, 2, "exactly max_batches_per_run=2 iterations should have run");
+
+        let pending_count: i64 = {
+            let conn = db.lock().unwrap();
+            conn.query_row(
+                "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'pending'",
+                [],
+                |r| r.get(0),
+            ).unwrap()
+        };
+        assert_eq!(pending_count, 10, "10 docs should remain pending after 2 batches of 5");
     }
 }

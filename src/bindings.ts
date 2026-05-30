@@ -67,16 +67,23 @@ export const commands = {
 	issueHistoryRetentionGet: () => typedError<IssueHistoryRetentionConfig, string>(__TAURI_INVOKE("issue_history_retention_get")),
 	issueHistoryRetentionSave: (config: IssueHistoryRetentionConfig) => typedError<null, string>(__TAURI_INVOKE("issue_history_retention_save", { config })),
 	/**
-	 *  Trigger a batch embedding refresh. Processes up to `options.limit` pending
-	 *  documents (default 25 per call) using the configured AI embedding provider.
-	 *  Returns a summary with counts and status. Failures are non-fatal: documents
-	 *  revert to pending and the summary's `safe_error` field carries a
-	 *  sanitised description.
+	 *  Trigger a batch embedding refresh. Processes pending documents using the
+	 *  configured AI embedding provider, looping until the backlog is drained,
+	 *  a rate limit pauses the run, or `limits.max_batches_per_run` provider
+	 *  HTTP calls have been made.
 	 * 
-	 *  The DB mutex is held in two short scopes only:
-	 *    Phase 1 — claim documents + resolve AI provider config.
+	 *  The provider is resolved before any documents are claimed so that a
+	 *  missing-route or missing-credential error never leaves documents stuck in
+	 *  the `embedding` state.
+	 * 
+	 *  The DB mutex is held in two short scopes per iteration:
+	 *    Phase 1 — claim one batch of documents (max_inputs_per_request docs).
 	 *    Phase 3 — write vectors + update document status.
 	 *  The provider HTTP call (Phase 2) happens between these scopes with no lock held.
+	 * 
+	 *  Returns `Complete` when all pending documents have been embedded, `Partial`
+	 *  when the run reached `max_batches_per_run` with pending work remaining, and
+	 *  `Paused` / `Partial` (depending on progress) when a rate limit was hit.
 	 */
 	embeddingRefreshRun: (options: EmbeddingRunOptions) => typedError<EmbeddingRunSummary, string>(__TAURI_INVOKE("embedding_refresh_run", { options })),
 	/**

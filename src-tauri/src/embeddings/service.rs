@@ -547,9 +547,14 @@ pub struct PreparedRefreshBatch {
 ///
 /// Call with a brief DB lock. Release the lock before calling the embedding provider.
 /// Returns `None` when there are no documents to embed.
+///
+/// Claim size is `limits.max_inputs_per_request` so each call produces at most one
+/// provider HTTP call worth of documents. Callers that need to drain a full backlog
+/// should loop, passing the same `limits` on each iteration, until `None` is returned.
 pub fn prepare_refresh_batch(
     conn: &rusqlite::Connection,
     options: &EmbeddingRunOptions,
+    limits: &EmbeddingBatchLimits,
     now_utc: &str,
 ) -> Result<Option<PreparedRefreshBatch>, EmbeddingError> {
     recover_stuck_embedding_claims(conn).map_err(EmbeddingError::from)?;
@@ -571,11 +576,10 @@ pub fn prepare_refresh_batch(
             .map_err(EmbeddingError::from)?;
     }
 
-    let limit = options.limit.unwrap_or(25).max(1) as usize;
     let claim_opts = ClaimOptions {
         source_system_id: options.source_system_id.as_deref(),
         entity_kind: options.entity_kind.as_deref(),
-        limit,
+        limit: limits.max_inputs_per_request,
     };
 
     let claimed = claim_documents(conn, &claim_opts, now_utc)?;
@@ -588,8 +592,7 @@ pub fn prepare_refresh_batch(
         .map(|doc| assemble_text(doc.title.as_deref(), &doc.body))
         .collect();
 
-    let limits = EmbeddingBatchLimits::default();
-    let text_batches = split_claimed_documents(claimed, texts, &limits);
+    let text_batches = split_claimed_documents(claimed, texts, limits);
     let scanned = text_batches.iter().map(|b| b.docs.len() as u32).sum();
 
     Ok(Some(PreparedRefreshBatch { text_batches, scanned }))
@@ -1277,7 +1280,8 @@ mod tests {
         // Phase 1: claim docs (brief lock).
         let batch = {
             let conn = db.lock().expect("phase 1 lock");
-            prepare_refresh_batch(&conn, &options, now)
+            let limits = EmbeddingBatchLimits::default();
+            prepare_refresh_batch(&conn, &options, &limits, now)
                 .expect("prepare batch")
                 .expect("should have pending docs")
         }; // lock released here
