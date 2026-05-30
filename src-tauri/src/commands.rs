@@ -540,6 +540,30 @@ pub fn jira_issue_ingestion_run(
                         }
                     }
                 }
+
+                // Best-effort gardener scheduled run. A gardener failure must
+                // not roll back ingestion success — status is logged only.
+                let gardener_now = now_utc_rfc3339();
+                let gardener_runtime = app_for_worker
+                    .state::<crate::gardener::runner::GardenerRuntime>();
+                if let Ok(conn) = db.lock() {
+                    let summary = crate::gardener::run_gardener_after_successful_project_ingestion(
+                        &conn,
+                        &gardener_runtime,
+                        &source_system_id_for_worker,
+                        project_key,
+                        &gardener_now,
+                    );
+                    if matches!(
+                        summary.status,
+                        crate::gardener::runner::GardenerRunStatus::Failed
+                            | crate::gardener::runner::GardenerRunStatus::Partial
+                    ) {
+                        eprintln!(
+                            "gardener: scheduled run after ingestion of {project_key} had issues (non-fatal)"
+                        );
+                    }
+                }
             }
         }
 

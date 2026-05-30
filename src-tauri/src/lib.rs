@@ -155,6 +155,9 @@ pub fn run() {
             // In-memory map of active Jira ingestion cancellation flags.
             app.manage(commands::ActiveIngestionRuns::default());
 
+            // Gardener runtime: single-flight guard for engine runs.
+            app.manage(crate::gardener::runner::GardenerRuntime::default());
+
             Ok(())
         })
         .run(tauri::generate_context!())
