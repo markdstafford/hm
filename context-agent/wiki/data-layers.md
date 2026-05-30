@@ -18,6 +18,7 @@ Notes:
 
 - The **event log is source-mirrored, not local truth.** Events are ingested from the upstream changelog and can be re-ingested (ADR-005: "re-ingest if needed"). It is the authoritative local copy for time-travel, but it is not irreplaceable.
 - **Derived is not free to rebuild.** Snapshots and suggestions are cheap to recompute, but embeddings and AI enrichment cost time and money. "Recomputable" describes correctness, not cost.
+- **Local truth keys off source identifiers, not local ids.** Local-truth rows reference the source-identity tuple `(source_id, source_kind, upstream_id)` (#10), never the SQLite-generated `hm` id, so they survive a rebuild — re-ingested rows get new local ids but the same source tuple, and the reference still resolves. See ADR-010.
 
 ## Recompute dependency order
 

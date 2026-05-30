@@ -1,8 +1,8 @@
 ---
 created: 2026-05-29
 last_updated: 2026-05-29
-status: proposed
-decided_by: null
+status: accepted
+decided_by: markdstafford
 superseded_by: null
 ---
 
@@ -10,7 +10,7 @@ superseded_by: null
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -103,22 +103,6 @@ A timer fires gardener runs on a fixed schedule.
 - Duplicates the catch-up problem ADR-005 already solved differently.
 
 **Why not chosen:** A cron is unreliable by construction on a desktop app. ADR-005 already chose event-driven catch-up, and #10 explicitly scopes out a background scheduler. Going always-on would require superseding ADR-003.
-
-### Option 4: Eager enrichment generation for everything, no configuration
-
-Always generate AI rewrites for every detected thin issue, with no user control.
-
-**Pros:**
-- Matches the Backlog-grooming narrative literally — everything is pre-done.
-- No setting to design or explain.
-- Simplest mental model for the user.
-
-**Cons:**
-- Unbounded AI cost and latency per sweep.
-- Dangerous on a large first-run backlog.
-- No escape hatch for cost-conscious users.
-
-**Why not chosen:** We kept eager generation as the default because it preserves the narrative, but made it a configurable policy with a cap so cost stays controllable.
 
 ## Cross-references
 

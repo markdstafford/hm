@@ -1,8 +1,8 @@
 ---
 created: 2026-05-29
 last_updated: 2026-05-29
-status: proposed
-decided_by: null
+status: accepted
+decided_by: markdstafford
 superseded_by: null
 ---
 
@@ -10,7 +10,7 @@ superseded_by: null
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -37,6 +37,7 @@ Keep a **single SQLite database** (with `sqlite-vec`) for all layers, and classi
   2. **Derived / cache** — daily snapshots (ADR-005), vector embeddings (#12), suggestions, and enrichment proposals (ADR-009). Recomputable locally from source-mirrored data; may be dropped and rebuilt.
   3. **Local truth** — the audit log (#45), suppressions and feedback, settings, and named views. Originates in `hm`, cannot be recomputed, and is the only data that must be preserved.
 - **Lifecycle rules follow from the category.** Derived tables may be dropped on a schema change and rebuilt. The backup and portability boundary is local truth (plus configuration). A full rebuild blows away source-mirrored and derived data, re-ingests, and recomputes, while preserving local truth.
+- **Local truth references source identifiers, not local keys.** Local-truth rows key off the stable source-identity tuple `(source_id, source_kind, upstream_id)` established by #10 — never the SQLite-generated `hm` id or integer primary key, which is regenerated on rebuild. This is what lets local truth survive a rebuild at all: re-ingested rows get fresh local ids but the same source tuple, so the reference still resolves. Prefer the immutable `upstream_id` over the human-readable key, which can change (e.g. a Jira issue moved between projects). _Example:_ a "not a duplicate" suppression for the pair AMP-1043 / AMP-1102 stores each issue's `(source_id, source_kind, upstream_id)` — Jira's immutable numeric issue id, displayed via its key — so after a full rebuild the pair stays suppressed even though both work-item rows now have new local `hm` ids.
 - **The recompute dependency order is explicit** and owned operationally by the gardener's incrementality (ADR-009). The living detail lives in `context-agent/wiki/data-layers.md`.
 
 ## Consequences
@@ -89,22 +90,6 @@ Model every table as a permanent record, with no recomputable category.
 - Makes schema migrations heavier than necessary.
 
 **Why not chosen:** ADR-005 already established the cache concept for snapshots; extending it to embeddings and suggestions is consistent and reduces migration and backup cost.
-
-### Option 3: No explicit layering model (status quo)
-
-Add tables as features land without a stated category model.
-
-**Pros:**
-- No upfront modeling work.
-- Maximum flexibility per feature.
-- Nothing new to document.
-
-**Cons:**
-- Rebuild, backup, and migration decisions become ad hoc per table.
-- Easy to back up or migrate recomputable data by mistake.
-- New engines have no guidance on where their data fits.
-
-**Why not chosen:** With four-plus layers, an unstated model makes rebuild and backup error-prone. A simple three-category rule is cheap insurance and guides every future engine.
 
 ## Cross-references
 
