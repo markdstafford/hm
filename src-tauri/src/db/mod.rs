@@ -23,6 +23,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     crate::issues::schema::setup_schema(conn)?;
     crate::audit::repository::setup_schema(conn)?;
     crate::embeddings::repository::setup_schema(conn)?;
+    crate::gardener::schema::setup_schema(conn)?;
     // Best-effort: register the sqlite-vec extension globally so it is available
     // for subsequent operations. The vec_document_embeddings virtual table is
     // created by setup_vec_table (called separately in open_at for production, or

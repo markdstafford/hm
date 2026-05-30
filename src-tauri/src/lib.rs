@@ -9,6 +9,7 @@ pub mod ingestion;
 pub mod issues;
 pub mod settings;
 pub mod sources;
+pub mod gardener;
 
 /// Run `replay_missing_snapshots` for every configured Jira project at startup.
 ///
