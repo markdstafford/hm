@@ -8,6 +8,12 @@ pub struct OpenAiEmbeddingsRunner {
     pub timeout: Duration,
 }
 
+fn retry_after_seconds(resp: &ureq::Response) -> Option<u64> {
+    resp.header("retry-after")
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|seconds| seconds.max(60))
+}
+
 impl Default for OpenAiEmbeddingsRunner {
     fn default() -> Self {
         Self { timeout: Duration::from_secs(30) }
@@ -39,15 +45,17 @@ impl OpenAiEmbeddingsRunner {
         let result = agent
             .post(&url)
             .set("Authorization", &format!("Bearer {api_key}"))
+            .set("api-key", api_key)
+            .set("x-api-key", api_key)
             .set("content-type", "application/json")
             .send_json(&body);
 
         let response = match result {
             Ok(resp) => resp,
-            Err(ureq::Error::Status(status, _resp)) => {
+            Err(ureq::Error::Status(status, resp)) => {
                 return Err(match status {
                     401 | 403 => EmbeddingError::provider_rejected(String::new()),
-                    429 => EmbeddingError::provider_unavailable(),
+                    429 => EmbeddingError::provider_rate_limited(retry_after_seconds(&resp)),
                     s if s >= 500 => EmbeddingError::provider_unavailable(),
                     _ => EmbeddingError::provider_rejected(String::new()),
                 });
@@ -234,6 +242,73 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("dimension") || msg.contains("Embedding dimension"), "error should mention dimension");
         assert!(!msg.contains("sk-test-secret"), "must not contain secret");
+    }
+
+    #[test]
+    fn provider_429_returns_rate_limited_error_with_retry_after_floor() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let req = server.recv().unwrap();
+            let resp = tiny_http::Response::from_string(r#"{"error":{"message":"too many requests"}}"#)
+                .with_status_code(429)
+                .with_header("retry-after: 15".parse::<tiny_http::Header>().unwrap())
+                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            req.respond(resp).unwrap();
+        });
+        let runner = OpenAiEmbeddingsRunner::default();
+        let resolved = make_resolved(&format!("http://127.0.0.1:{port}/v1"));
+        let request = crate::embeddings::provider::EmbeddingRequest { input: vec!["hi".into()] };
+        let err = runner.run(&resolved, request).unwrap_err();
+        handle.join().unwrap();
+        assert_eq!(err.category, crate::embeddings::errors::EmbeddingErrorCategory::ProviderRateLimited);
+        assert_eq!(err.retry_after_seconds, Some(60));
+        crate::embeddings::errors::assert_safe_message(&err.to_string());
+    }
+
+    #[test]
+    fn grove_apim_requires_api_key_header_in_addition_to_bearer() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let mut req = server.recv().unwrap();
+            let mut authorization = None;
+            let mut api_key = None;
+            let mut x_api_key = None;
+            for header in req.headers() {
+                match header.field.as_str().to_ascii_lowercase().as_str() {
+                    "authorization" => authorization = Some(header.value.as_str().to_string()),
+                    "api-key" => api_key = Some(header.value.as_str().to_string()),
+                    "x-api-key" => x_api_key = Some(header.value.as_str().to_string()),
+                    _ => {}
+                }
+            }
+            assert_eq!(authorization.as_deref(), Some("Bearer sk-test-secret"));
+            assert_eq!(api_key.as_deref(), Some("sk-test-secret"));
+            assert_eq!(x_api_key.as_deref(), Some("sk-test-secret"));
+
+            let mut body = String::new();
+            req.as_reader().read_to_string(&mut body).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(parsed["model"], "embed-v-4-0");
+            assert_eq!(parsed["input"].as_array().unwrap().len(), 1);
+
+            let resp_body = r#"{"model":"embed-v-4-0","usage":{"prompt_tokens":4,"total_tokens":4},"data":[{"index":0,"embedding":[0.5,0.25,0.125]}]}"#;
+            let resp = tiny_http::Response::from_string(resp_body)
+                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            req.respond(resp).unwrap();
+        });
+
+        let runner = OpenAiEmbeddingsRunner::default();
+        let mut resolved = make_resolved(&format!("http://127.0.0.1:{port}/v1"));
+        resolved.profile.model = "embed-v-4-0".into();
+        let request = crate::embeddings::provider::EmbeddingRequest {
+            input: vec!["Body:\nGrove APIM auth check".into()],
+        };
+        let result = runner.run(&resolved, request).unwrap();
+        handle.join().unwrap();
+        assert_eq!(result.model, "embed-v-4-0");
+        assert_eq!(result.vectors, vec![vec![0.5f32, 0.25, 0.125]]);
     }
 
     #[test]
