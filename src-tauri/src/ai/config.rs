@@ -248,15 +248,23 @@ fn validate_supported_combination(
     Ok(())
 }
 
+fn looks_like_secret_key(key: &str) -> bool {
+    let key_lower = key.to_ascii_lowercase();
+    let segments: Vec<&str> = key_lower.split(['_', '-']).collect();
+    // Multi-word needles: substring match is sufficient (e.g. "api_key" won't false-positive on "max_inputs_per_request")
+    // Single-word needles like "token": use exact segment match to avoid false positives
+    // on keys like "max_estimated_tokens_per_request" which contain "token" as a substring of "tokens"
+    let multi_word = ["api_key", "authorization"];
+    let single_word = ["token", "secret", "password"];
+    multi_word.iter().any(|needle| key_lower.contains(needle))
+        || single_word.iter().any(|needle| segments.iter().any(|s| s == needle))
+}
+
 fn validate_settings_no_secrets(value: &serde_json::Value, path: &str) -> Result<(), AiError> {
     match value {
         serde_json::Value::Object(map) => {
             for (key, val) in map {
-                let key_lower = key.to_ascii_lowercase();
-                if ["api_key", "token", "secret", "authorization", "password"]
-                    .iter()
-                    .any(|needle| key_lower.contains(needle))
-                {
+                if looks_like_secret_key(key) {
                     return Err(AiError::InvalidConfig(format!(
                         "profile settings key looks like a secret — store credentials via credential_ref instead: {path}.{key}"
                     )));
@@ -718,7 +726,7 @@ mod tests {
                 execution_mode: AiExecutionMode::DirectApi,
                 settings: crate::commands::JsonValue(serde_json::json!({
                     "max_inputs_per_request": 96,
-                    "max_estimated_chars_per_request": 32000,
+                    "max_estimated_tokens_per_request": 8000,
                     "max_batches_per_run": 50,
                     "rate_limit_backoff_seconds": 60
                 })),
