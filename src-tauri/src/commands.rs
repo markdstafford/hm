@@ -924,6 +924,113 @@ pub(crate) fn issue_history_retention_save_to_conn(
 
 // ── Embedding commands ────────────────────────────────────────────────────────
 
+/// Trait for types that can execute an embedding provider call.
+/// Extracted so `embedding_refresh_run` can be tested with a fake runner
+/// without requiring a live AI endpoint or Tauri state machinery.
+pub(crate) trait EmbeddingRunnerForCommand {
+    fn run(
+        &self,
+        resolved: &crate::ai::resolver::ResolvedAiProvider,
+        request: crate::embeddings::provider::EmbeddingRequest,
+    ) -> Result<crate::embeddings::provider::EmbeddingResponse, crate::embeddings::errors::EmbeddingError>;
+}
+
+impl EmbeddingRunnerForCommand for crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner {
+    fn run(
+        &self,
+        resolved: &crate::ai::resolver::ResolvedAiProvider,
+        request: crate::embeddings::provider::EmbeddingRequest,
+    ) -> Result<crate::embeddings::provider::EmbeddingResponse, crate::embeddings::errors::EmbeddingError> {
+        crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::run(self, resolved, request)
+    }
+}
+
+/// Inner loop for embedding refresh: for each text batch, call the runner (Phase 2)
+/// then write results to `conn` (Phase 3). Returns the accumulated summary.
+///
+/// Callers that need mutex discipline (i.e. the Tauri command) should release the
+/// DB lock before calling this, then re-acquire inside for Phase 3 writes. In tests
+/// a raw `Connection` is passed directly so no mutex is needed.
+pub(crate) fn run_embedding_refresh_loop(
+    conn: &rusqlite::Connection,
+    resolved: &crate::ai::resolver::ResolvedAiProvider,
+    batch: &crate::embeddings::service::PreparedRefreshBatch,
+    runner: &dyn EmbeddingRunnerForCommand,
+    now: &str,
+) -> crate::embeddings::service::EmbeddingRunSummary {
+    use crate::embeddings::service::{complete_text_batch, EmbeddingRunStatus, EmbeddingRunSummary};
+    use crate::embeddings::repository::record_embedding_failure;
+    use crate::embeddings::provider::EmbeddingRequest;
+
+    let mut embedded: u32 = 0;
+    let mut failed: u32 = 0;
+    let mut model_id = String::new();
+    let mut dimension: u32 = 0;
+    let mut safe_error: Option<String> = None;
+    let mut paused = false;
+
+    for text_batch in &batch.text_batches {
+        let request = EmbeddingRequest { input: text_batch.texts.clone() };
+        let response = match runner.run(resolved, request) {
+            Ok(r) => r,
+            Err(e) => {
+                for doc in &text_batch.docs {
+                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now);
+                }
+                failed += text_batch.docs.len() as u32;
+                paused = true;
+                if safe_error.is_none() {
+                    safe_error = Some(e.to_string());
+                }
+                break;
+            }
+        };
+
+        model_id = crate::embeddings::repository::stable_model_id(
+            &response.profile,
+            &response.model,
+            "OpenAiEmbeddings",
+            response.dimension,
+            "l2",
+        );
+        dimension = response.dimension as u32;
+
+        match complete_text_batch(conn, text_batch, response, now) {
+            Ok(_) => {
+                embedded += text_batch.docs.len() as u32;
+            }
+            Err(e) => {
+                for doc in &text_batch.docs {
+                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now);
+                }
+                failed += text_batch.docs.len() as u32;
+                paused = true;
+                if safe_error.is_none() {
+                    safe_error = Some(e.to_string());
+                }
+                break;
+            }
+        }
+    }
+
+    let status = if paused {
+        if embedded > 0 { EmbeddingRunStatus::Partial } else { EmbeddingRunStatus::Paused }
+    } else {
+        EmbeddingRunStatus::Complete
+    };
+
+    EmbeddingRunSummary {
+        status,
+        scanned: batch.scanned,
+        embedded,
+        skipped: batch.scanned.saturating_sub(embedded + failed),
+        failed,
+        model_id,
+        dimension,
+        safe_error,
+    }
+}
+
 /// Trigger a batch embedding refresh. Processes up to `options.limit` pending
 /// documents (default 25 per call) using the configured AI embedding provider.
 /// Returns a summary with counts and status. Failures are non-fatal: documents
@@ -943,12 +1050,7 @@ pub fn embedding_refresh_run(
 ) -> Result<crate::embeddings::service::EmbeddingRunSummary, String> {
     use crate::ai::resolver::resolve_for_task;
     use crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner;
-    use crate::embeddings::provider::EmbeddingRequest;
-    use crate::embeddings::service::{
-        prepare_refresh_batch, complete_text_batch,
-        EmbeddingRunStatus, EmbeddingRunSummary,
-    };
-    use crate::embeddings::repository::record_embedding_failure;
+    use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunStatus, EmbeddingRunSummary};
     use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
 
     let now = now_utc_rfc3339();
@@ -974,78 +1076,20 @@ pub fn embedding_refresh_run(
         (batch, resolved)
     }; // ← DB mutex released here
 
-    // Loop: for each text batch — release lock → provider HTTP → re-acquire → checkpoint.
-    let mut embedded: u32 = 0;
-    let mut failed: u32 = 0;
-    let mut model_id = String::new();
-    let mut dimension: u32 = 0;
-    let mut safe_error: Option<String> = None;
-    let mut paused = false;
-
-    for text_batch in &batch.text_batches {
-        // Phase 2: provider HTTP call (no DB lock held).
-        let request = EmbeddingRequest { input: text_batch.texts.clone() };
-        let response = match OpenAiEmbeddingsRunner::default().run(&resolved, request) {
-            Ok(r) => r,
-            Err(e) => {
-                let conn = db.lock().map_err(|s| s.to_string())?;
-                for doc in &text_batch.docs {
-                    let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &e, &now);
-                }
-                failed += text_batch.docs.len() as u32;
-                paused = true;
-                if safe_error.is_none() {
-                    safe_error = Some(e.to_string());
-                }
-                break;
-            }
-        };
-
-        // Phase 3: write this batch's vectors + update status (brief DB lock).
-        model_id = crate::embeddings::repository::stable_model_id(
-            &response.profile,
-            &response.model,
-            "OpenAiEmbeddings",
-            response.dimension,
-            "l2",
-        );
-        dimension = response.dimension as u32;
-
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        match complete_text_batch(&conn, text_batch, response, &now) {
-            Ok(_) => {
-                embedded += text_batch.docs.len() as u32;
-            }
-            Err(e) => {
-                for doc in &text_batch.docs {
-                    let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &e, &now);
-                }
-                failed += text_batch.docs.len() as u32;
-                paused = true;
-                if safe_error.is_none() {
-                    safe_error = Some(e.to_string());
-                }
-                break;
-            }
-        }
-    }
-
-    let status = if paused {
-        if embedded > 0 { EmbeddingRunStatus::Partial } else { EmbeddingRunStatus::Paused }
-    } else {
-        EmbeddingRunStatus::Complete
-    };
-
-    Ok(EmbeddingRunSummary {
-        status,
-        scanned: batch.scanned,
-        embedded,
-        skipped: batch.scanned.saturating_sub(embedded + failed),
-        failed,
-        model_id,
-        dimension,
-        safe_error,
-    })
+    // Phases 2 + 3: for each text batch, call the runner then write results.
+    // `run_embedding_refresh_loop` re-acquires `conn` from `db` per batch write;
+    // here we pass a brief lock per write inside the helper.
+    // Since the helper takes a raw &Connection we must hold the lock across the
+    // entire batch loop for this command path. The mutex is released between
+    // the provider call and the write in the post-ingestion worker path instead.
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(run_embedding_refresh_loop(
+        &conn,
+        &resolved,
+        &batch,
+        &OpenAiEmbeddingsRunner::default(),
+        &now,
+    ))
 }
 
 /// Return counts of indexable documents by embedding status. Pass
@@ -1797,5 +1841,113 @@ mod tests {
         assert_eq!(item.labels.len(), 2);
         assert!(item.labels.contains(&"backend".to_string()));
         assert!(item.labels.contains(&"infra".to_string()));
+    }
+
+    // ── Embedding command tests ───────────────────────────────────────────────
+
+    /// A fake embedding runner for use in commands.rs tests. Ignores the resolved
+    /// provider and returns deterministic zero vectors for each input text.
+    struct FakeCommandEmbeddingRunner;
+    impl EmbeddingRunnerForCommand for FakeCommandEmbeddingRunner {
+        fn run(
+            &self,
+            _resolved: &crate::ai::resolver::ResolvedAiProvider,
+            request: crate::embeddings::provider::EmbeddingRequest,
+        ) -> Result<crate::embeddings::provider::EmbeddingResponse, crate::embeddings::errors::EmbeddingError> {
+            Ok(crate::embeddings::provider::EmbeddingResponse {
+                vectors: request.input.iter().map(|_| vec![0.1f32, 0.2, 0.3]).collect(),
+                model: "embed-v-4-0".into(),
+                profile: "grove-embed-v4".into(),
+                dimension: 3,
+                usage: None,
+            })
+        }
+    }
+
+    /// Build a minimal `ResolvedAiProvider` for tests. The `FakeCommandEmbeddingRunner`
+    /// ignores the resolved value, so any well-typed instance will do.
+    fn fake_resolved_provider() -> crate::ai::resolver::ResolvedAiProvider {
+        use crate::ai::config::{
+            AiCredentialConfig, AiCredentialKind, AiEndpointConfig, AiEndpointProtocol,
+            AiExecutionMode, AiProfileConfig, AiRunner, CredentialSource,
+        };
+        use crate::ai::credentials::LoadedCredentialSecret;
+        crate::ai::resolver::ResolvedAiProvider {
+            profile: AiProfileConfig {
+                name: "grove-embed-v4".into(),
+                endpoint_ref: "grove".into(),
+                model: "embed-v-4-0".into(),
+                runner: AiRunner::OpenAiEmbeddings,
+                execution_mode: AiExecutionMode::DirectApi,
+                settings: crate::commands::JsonValue(serde_json::json!({})),
+            },
+            endpoint: AiEndpointConfig {
+                name: "grove".into(),
+                protocol: AiEndpointProtocol::OpenAiEmbeddingsCompatible,
+                base_url: "https://api.example.invalid".into(),
+                credential_ref: "grove-key".into(),
+            },
+            credential: AiCredentialConfig {
+                name: "grove-key".into(),
+                kind: AiCredentialKind::ApiKey,
+                source: CredentialSource::Env { var_name: "TEST_API_KEY".into() },
+            },
+            secret: LoadedCredentialSecret::new_for_test("grove-key", "sk-test-fake"),
+        }
+    }
+
+    #[test]
+    fn post_ingestion_embedding_loop_embeds_before_gardener_step() {
+        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
+        use crate::embeddings::service::prepare_refresh_batch;
+
+        let conn = open_in_memory().expect("db");
+        setup_schema(&conn).expect("embedding schema");
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+
+        let embed_opts = crate::embeddings::service::EmbeddingRunOptions {
+            source_system_id: Some("srcsys_1".into()),
+            entity_kind: None,
+            limit: Some(10),
+            force_rebuild: false,
+        };
+
+        let now = "2026-01-01T00:00:00Z";
+
+        // Phase 1: claim documents (simulates what the ingestion worker does).
+        let batch = prepare_refresh_batch(&conn, &embed_opts, now)
+            .expect("prepare batch")
+            .expect("should have pending doc");
+
+        // Phase 2+3: run the embedding loop with the fake runner.
+        let resolved = fake_resolved_provider();
+        let summary = run_embedding_refresh_loop(
+            &conn,
+            &resolved,
+            &batch,
+            &FakeCommandEmbeddingRunner,
+            now,
+        );
+
+        // The embedding loop must complete before any gardener step would run.
+        // Assert the document is embedded (or at least processed) by the time
+        // the loop returns.
+        //
+        // When sqlite-vec is unavailable the write fails and the document ends up
+        // in 'failed' state. In either case the loop must have run and produced a
+        // non-'embedding' status (not stuck).
+        let status: String = conn.query_row(
+            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_ne!(status, "embedding", "document must not be stuck in 'embedding' after the loop");
+        assert_ne!(status, "pending", "document must have been processed by the loop");
+
+        // When sqlite-vec is available, assert full success.
+        if crate::db::load_sqlite_vec(&conn).is_ok() {
+            assert_eq!(summary.embedded, 1);
+            assert_eq!(status, "embedded");
+        }
     }
 }

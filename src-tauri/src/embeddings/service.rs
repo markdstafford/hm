@@ -1294,6 +1294,47 @@ mod tests {
     }
 
     #[test]
+    fn refresh_recovers_stuck_embedding_status_before_claiming() {
+        let conn = open_with_embedding_schema();
+        seed_source_and_document(&conn, "doc_1", "hash_a");
+        conn.execute(
+            "UPDATE indexable_documents SET embedding_status = 'embedding' WHERE id = 'doc_1'",
+            [],
+        ).unwrap();
+
+        let provider = FakeEmbeddingProvider::new(3, "grove-embed-v4", "embed-v-4-0");
+        let options = EmbeddingRunOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: Some(10),
+            force_rebuild: false,
+        };
+        let summary = refresh_embeddings_with_provider(
+            &conn,
+            &provider,
+            options,
+            "2026-01-01T00:00:00Z",
+        ).expect("refresh");
+
+        // Verify that the stuck 'embedding' status was recovered and re-processed.
+        // When sqlite-vec is available the document is fully embedded; when not
+        // available the write fails and status is 'failed' — but in either case
+        // the document must NOT remain stuck in 'embedding'.
+        let status: String = conn.query_row(
+            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+            [],
+            |r| r.get(0),
+        ).unwrap();
+        assert_ne!(status, "embedding", "stuck 'embedding' claim must be recovered before the next run");
+
+        // When sqlite-vec is available (embedded successfully), assert full success.
+        if crate::db::load_sqlite_vec(&conn).is_ok() {
+            assert_eq!(summary.embedded, 1);
+            assert_eq!(status, "embedded");
+        }
+    }
+
+    #[test]
     fn refresh_splits_200_documents_into_multiple_provider_requests() {
         use std::sync::{Arc, Mutex};
 
