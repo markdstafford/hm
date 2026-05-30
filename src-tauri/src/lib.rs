@@ -9,6 +9,7 @@ pub mod ingestion;
 pub mod issues;
 pub mod settings;
 pub mod sources;
+pub mod gardener;
 
 /// Run `replay_missing_snapshots` for every configured Jira project at startup.
 ///
@@ -121,6 +122,9 @@ pub fn run() {
         mutations::jira_link_as_duplicate::jira_link_as_duplicate,
         mutations::jira_link_as_duplicate::jira_link_as_duplicate_reverse,
         mutations::jira_add_comment::jira_add_comment,
+        crate::gardener::commands::hygiene_suggestions_list,
+        crate::gardener::commands::gardener_run_on_demand,
+        crate::gardener::commands::gardener_record_suppression,
     ]);
 
     #[cfg(debug_assertions)]
@@ -153,6 +157,9 @@ pub fn run() {
 
             // In-memory map of active Jira ingestion cancellation flags.
             app.manage(commands::ActiveIngestionRuns::default());
+
+            // Gardener runtime: single-flight guard for engine runs.
+            app.manage(crate::gardener::runner::GardenerRuntime::default());
 
             Ok(())
         })
@@ -228,6 +235,9 @@ mod tests {
                     crate::mutations::jira_link_as_duplicate::jira_link_as_duplicate,
                     crate::mutations::jira_link_as_duplicate::jira_link_as_duplicate_reverse,
                     crate::mutations::jira_add_comment::jira_add_comment,
+                    crate::gardener::commands::hygiene_suggestions_list,
+                    crate::gardener::commands::gardener_run_on_demand,
+                    crate::gardener::commands::gardener_record_suppression,
                 ]);
                 builder
                     .export(specta_typescript::Typescript::default(), out_path)

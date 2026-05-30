@@ -11,14 +11,15 @@ Every table belongs to exactly one category. The category decides how the table 
 | Category | Tables (today) | Refresh / rebuild | Backup boundary |
 | --- | --- | --- | --- |
 | **Source-mirrored** | raw issue payloads, issues, comments, links, labels, components, people, worklogs (#10); the event log (#11, ADR-005) | re-ingest from the source system (incl. Jira changelog) | not backed up — re-ingestable |
-| **Derived / cache** | daily snapshots (ADR-005); vector embeddings (#12); suggestions + enrichment proposals (#13/#14/#15) | recompute locally from source-mirrored data | not backed up — recomputable |
-| **Local truth** | audit log (#45); suppressions / feedback; settings; named views | cannot be recomputed | **this is the backup boundary** |
+| **Derived / cache** | daily snapshots (ADR-005); vector embeddings (#12); suggestions + enrichment proposals (#13/#14/#15); `gardener_suggestions` (#69); `gardener_watermarks` (#69) | recompute locally from source-mirrored data | not backed up — recomputable |
+| **Local truth** | audit log (#45); suppressions / feedback; settings; named views; `gardener_suppressions` (#69) | cannot be recomputed | **this is the backup boundary** |
 
 Notes:
 
 - The **event log is source-mirrored, not local truth.** Events are ingested from the upstream changelog and can be re-ingested (ADR-005: "re-ingest if needed"). It is the authoritative local copy for time-travel, but it is not irreplaceable.
 - **Derived is not free to rebuild.** Snapshots and suggestions are cheap to recompute, but embeddings and AI enrichment cost time and money. "Recomputable" describes correctness, not cost.
 - **Local truth keys off source identifiers, not local ids.** Local-truth rows reference the source-identity tuple `(source_id, source_kind, upstream_id)` (#10), never the SQLite-generated `hm` id, so they survive a rebuild — re-ingested rows get new local ids but the same source tuple, and the reference still resolves. See ADR-010.
+- **Gardener tables (added #69):** `gardener_suggestions` and `gardener_watermarks` are derived/cache — they can be dropped and rebuilt from source-mirrored data. `gardener_suppressions` is local truth — it must be preserved across rebuilds because it captures user intent (what they asked the gardener to ignore). `gardener_suppressions` is consulted before each scheduled suggestion emission (suppressed items are skipped). On-demand runs bypass suppression to surface results regardless of prior suppression state.
 
 ## Recompute dependency order
 

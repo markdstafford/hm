@@ -69,7 +69,7 @@ describe("BacklogHygienePage", () => {
     });
   });
 
-  it("renders fixture suggestions and hygiene default view chips", async () => {
+  it("renders command-backed suggestions and hygiene default view chips", async () => {
     renderPage();
     expect(await screen.findByRole("button", { name: "All" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("button", { name: "By action" })).toBeInTheDocument();
