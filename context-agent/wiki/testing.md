@@ -385,3 +385,23 @@ cd src-tauri && cargo test generate_typescript_bindings -- --exact --nocapture
 - **Changelog ingestion is opt-in via `JiraIngestionOptions.fetch_changelog`** (default `true`). Tests that don't want changelog behavior can set `fetch_changelog: false`.
 - **`jiraIssueStatusTimeline` returns `typedError<JiraIssueStatusTransition[], string>`** — unwrap with `result.status === "error"` check before accessing `result.data`.
 - **Mock pattern for history tests:** `vi.mock("./history", () => ({ loadJiraIssueStatusHistory: vi.fn() }))` in detail.test.tsx.
+
+---
+
+## Gardener producer tests (added 2026-05-30, issue #69)
+
+Targeted Rust:
+
+````bash
+cd src-tauri && cargo test gardener:: -- --nocapture
+cd src-tauri && cargo test ingestion_success_seam_runs_reference_gardener_best_effort -- --nocapture
+cd src-tauri && cargo test generate_typescript_bindings -- --exact --nocapture
+````
+
+Targeted frontend:
+
+````bash
+npm test -- src/features/backlog-hygiene/data.test.tsx src/features/backlog-hygiene/BacklogHygienePage.test.tsx src/entities/hygiene-suggestion
+````
+
+The reference engine uses existing synthetic local work items in tests and never requires Jira credentials, AI provider credentials, or network access. Suppression tests must key local truth by source identity tuples, not SQLite local row ids.

@@ -6,8 +6,7 @@ use rusqlite::Connection;
 
 use crate::gardener::contract::{GardenerTrigger, GardenerDependency};
 use crate::gardener::engine::{GardenerEngine, EngineRunContext};
-use crate::gardener::errors::GardenerError;
-use crate::gardener::repository::{self, SuggestionInsert, SuppressionKey};
+use crate::gardener::repository::{self, SuggestionInsert};
 use crate::gardener::settings::load_gardener_policy;
 
 // ---------------------------------------------------------------------------

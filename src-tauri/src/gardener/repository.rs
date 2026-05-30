@@ -346,7 +346,7 @@ pub fn transition_suggestion(
         message: "Suggestion not found.".into(),
     })?;
 
-    let current = SuggestionState::from_db(&current_str).ok_or_else(|| GardenerError::database())?;
+    let current = SuggestionState::from_db(&current_str).ok_or_else(GardenerError::database)?;
 
     if !current.can_transition_to(&next) {
         return Err(GardenerError::invalid_transition(current.as_db(), next.as_db()));

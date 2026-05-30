@@ -356,3 +356,16 @@ The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `Pro
 - New schema tables: `issue_events`, `issue_snapshots`, `issue_snapshot_jobs`.
 - New commands: `jira_issue_status_timeline`, `issue_snapshots_query`, `issue_history_retention_get`, `issue_history_retention_save`.
 - React: `src/entities/jira-issue/history.ts` — `loadJiraIssueStatusHistory` with `typedError` unwrap + browser fallback. `src/entities/jira-issue/detail.tsx` — Status history section, keyed on `work_item_id`, loading/error/empty/partial/success states.
+
+---
+
+## Gardener producer foundation (added 2026-05-30, issue #69)
+
+- `src-tauri/src/gardener/` owns producer-side hygiene suggestion infrastructure.
+- `schema.rs` creates `gardener_suggestions` (derived/cache), `gardener_suppressions` (local truth), and `gardener_watermarks` (derived cursor/progress).
+- `repository.rs` owns lifecycle transitions, idempotent supersede, pending-list reads, suppression, watermarks, and target lookup by stable source identity.
+- `contract.rs` / `engine.rs` define the declarative engine contract and `GardenerEngine` trait. Add future duplicate/stale/enrichment engines by registering a new engine; do not add engine-specific branches to `runner.rs`.
+- `runner.rs` owns trigger dispatch, per-engine single-flight, dependency/policy gates, pipeline walking, suppression consult, failure isolation, and watermark advancement.
+- `reference.rs` is a no-dependency deterministic reference engine. It emits honest reference output for an existing local Jira work item only; it does not create fake AMP rows.
+- `commands.rs` exposes `hygiene_suggestions_list`, `gardener_run_on_demand`, and `gardener_record_suppression`.
+- `src/features/backlog-hygiene/data.ts` is now command-backed; fixtures remain only for tests.

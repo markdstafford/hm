@@ -178,7 +178,261 @@ mod tests {
     use crate::db::open_in_memory;
     use crate::gardener::repository::{
         insert_or_supersede_pending, GardenerTarget, SuppressionKey, SuggestionInsert,
+        SuppressionInput, record_suppression, suppress_pending_for_changed_target,
+        read_watermark,
     };
+    use crate::gardener::runner::{
+        GardenerRuntime, GardenerRunStatus, ScheduledRunInput, OnDemandRunInput,
+        run_scheduled, run_on_demand,
+    };
+    use crate::gardener::reference::ReferenceEngine;
+    use crate::gardener::engine::GardenerEngine;
+    use crate::issues::repository::{upsert_source_system, SourceSystemInput, upsert_work_item, WorkItemInput};
+    use crate::issues::ids::stable_id;
+    use std::sync::Arc;
+
+    fn seed_source_and_work_item(conn: &rusqlite::Connection) {
+        let now = "2026-01-01T00:00:00Z";
+        upsert_source_system(
+            conn,
+            now,
+            &SourceSystemInput {
+                id: "srcsys_1",
+                kind: "jira",
+                deployment_kind: Some("data_center"),
+                display_name: "Test Jira",
+                base_url: Some("https://jira.example.com"),
+                config_source_id: Some("src_1"),
+            },
+        )
+        .expect("upsert source");
+
+        let item_id = stable_id("wi", &["srcsys_1", "jira_issue", "10001"]);
+        upsert_work_item(
+            conn,
+            now,
+            &WorkItemInput {
+                id: &item_id,
+                source_system_id: "srcsys_1",
+                source_kind: "jira_issue",
+                upstream_id: "10001",
+                key: Some("TEST-1"),
+                url: None,
+                title: "Test issue title",
+                body: None,
+                state: "open",
+                status_name: Some("Open"),
+                resolution_name: None,
+                priority_name: None,
+                item_type: None,
+                project_key: Some("TEST"),
+                project_name: Some("Test Project"),
+                assignee_person_id: None,
+                reporter_person_id: None,
+                created_at_source: None,
+                updated_at_source: Some("2026-01-01T00:00:00Z"),
+                resolved_at_source: None,
+                due_at_source: None,
+                raw_updated_hash: "hash001",
+            },
+        )
+        .expect("upsert work item");
+    }
+
+    fn reference_engines() -> Vec<Arc<dyn GardenerEngine>> {
+        vec![Arc::new(ReferenceEngine)]
+    }
+
+    fn make_scheduled_input(source_id: &str) -> ScheduledRunInput {
+        ScheduledRunInput {
+            source_id: Some(source_id.into()),
+            project_key: None,
+            cursor_kind: "updated_at".into(),
+            cursor_value: "2026-01-01T00:00:00Z".into(),
+            now: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // End-to-end acceptance tests
+    // -----------------------------------------------------------------------
+
+    /// Full path: seed work item → run scheduled → list via command helper → assert DTO shape.
+    #[test]
+    fn full_path_reference_suggestion_lists_through_command_shape() {
+        let conn = open_in_memory().expect("db opens");
+        seed_source_and_work_item(&conn);
+        let runtime = GardenerRuntime::default();
+
+        let summary = run_scheduled(
+            &conn,
+            &runtime,
+            &reference_engines(),
+            make_scheduled_input("srcsys_1"),
+        );
+        assert_eq!(summary.status, GardenerRunStatus::Complete);
+
+        let dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list");
+        assert_eq!(dtos.len(), 1);
+        let dto = &dtos[0];
+        assert_eq!(dto.category, "stale");
+        assert_eq!(dto.action, "close-as-resolved");
+        assert_eq!(dto.target.key, "TEST-1");
+        assert!(!dto.rationale.is_empty());
+    }
+
+    /// Running scheduled twice for the same target must result in exactly one pending suggestion.
+    #[test]
+    fn repeated_scheduled_reference_run_keeps_one_pending_visible_suggestion() {
+        let conn = open_in_memory().expect("db opens");
+        seed_source_and_work_item(&conn);
+        let runtime = GardenerRuntime::default();
+
+        run_scheduled(&conn, &runtime, &reference_engines(), make_scheduled_input("srcsys_1"));
+        run_scheduled(&conn, &runtime, &reference_engines(), make_scheduled_input("srcsys_1"));
+
+        let dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list");
+        assert_eq!(dtos.len(), 1, "second run must supersede, not add a duplicate");
+    }
+
+    /// Suppression hides suggestions from scheduled runs but on-demand bypasses suppression.
+    #[test]
+    fn suppression_hides_scheduled_but_on_demand_bypasses() {
+        let conn = open_in_memory().expect("db opens");
+        seed_source_and_work_item(&conn);
+
+        let key = SuppressionKey::Issue {
+            source_id: "srcsys_1".into(),
+            source_kind: "jira_issue".into(),
+            upstream_id: "10001".into(),
+        };
+        record_suppression(
+            &conn,
+            &SuppressionInput {
+                id: "sup-acc-1".into(),
+                engine_id: "reference".into(),
+                key,
+                reason: "already handled".into(),
+            },
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("record suppression");
+
+        let runtime = GardenerRuntime::default();
+
+        // Scheduled run: suppressed → zero visible
+        run_scheduled(&conn, &runtime, &reference_engines(), make_scheduled_input("srcsys_1"));
+        let scheduled_dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list after scheduled");
+        assert!(scheduled_dtos.is_empty(), "suppression must hide the scheduled suggestion");
+
+        // On-demand run: bypasses suppression → one visible
+        let on_demand_input = OnDemandRunInput {
+            source_id: Some("srcsys_1".into()),
+            target_upstream_id: Some("10001".into()),
+            now: "2026-01-01T00:00:00Z".into(),
+        };
+        let on_demand_summary = run_on_demand(
+            &conn,
+            &runtime,
+            &reference_engines(),
+            "reference",
+            on_demand_input,
+        );
+        assert_eq!(on_demand_summary.status, GardenerRunStatus::Complete);
+        let on_demand_dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list after on-demand");
+        assert_eq!(on_demand_dtos.len(), 1, "on-demand must bypass suppression and surface the suggestion");
+    }
+
+    /// Writing gardener.policy.v1 with reference.enabled=false causes zero suggestions.
+    #[test]
+    fn disabled_reference_engine_produces_no_suggestions() {
+        let conn = open_in_memory().expect("db opens");
+        seed_source_and_work_item(&conn);
+
+        // Disable the reference engine via policy
+        crate::settings::shared::shared_settings_set(
+            &conn,
+            crate::gardener::settings::GARDENER_POLICY_KEY,
+            &serde_json::json!({
+                "engines": {
+                    "reference": { "enabled": false, "scheduled": false, "on_demand": false }
+                }
+            }),
+        )
+        .expect("set policy");
+
+        let runtime = GardenerRuntime::default();
+        let summary = run_scheduled(
+            &conn,
+            &runtime,
+            &reference_engines(),
+            make_scheduled_input("srcsys_1"),
+        );
+
+        // All engines should be skipped
+        assert!(
+            matches!(summary.status, GardenerRunStatus::Skipped),
+            "disabled engine must skip, got {:?}",
+            summary.status
+        );
+
+        let dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list");
+        assert!(dtos.is_empty(), "disabled engine must produce zero suggestions");
+    }
+
+    /// After a successful scheduled run, the watermark reference/source/timestamp is set.
+    #[test]
+    fn watermark_advances_after_successful_scheduled_reference_run() {
+        let conn = open_in_memory().expect("db opens");
+        seed_source_and_work_item(&conn);
+        let runtime = GardenerRuntime::default();
+
+        let summary = run_scheduled(
+            &conn,
+            &runtime,
+            &reference_engines(),
+            make_scheduled_input("srcsys_1"),
+        );
+        assert_eq!(summary.status, GardenerRunStatus::Complete);
+
+        let wm = read_watermark(&conn, "reference", "srcsys_1", "updated_at").expect("read watermark");
+        assert_eq!(
+            wm.as_deref(),
+            Some("2026-01-01T00:00:00Z"),
+            "watermark must be set after successful scheduled run"
+        );
+    }
+
+    /// suppress_pending_for_changed_target hides pending suggestions for a changed target.
+    #[test]
+    fn changed_source_target_suppresses_stale_pending_suggestion() {
+        let conn = open_in_memory().expect("db opens");
+        seed_source_and_work_item(&conn);
+        let runtime = GardenerRuntime::default();
+
+        // Seed a pending suggestion via the runner
+        run_scheduled(
+            &conn,
+            &runtime,
+            &reference_engines(),
+            make_scheduled_input("srcsys_1"),
+        );
+        let before = list_hygiene_suggestions_from_conn(&conn, None).expect("list before");
+        assert_eq!(before.len(), 1, "precondition: one pending suggestion");
+
+        // Simulate a source change that invalidates existing pending suggestions
+        suppress_pending_for_changed_target(
+            &conn,
+            "srcsys_1",
+            "jira_issue",
+            "10001",
+            "2026-01-02T00:00:00Z",
+        )
+        .expect("suppress pending for changed target");
+
+        let after = list_hygiene_suggestions_from_conn(&conn, None).expect("list after");
+        assert!(after.is_empty(), "pending suggestion must be suppressed after target change");
+    }
 
     fn make_pending_row(conn: &rusqlite::Connection, id: &str, key_json_seed: &str) {
         let target = GardenerTarget {
