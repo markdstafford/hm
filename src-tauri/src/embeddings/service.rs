@@ -310,6 +310,27 @@ pub fn nearest_neighbors(
     run_knn_query(conn, &vector, &model_id, &query)
 }
 
+/// KNN search using a stored document's precomputed vector.
+///
+/// Use this in the command path for `document_id` queries: no provider call is
+/// needed — the stored vector is fetched directly from the database.
+/// A single brief DB lock covers both the vector lookup and the KNN query.
+pub fn nearest_neighbors_by_document_id(
+    conn: &rusqlite::Connection,
+    query: EmbeddingCandidateQuery,
+) -> Result<Vec<EmbeddingCandidate>, EmbeddingError> {
+    let doc_id = query.document_id.as_deref().ok_or_else(|| {
+        EmbeddingError::new(
+            EmbeddingErrorCategory::InvalidQuery,
+            "document_id must be provided for nearest_neighbors_by_document_id.",
+        )
+    })?;
+    let (_emb_id, model_id, _dimension, vector) =
+        crate::embeddings::repository::fresh_embedding_for_document(conn, doc_id)?
+            .unwrap_or_else(|| unreachable!("fresh_embedding_for_document returns Err, not Ok(None)"));
+    run_knn_query(conn, &vector, &model_id, &query)
+}
+
 pub fn refresh_embeddings_with_provider(
     conn: &rusqlite::Connection,
     provider: &dyn EmbeddingProvider,

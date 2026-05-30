@@ -945,14 +945,16 @@ impl EmbeddingRunnerForCommand for crate::ai::runners::openai_embeddings::OpenAi
     }
 }
 
-/// Inner loop for embedding refresh: for each text batch, call the runner (Phase 2)
-/// then write results to `conn` (Phase 3). Returns the accumulated summary.
+/// Inner loop for embedding refresh: for each text batch, release the DB lock,
+/// call the runner (Phase 2), re-acquire the lock, then write results (Phase 3).
+/// Returns the accumulated summary.
 ///
-/// Callers that need mutex discipline (i.e. the Tauri command) should release the
-/// DB lock before calling this, then re-acquire inside for Phase 3 writes. In tests
-/// a raw `Connection` is passed directly so no mutex is needed.
+/// Accepts a `&Mutex<Connection>` so it can lock briefly for Phase 3 writes
+/// while keeping the lock released during the provider HTTP call (Phase 2).
+/// Callers pass `&*db` when `db` is a `tauri::State<Mutex<Connection>>`, or
+/// wrap a raw connection in a `Mutex` for tests.
 pub(crate) fn run_embedding_refresh_loop(
-    conn: &rusqlite::Connection,
+    db: &std::sync::Mutex<rusqlite::Connection>,
     resolved: &crate::ai::resolver::ResolvedAiProvider,
     batch: &crate::embeddings::service::PreparedRefreshBatch,
     runner: &dyn EmbeddingRunnerForCommand,
@@ -971,11 +973,16 @@ pub(crate) fn run_embedding_refresh_loop(
 
     for text_batch in &batch.text_batches {
         let request = EmbeddingRequest { input: text_batch.texts.clone() };
+
+        // Phase 2: HTTP call — no DB lock held.
         let response = match runner.run(resolved, request) {
             Ok(r) => r,
             Err(e) => {
-                for doc in &text_batch.docs {
-                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now);
+                // Phase 3 (failure path): record failures (brief lock).
+                if let Ok(conn) = db.lock() {
+                    for doc in &text_batch.docs {
+                        let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &e, now);
+                    }
                 }
                 failed += text_batch.docs.len() as u32;
                 paused = true;
@@ -995,18 +1002,29 @@ pub(crate) fn run_embedding_refresh_loop(
         );
         dimension = response.dimension as u32;
 
-        match complete_text_batch(conn, text_batch, response, now) {
-            Ok(_) => {
-                embedded += text_batch.docs.len() as u32;
-            }
-            Err(e) => {
-                for doc in &text_batch.docs {
-                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now);
+        // Phase 3 (success path): write vectors (brief lock).
+        match db.lock() {
+            Ok(conn) => match complete_text_batch(&conn, text_batch, response, now) {
+                Ok(_) => {
+                    embedded += text_batch.docs.len() as u32;
                 }
+                Err(e) => {
+                    for doc in &text_batch.docs {
+                        let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &e, now);
+                    }
+                    failed += text_batch.docs.len() as u32;
+                    paused = true;
+                    if safe_error.is_none() {
+                        safe_error = Some(e.to_string());
+                    }
+                    break;
+                }
+            },
+            Err(e) => {
                 failed += text_batch.docs.len() as u32;
                 paused = true;
                 if safe_error.is_none() {
-                    safe_error = Some(e.to_string());
+                    safe_error = Some(format!("DB lock error: {e}"));
                 }
                 break;
             }
@@ -1076,15 +1094,11 @@ pub fn embedding_refresh_run(
         (batch, resolved)
     }; // ← DB mutex released here
 
-    // Phases 2 + 3: for each text batch, call the runner then write results.
-    // `run_embedding_refresh_loop` re-acquires `conn` from `db` per batch write;
-    // here we pass a brief lock per write inside the helper.
-    // Since the helper takes a raw &Connection we must hold the lock across the
-    // entire batch loop for this command path. The mutex is released between
-    // the provider call and the write in the post-ingestion worker path instead.
-    let conn = db.lock().map_err(|e| e.to_string())?;
+    // Phases 2 + 3: for each text batch, call the runner (no DB lock held),
+    // then write results (brief lock). `run_embedding_refresh_loop` manages the
+    // Mutex internally so the lock is released before each provider HTTP call.
     Ok(run_embedding_refresh_loop(
-        &conn,
+        &*db,
         &resolved,
         &batch,
         &OpenAiEmbeddingsRunner::default(),
@@ -1124,10 +1138,10 @@ pub fn embedding_nearest_neighbors(
     use crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner;
     use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
     use crate::embeddings::service::{
-        embed_query_text_unlocked, nearest_neighbors_by_precomputed_vector,
+        embed_query_text_unlocked, nearest_neighbors_by_document_id,
+        nearest_neighbors_by_precomputed_vector,
     };
     use crate::embeddings::errors::EmbeddingError;
-    use crate::embeddings::provider::FakeEmbeddingProvider;
 
     match (&query.document_id, &query.query_text) {
         (None, None) | (Some(_), Some(_)) => {
@@ -1143,11 +1157,7 @@ pub fn embedding_nearest_neighbors(
         // document_id path: no provider call needed — stored vector used directly.
         // A single brief DB lock covers both the vector lookup and the KNN query.
         let conn = db.lock().map_err(|e| e.to_string())?;
-        return crate::embeddings::service::nearest_neighbors(
-            &conn,
-            &FakeEmbeddingProvider::new(0, "", ""), // provider unused for document_id path
-            query,
-        ).map_err(|e| e.to_string());
+        return nearest_neighbors_by_document_id(&conn, query).map_err(|e| e.to_string());
     }
 
     // query_text path: 3-phase approach.
@@ -1914,15 +1924,22 @@ mod tests {
 
         let now = "2026-01-01T00:00:00Z";
 
+        // Wrap connection in a Mutex so run_embedding_refresh_loop can lock/unlock
+        // between Phase 2 (HTTP call) and Phase 3 (write), matching production behaviour.
+        let db = std::sync::Mutex::new(conn);
+
         // Phase 1: claim documents (simulates what the ingestion worker does).
-        let batch = prepare_refresh_batch(&conn, &embed_opts, now)
-            .expect("prepare batch")
-            .expect("should have pending doc");
+        let batch = {
+            let conn = db.lock().expect("phase 1 lock");
+            prepare_refresh_batch(&conn, &embed_opts, now)
+                .expect("prepare batch")
+                .expect("should have pending doc")
+        }; // lock released here
 
         // Phase 2+3: run the embedding loop with the fake runner.
         let resolved = fake_resolved_provider();
         let summary = run_embedding_refresh_loop(
-            &conn,
+            &db,
             &resolved,
             &batch,
             &FakeCommandEmbeddingRunner,
@@ -1936,6 +1953,7 @@ mod tests {
         // When sqlite-vec is unavailable the write fails and the document ends up
         // in 'failed' state. In either case the loop must have run and produced a
         // non-'embedding' status (not stuck).
+        let conn = db.lock().expect("final check lock");
         let status: String = conn.query_row(
             "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
             [],
