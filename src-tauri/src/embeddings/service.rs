@@ -814,9 +814,7 @@ mod tests {
         struct FailingProvider;
         impl EmbeddingProvider for FailingProvider {
             fn embed(&self, _req: EmbeddingRequest) -> Result<EmbeddingResponse, EmbeddingError> {
-                Err(EmbeddingError::provider_rejected(
-                    "Bearer sk-test raw body Cannot sign in".into(),
-                ))
+                Err(EmbeddingError::provider_rejected())
             }
         }
 

@@ -28,7 +28,7 @@ impl EmbeddingError {
     pub fn new(category: EmbeddingErrorCategory, safe_summary: impl Into<String>) -> Self {
         Self { category, safe_summary: safe_summary.into(), retry_after_seconds: None }
     }
-    pub fn provider_rejected(_detail: String) -> Self {
+    pub fn provider_rejected() -> Self {
         Self::new(EmbeddingErrorCategory::ProviderRejected, "Embedding provider rejected the request: Check the selected credential and model.")
     }
     pub fn unsupported_profile() -> Self {
@@ -106,9 +106,7 @@ mod tests {
 
     #[test]
     fn provider_rejected_redacts_secret_and_document_text() {
-        let err = EmbeddingError::provider_rejected(
-            "Bearer sk-test-secret Authorization raw provider body Cannot sign in Full issue text".into(),
-        );
+        let err = EmbeddingError::provider_rejected();
         assert_safe_message(&err.to_string());
         assert!(err.to_string().contains("Embedding provider rejected"));
     }

@@ -531,9 +531,7 @@ mod tests {
         setup_schema(&conn).expect("schema");
         seed_source_and_document(&conn, "doc_1", "hash_a");
 
-        let err = crate::embeddings::errors::EmbeddingError::provider_rejected(
-            "Bearer sk-test raw body Cannot sign in".into(),
-        );
+        let err = crate::embeddings::errors::EmbeddingError::provider_rejected();
         record_embedding_failure(&conn, "doc_1", "srcsys_1", &err, "2026-01-01T00:00:00Z")
             .expect("record failure");
         record_embedding_failure(&conn, "doc_1", "srcsys_1", &err, "2026-01-01T00:00:00Z")

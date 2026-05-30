@@ -54,10 +54,10 @@ impl OpenAiEmbeddingsRunner {
             Ok(resp) => resp,
             Err(ureq::Error::Status(status, resp)) => {
                 return Err(match status {
-                    401 | 403 => EmbeddingError::provider_rejected(String::new()),
+                    401 | 403 => EmbeddingError::provider_rejected(),
                     429 => EmbeddingError::provider_rate_limited(retry_after_seconds(&resp)),
                     s if s >= 500 => EmbeddingError::provider_unavailable(),
-                    _ => EmbeddingError::provider_rejected(String::new()),
+                    _ => EmbeddingError::provider_rejected(),
                 });
             }
             Err(ureq::Error::Transport(_t)) => {
@@ -84,7 +84,8 @@ impl OpenAiEmbeddingsRunner {
                 let idx = item["index"].as_u64().unwrap_or(0) as usize;
                 let embedding: Vec<f32> = item["embedding"]
                     .as_array()
-                    .unwrap_or(&vec![])
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[])
                     .iter()
                     .filter_map(|v| v.as_f64().map(|f| f as f32))
                     .collect();
