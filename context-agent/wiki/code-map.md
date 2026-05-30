@@ -347,6 +347,15 @@ The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `Pro
 
 ---
 
+### Grove embedding refresh path
+
+- `src-tauri/src/ai/runners/openai_embeddings.rs` sends OpenAI-compatible `/embeddings` requests with `Authorization`, `api-key`, and `x-api-key` headers for Grove APIM compatibility.
+- `src-tauri/src/embeddings/limits.rs` owns embedding request limits: 96 inputs per request by default, estimated-token splitting, maximum batches per run, and a minimum 60 second rate-limit backoff.
+- `src-tauri/src/embeddings/service.rs` owns refresh batching and checkpointing. Provider calls happen outside the SQLite mutex; writes and failure records happen under short DB locks.
+- `embedding.default` must route to a profile with `runner: OpenAiEmbeddings` and model `embed-v-4-0` for the Grove example.
+
+---
+
 ## Jira issue history (added 2026-05-28, issue #11)
 
 - `src-tauri/src/issues/history.rs` — issue event/snapshot repository helpers, retention config load/save (`IssueHistoryRetentionConfig`, key `"issue_history.retention"`), snapshot job lifecycle, `coarse_state` helper, `IssueHistoryError` safe error type.

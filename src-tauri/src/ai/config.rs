@@ -700,25 +700,30 @@ mod tests {
         AiProviderConfig {
             version: 1,
             credentials: vec![AiCredentialConfig {
-                name: "openai-prod".into(),
-                kind: AiCredentialKind::BearerToken,
-                source: CredentialSource::Keychain { key_ref: "ai.credentials.openai-prod".into() },
+                name: "grove".into(),
+                kind: AiCredentialKind::ApiKey,
+                source: CredentialSource::Keychain { key_ref: "ai.credentials.grove".into() },
             }],
             endpoints: vec![AiEndpointConfig {
-                name: "embeddings-gateway".into(),
+                name: "grove-embeddings".into(),
                 protocol: AiEndpointProtocol::OpenAiEmbeddingsCompatible,
-                base_url: "https://api.openai.com/v1".into(),
-                credential_ref: "openai-prod".into(),
+                base_url: "https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1".into(),
+                credential_ref: "grove".into(),
             }],
             profiles: vec![AiProfileConfig {
-                name: "embed-small".into(),
-                endpoint_ref: "embeddings-gateway".into(),
-                model: "text-embedding-3-small".into(),
+                name: "grove-embed-v4".into(),
+                endpoint_ref: "grove-embeddings".into(),
+                model: "embed-v-4-0".into(),
                 runner: AiRunner::OpenAiEmbeddings,
                 execution_mode: AiExecutionMode::DirectApi,
-                settings: crate::commands::JsonValue(serde_json::json!({ "dimensions": 3 })),
+                settings: crate::commands::JsonValue(serde_json::json!({
+                    "max_inputs_per_request": 96,
+                    "max_estimated_chars_per_request": 32000,
+                    "max_batches_per_run": 50,
+                    "rate_limit_backoff_seconds": 60
+                })),
             }],
-            routing: BTreeMap::from([("embedding.default".into(), "embed-small".into())]),
+            routing: BTreeMap::from([("embedding.default".into(), "grove-embed-v4".into())]),
         }
     }
 

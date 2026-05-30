@@ -388,6 +388,15 @@ cd src-tauri && cargo test generate_typescript_bindings -- --exact --nocapture
 
 ---
 
+### Grove embedding checks
+
+- Runner/APIM headers: `cargo test --manifest-path src-tauri/Cargo.toml --lib openai_embeddings -- --nocapture`
+- Embedding service batching/backoff: `cargo test --manifest-path src-tauri/Cargo.toml --lib embeddings::service -- --nocapture`
+- Frontend AI provider embedding config: `npm test -- src/aiProviders src/features/settings/ai-providers`
+- The sandbox may lack working sqlite-vec extension behavior; compare any sqlite-vec failures with the known triage failures before treating them as regressions.
+
+---
+
 ## Gardener producer tests (added 2026-05-30, issue #69)
 
 Targeted Rust:

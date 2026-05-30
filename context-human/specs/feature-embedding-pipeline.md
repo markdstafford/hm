@@ -161,6 +161,29 @@ Safe logs may include source id, document id, entity kind, entity id, model name
 ### Provider model changes
 
 The current AI provider code supports text completion runners. Issue #12 needs embedding-capable profile metadata and a service path that returns vectors.
+
+For the Grove OpenAI-compatible gateway, the supported embedding example is:
+
+```yaml
+endpoints:
+  - name: grove-embeddings
+    protocol: openai_embeddings
+    base_url: https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1
+    credential: grove
+profiles:
+  - name: grove-embed-v4
+    endpoint: grove-embeddings
+    model: embed-v-4-0
+    runner: openai_embeddings
+    max_inputs_per_request: 96
+    max_estimated_tokens_per_request: 8000
+    max_batches_per_run: 50
+    rate_limit_backoff_seconds: 60
+routing:
+  embedding.default: grove-embed-v4
+```
+
+The runner sends `Authorization`, `api-key`, and `x-api-key` headers for APIM compatibility. Refresh splits requests at 96 inputs and under the configured estimated token cap, then pauses failed batches according to provider 429 retry metadata.
 Recommended changes:
 ```rust
 pub enum AiEndpointProtocol {
