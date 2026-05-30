@@ -96,7 +96,12 @@ function ProfileRow({
   onTest: () => void;
   onRemove: () => void;
 }) {
-  const runnerLabel = profile.runner === "AnthropicMessages" ? "Anthropic Messages" : "OpenAI Chat";
+  const runnerLabel =
+    profile.runner === "AnthropicMessages"
+      ? "Anthropic Messages"
+      : profile.runner === "OpenAiEmbeddings"
+        ? "OpenAI Embeddings"
+        : "OpenAI Chat";
   let host = endpointBaseUrl;
   try { host = new URL(endpointBaseUrl).hostname; } catch { /* keep */ }
   const pill = effortPill(profile);

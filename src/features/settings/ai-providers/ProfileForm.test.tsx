@@ -173,6 +173,43 @@ describe("ProfileForm", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it("creates a Grove embedding profile with OpenAI Embeddings protocol and embedding.default routing", async () => {
+    const onSave = vi.fn();
+    const emptyConfig: AiProviderConfig = {
+      version: 1,
+      credentials: [],
+      endpoints: [],
+      profiles: [],
+      routing: {},
+    };
+    render(<ProfileForm mode="create" config={emptyConfig} onCancel={() => {}} onSave={onSave} />);
+    await userEvent.type(screen.getByLabelText(/Profile name/i), "grove-embed-v4");
+    // Create new connection with OpenAI Embeddings protocol
+    await userEvent.type(screen.getByLabelText(/Endpoint name/i), "grove-embeddings");
+    // Change protocol to OpenAI Embeddings
+    const protocolSelect = screen.getByRole("combobox", { name: /Protocol/i });
+    await userEvent.click(protocolSelect);
+    await userEvent.click(await screen.findByRole("option", { name: /OpenAI Embeddings/i }));
+    // Set base URL
+    const baseUrlInput = screen.getByLabelText(/Base URL/i);
+    await userEvent.clear(baseUrlInput);
+    await userEvent.type(baseUrlInput, "https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1");
+    // Create new credential
+    await userEvent.type(screen.getByLabelText(/Credential name/i), "grove");
+    await userEvent.type(screen.getByLabelText(/Secret value/i), "sk-grove-key");
+    // Set model
+    await userEvent.type(screen.getByLabelText(/^Model$/i), "embed-v-4-0");
+    // Enable embedding.default routing
+    await userEvent.click(screen.getByRole("checkbox", { name: /embedding\.default/i }));
+    await userEvent.click(screen.getByRole("button", { name: /Add profile/ }));
+    expect(onSave).toHaveBeenCalledOnce();
+    const { next } = onSave.mock.calls[0][0] as { next: AiProviderConfig };
+    expect(next.endpoints[0].protocol).toBe("OpenAiEmbeddingsCompatible");
+    expect(next.profiles[0].runner).toBe("OpenAiEmbeddings");
+    expect(next.profiles[0].model).toBe("embed-v-4-0");
+    expect(next.routing["embedding.default"]).toBe("grove-embed-v4");
+  });
+
   it("produces a pendingSecret when creating a new Keychain credential", async () => {
     const onSave = vi.fn();
     const emptyConfig: AiProviderConfig = {

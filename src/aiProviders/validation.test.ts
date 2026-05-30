@@ -186,3 +186,52 @@ describe("validateAiProviderConfig", () => {
     expect(errors.join("\n")).toContain("Invalid endpoint URL");
   });
 });
+
+function validEmbeddingConfig(): AiProviderConfig {
+  return {
+    version: 1,
+    credentials: [
+      {
+        name: "grove",
+        kind: "ApiKey",
+        source: { type: "Keychain", key_ref: "ai.credentials.grove" },
+      },
+    ],
+    endpoints: [
+      {
+        name: "grove-embeddings",
+        protocol: "OpenAiEmbeddingsCompatible",
+        base_url: "https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1",
+        credential_ref: "grove",
+      },
+    ],
+    profiles: [
+      {
+        name: "grove-embed-v4",
+        endpoint_ref: "grove-embeddings",
+        model: "embed-v-4-0",
+        runner: "OpenAiEmbeddings",
+        execution_mode: "DirectApi",
+        settings: {
+          max_inputs_per_request: 96,
+          max_estimated_tokens_per_request: 8000,
+          max_batches_per_run: 50,
+          rate_limit_backoff_seconds: 60,
+        },
+      },
+    ],
+    routing: { "embedding.default": "grove-embed-v4" },
+  };
+}
+
+it("accepts embedding.default routed to an OpenAI embeddings profile", () => {
+  expect(validateAiProviderConfig(validEmbeddingConfig())).toEqual([]);
+});
+
+it("rejects embedding.default routed to a chat profile", () => {
+  const c = validConfig();
+  c.routing["embedding.default"] = "chat-fast";
+  const errors = validateAiProviderConfig(c);
+  expect(errors.join("\n")).toContain("embedding.default");
+  expect(errors.join("\n")).toContain("cannot create embeddings");
+});

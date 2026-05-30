@@ -86,6 +86,8 @@ function parseEndpoint(raw: unknown, i: number): AiEndpointConfig {
     mappedProtocol = "AnthropicMessages";
   } else if (protocol === "openai" || protocol === "OpenAiChatCompletionsCompatible") {
     mappedProtocol = "OpenAiChatCompletionsCompatible";
+  } else if (protocol === "openai_embeddings" || protocol === "OpenAiEmbeddingsCompatible") {
+    mappedProtocol = "OpenAiEmbeddingsCompatible";
   } else {
     throw new YamlParseError(`${where}.protocol: unknown protocol "${protocol}"`);
   }
@@ -105,6 +107,8 @@ function parseProfile(raw: unknown, i: number): AiProfileConfig {
     mappedRunner = "AnthropicMessages";
   } else if (runner === "openai_direct" || runner === "openai_agent_sdk" || runner === "OpenAiChatCompletions") {
     mappedRunner = "OpenAiChatCompletions";
+  } else if (runner === "openai_embeddings" || runner === "OpenAiEmbeddings") {
+    mappedRunner = "OpenAiEmbeddings";
   } else {
     throw new YamlParseError(`${where}.runner: unknown runner "${runner}"`);
   }

@@ -12,7 +12,7 @@ type YamlCredential =
 
 type YamlEndpoint = {
   name: string;
-  protocol: "anthropic" | "openai";
+  protocol: "anthropic" | "openai" | "openai_embeddings";
   base_url: string;
   credential: string;
 };
@@ -43,7 +43,12 @@ function credentialToYaml(c: AiCredentialConfig): YamlCredential {
 }
 
 function endpointToYaml(e: AiEndpointConfig): YamlEndpoint {
-  const protocol = e.protocol === "AnthropicMessages" ? "anthropic" : "openai";
+  const protocol =
+    e.protocol === "AnthropicMessages"
+      ? "anthropic"
+      : e.protocol === "OpenAiEmbeddingsCompatible"
+        ? "openai_embeddings"
+        : "openai";
   return {
     name: e.name,
     protocol,
@@ -56,7 +61,11 @@ function profileToYaml(p: AiProfileConfig): YamlProfile {
   const settings = { ...((p.settings as Record<string, unknown>) ?? {}) };
   const yamlRunner =
     (settings._yaml_runner as string | undefined) ??
-    (p.runner === "AnthropicMessages" ? "anthropic_direct" : "openai_direct");
+    (p.runner === "AnthropicMessages"
+      ? "anthropic_direct"
+      : p.runner === "OpenAiEmbeddings"
+        ? "openai_embeddings"
+        : "openai_direct");
   delete settings._yaml_runner;
 
   const out: YamlProfile = {
