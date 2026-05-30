@@ -972,7 +972,8 @@ pub(crate) fn run_embedding_refresh_loop(
     runner: &dyn EmbeddingRunnerForCommand,
     now: &str,
     limits: &crate::embeddings::limits::EmbeddingBatchLimits,
-) -> crate::embeddings::service::EmbeddingRunSummary {
+    max_http_calls: usize,
+) -> (crate::embeddings::service::EmbeddingRunSummary, usize) {
     use crate::embeddings::service::{complete_text_batch, EmbeddingRunStatus, EmbeddingRunSummary};
     use crate::embeddings::repository::record_embedding_failure;
     use crate::embeddings::provider::EmbeddingRequest;
@@ -984,8 +985,16 @@ pub(crate) fn run_embedding_refresh_loop(
     let mut dimension: u32 = 0;
     let mut safe_error: Option<String> = None;
     let mut paused = false;
+    let mut http_calls_made: usize = 0;
 
     for text_batch in &batch.text_batches {
+        if http_calls_made >= max_http_calls {
+            // Budget exhausted; remaining docs in uncompleted text_batches stay in
+            // 'embedding' state and will be recovered at the start of the next run.
+            paused = true;
+            break;
+        }
+        http_calls_made += 1;
         let request = EmbeddingRequest { input: text_batch.texts.clone() };
 
         // Phase 2: HTTP call — no DB lock held.
@@ -1063,7 +1072,7 @@ pub(crate) fn run_embedding_refresh_loop(
         EmbeddingRunStatus::Complete
     };
 
-    EmbeddingRunSummary {
+    (EmbeddingRunSummary {
         status,
         scanned: batch.scanned,
         embedded,
@@ -1072,7 +1081,7 @@ pub(crate) fn run_embedding_refresh_loop(
         model_id,
         dimension,
         safe_error,
-    }
+    }, http_calls_made)
 }
 
 /// Trigger a batch embedding refresh. Processes pending documents using the
@@ -1155,17 +1164,22 @@ pub fn embedding_refresh_run(
         };
 
         total_scanned += batch.scanned;
-        batches_run += 1;
 
         // Phases 2 + 3: call runner (no lock held) then write results (brief lock).
-        let iter_summary = run_embedding_refresh_loop(
+        // Pass the remaining HTTP-call budget so the inner loop enforces the cap at
+        // the provider-request level (one per token-split text_batch), not just the
+        // claim-iteration level.
+        let remaining_budget = limits.max_batches_per_run.saturating_sub(batches_run);
+        let (iter_summary, http_calls_made) = run_embedding_refresh_loop(
             &*db,
             &resolved,
             &batch,
             &OpenAiEmbeddingsRunner::default(),
             &now,
             &limits,
+            remaining_budget,
         );
+        batches_run += http_calls_made;
 
         total_embedded += iter_summary.embedded;
         total_failed += iter_summary.failed;
@@ -2038,13 +2052,14 @@ mod tests {
 
         // Phase 2+3: run the embedding loop with the fake runner.
         let resolved = fake_resolved_provider();
-        let summary = run_embedding_refresh_loop(
+        let (summary, _http_calls) = run_embedding_refresh_loop(
             &db,
             &resolved,
             &batch,
             &FakeCommandEmbeddingRunner,
             now,
             &limits,
+            limits.max_batches_per_run,
         );
 
         // The embedding loop must complete before any gardener step would run.
@@ -2233,17 +2248,20 @@ mod tests {
                 fully_drained = true;
                 break;
             };
-            batches_run += 1;
-            let iter_summary = run_embedding_refresh_loop(
-                &db, &resolved, &batch, &FakeCommandEmbeddingRunner, now, &limits,
+            let remaining_budget = limits.max_batches_per_run.saturating_sub(batches_run);
+            let (iter_summary, http_calls_made) = run_embedding_refresh_loop(
+                &db, &resolved, &batch, &FakeCommandEmbeddingRunner, now, &limits, remaining_budget,
             );
+            batches_run += http_calls_made;
             if matches!(iter_summary.status, EmbeddingRunStatus::Paused | EmbeddingRunStatus::Partial) {
                 break;
             }
         }
 
         assert!(!fully_drained, "20 docs with 2 batches of 5 should not fully drain");
-        assert_eq!(batches_run, 2, "exactly max_batches_per_run=2 iterations should have run");
+        // Each claim of 5 docs produces 1 text_batch (within the 8000-token limit),
+        // so batches_run == HTTP calls made == max_batches_per_run.
+        assert_eq!(batches_run, 2, "exactly max_batches_per_run=2 HTTP calls should have been made");
 
         let pending_count: i64 = {
             let conn = db.lock().unwrap();
@@ -2254,5 +2272,109 @@ mod tests {
             ).unwrap()
         };
         assert_eq!(pending_count, 10, "10 docs should remain pending after 2 batches of 5");
+    }
+
+    /// Regression test: when a single claim produces multiple token-split text_batches,
+    /// `run_embedding_refresh_loop` must honour `max_http_calls=1` and stop after the
+    /// first provider request, leaving the remaining text_batches' docs in 'embedding'
+    /// state (to be recovered at the start of the next run).
+    ///
+    /// This validates FINAL-1: max_batches_per_run is enforced at the HTTP-call
+    /// level, not just at the claim-iteration level.
+    #[test]
+    fn token_split_within_claim_respects_max_http_calls() {
+        use std::sync::{Arc, Mutex as StdMutex};
+        use crate::embeddings::limits::EmbeddingBatchLimits;
+        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
+        use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunOptions};
+        use crate::embeddings::provider::{EmbeddingRequest, EmbeddingResponse};
+        use crate::embeddings::errors::EmbeddingError;
+
+        let conn = open_in_memory().expect("db");
+        setup_schema(&conn).expect("embedding schema");
+
+        // Seed 3 docs. Each assembled text is "Title: Login bug\n\nBody:\nCannot sign in"
+        // (≈10 estimated tokens). With max_estimated_tokens_per_request=15, each doc
+        // starts its own text_batch (10 + 10 > 15), producing 3 text_batches per claim.
+        seed_source_and_document(&conn, "doc_0", "hash_0");
+        for i in 1..3 {
+            conn.execute(
+                "INSERT OR IGNORE INTO indexable_documents \
+                 (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
+                 VALUES (?1, 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', 'Login bug', 'Cannot sign in', '{}', ?2, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                rusqlite::params![format!("doc_{i}"), format!("hash_{i}")],
+            ).unwrap();
+        }
+
+        // max_estimated_tokens_per_request=15 forces each doc into its own text_batch.
+        let limits = EmbeddingBatchLimits {
+            max_inputs_per_request: 96, // claim all 3
+            max_estimated_tokens_per_request: 15,
+            max_batches_per_run: 1,
+            rate_limit_backoff_seconds: 60,
+        };
+
+        let db = StdMutex::new(conn);
+        let embed_opts = EmbeddingRunOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: None,
+            force_rebuild: false,
+        };
+        let now = "2026-01-01T00:00:00Z";
+
+        // Phase 1: claim all 3 docs. Token splitting should produce 3 text_batches.
+        let batch = {
+            let conn = db.lock().expect("lock");
+            prepare_refresh_batch(&conn, &embed_opts, &limits, now)
+                .expect("prepare batch")
+                .expect("should have pending docs")
+        };
+        assert_eq!(batch.text_batches.len(), 3, "3 docs at ~10 tokens each with a 15-token cap should produce 3 text_batches");
+
+        // Count HTTP calls via a capturing runner.
+        let http_call_count: Arc<StdMutex<usize>> = Arc::new(StdMutex::new(0));
+        let http_call_count_clone = http_call_count.clone();
+
+        struct CountingRunner { count: Arc<StdMutex<usize>> }
+        impl EmbeddingRunnerForCommand for CountingRunner {
+            fn run(
+                &self,
+                _resolved: &crate::ai::resolver::ResolvedAiProvider,
+                req: EmbeddingRequest,
+            ) -> Result<EmbeddingResponse, EmbeddingError> {
+                *self.count.lock().unwrap() += 1;
+                Ok(EmbeddingResponse {
+                    vectors: req.input.iter().map(|_| vec![0.1f32, 0.2, 0.3]).collect(),
+                    model: "embed-v-4-0".into(),
+                    profile: "grove-embed-v4".into(),
+                    dimension: 3,
+                    usage: None,
+                })
+            }
+        }
+
+        let runner = CountingRunner { count: http_call_count_clone };
+        let resolved = fake_resolved_provider();
+
+        // With max_http_calls=1, only the first text_batch should be processed.
+        let (_summary, http_calls_made) = run_embedding_refresh_loop(
+            &db, &resolved, &batch, &runner, now, &limits, 1,
+        );
+
+        assert_eq!(*http_call_count.lock().unwrap(), 1, "exactly 1 HTTP call should be made with max_http_calls=1");
+        assert_eq!(http_calls_made, 1, "run_embedding_refresh_loop should report 1 HTTP call made");
+
+        // The other 2 docs are still in 'embedding' state (stuck), to be recovered
+        // by the stuck-claim recovery at the start of the next prepare_refresh_batch call.
+        let embedding_count: i64 = {
+            let conn = db.lock().unwrap();
+            conn.query_row(
+                "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'embedding'",
+                [],
+                |r| r.get(0),
+            ).unwrap()
+        };
+        assert_eq!(embedding_count, 2, "2 docs from unprocessed text_batches should remain in 'embedding' state");
     }
 }
