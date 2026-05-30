@@ -203,6 +203,11 @@ pub struct SuppressionInput {
 /// Both the suppression UPDATE and the new INSERT are wrapped in a single
 /// transaction so a crash between them cannot leave the old row suppressed
 /// without a replacement row existing.
+///
+/// When the incoming id equals the existing pending row's id (i.e. the runner
+/// generated a stable, key-derived id and is re-emitting for the same target),
+/// the row is updated in-place rather than superseded, which preserves exactly
+/// one pending suggestion and advances its updated_at.
 pub fn insert_or_supersede_pending(
     conn: &Connection,
     input: &SuggestionInsert,
@@ -231,8 +236,31 @@ pub fn insert_or_supersede_pending(
         .optional()
         .map_err(|_| GardenerError::database())?;
 
-    // Mark old pending row as suppressed + superseded
     if let Some(ref old_id) = existing_id {
+        if old_id == &input.id {
+            // Same stable id: update the existing pending row in-place so
+            // updated_at advances and the payload reflects the latest emission.
+            tx.execute(
+                "UPDATE gardener_suggestions
+                 SET confidence = ?1, title = ?2, status = ?3, assignee = ?4,
+                     rationale = ?5, payload_json = ?6, updated_at = ?7
+                 WHERE id = ?8 AND state = 'pending'",
+                params![
+                    input.confidence as i64,
+                    input.title,
+                    input.target.status,
+                    input.target.assignee,
+                    input.rationale,
+                    payload_str,
+                    now,
+                    old_id,
+                ],
+            )
+            .map_err(|_| GardenerError::database())?;
+            tx.commit().map_err(|_| GardenerError::database())?;
+            return Ok(input.id.clone());
+        }
+        // Different id: supersede the old pending row.
         tx.execute(
             "UPDATE gardener_suggestions
              SET state = 'suppressed', superseded_by = ?1, updated_at = ?2, terminal_at = ?2
@@ -445,10 +473,14 @@ pub fn advance_watermark(
 }
 
 /// Find the most recently updated jira work item matching the optional filters.
+/// project_key scopes the search to items belonging to that Jira project so
+/// that a scheduled run triggered by project A does not accidentally emit a
+/// suggestion for a work item from project B sharing the same source system.
 pub fn latest_jira_work_item_for_scope(
     conn: &Connection,
     source_id: Option<&str>,
     target_upstream_id: Option<&str>,
+    project_key: Option<&str>,
 ) -> Result<Option<GardenerTarget>, GardenerError> {
     conn.query_row(
         "SELECT w.source_system_id, w.source_kind, w.upstream_id,
@@ -459,9 +491,10 @@ pub fn latest_jira_work_item_for_scope(
          WHERE w.source_kind = 'jira_issue'
            AND (?1 IS NULL OR w.source_system_id = ?1)
            AND (?2 IS NULL OR w.upstream_id = ?2)
+           AND (?3 IS NULL OR w.project_key = ?3)
          ORDER BY w.updated_at_source IS NULL, w.updated_at_source DESC, w.key ASC
          LIMIT 1",
-        params![source_id, target_upstream_id],
+        params![source_id, target_upstream_id, project_key],
         |row| {
             Ok(GardenerTarget {
                 source_id: row.get(0)?,
@@ -584,6 +617,30 @@ mod tests {
             .expect("query superseded_by");
         assert_eq!(old_state, "suppressed");
         assert_eq!(old_superseded_by, "sug-2");
+    }
+
+    #[test]
+    fn re_emit_same_id_updates_in_place_and_keeps_one_pending_row() {
+        let conn = open_test_db();
+        let first = make_insert("sug-stable-1", "eng-1", 80);
+        insert_or_supersede_pending(&conn, &first, "2026-01-01T00:00:00Z").expect("first insert");
+
+        // Re-emit with the SAME id (stable id derived from key) and same key
+        let mut second = make_insert("sug-stable-1", "eng-1", 85);
+        second.suppression_key = first.suppression_key.clone();
+        insert_or_supersede_pending(&conn, &second, "2026-01-02T00:00:00Z").expect("second emit same id");
+
+        let list = list_pending_suggestions(&conn).expect("list");
+        assert_eq!(list.len(), 1, "re-emit with same id must not create a duplicate");
+        assert_eq!(list[0].id, "sug-stable-1");
+        assert_eq!(list[0].updated_at, "2026-01-02T00:00:00Z", "updated_at must advance on re-emit");
+        assert_eq!(list[0].confidence, 85, "confidence must update on re-emit");
+
+        // Row must still be pending, not suppressed
+        let state: String = conn
+            .query_row("SELECT state FROM gardener_suggestions WHERE id='sug-stable-1'", [], |r| r.get(0))
+            .expect("query state");
+        assert_eq!(state, "pending");
     }
 
     #[test]

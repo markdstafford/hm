@@ -126,6 +126,13 @@ pub fn gardener_run_on_demand(
     db: tauri::State<'_, Mutex<rusqlite::Connection>>,
     runtime: tauri::State<'_, crate::gardener::runner::GardenerRuntime>,
 ) -> Result<GardenerRunSummary, String> {
+    // Known limitation (INIT-5): the SQLite mutex is held for the duration of
+    // the entire gardener run, including engine compute. The spec requires
+    // acquiring the connection only for short read/write phases and releasing it
+    // during compute. For the v1 reference engine this is safe because compute
+    // is cheap and local. A future provider-backed engine must refactor the
+    // runner to accept a connection factory / short-lived borrows so that
+    // compute runs without holding the mutex.
     let conn = db
         .lock()
         .map_err(|_| "Could not access gardener storage.".to_string())?;

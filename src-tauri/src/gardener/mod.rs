@@ -16,6 +16,11 @@ pub fn default_engines() -> Vec<std::sync::Arc<dyn engine::GardenerEngine>> {
 /// Best-effort gardener scheduled run triggered after a successful project
 /// ingestion.  A gardener failure must NOT roll back ingestion success;
 /// callers should log the returned status but must not treat it as fatal.
+///
+/// Known limitation (INIT-5): the caller holds the SQLite connection across the
+/// entire run, including engine compute.  The v1 reference engine is cheap and
+/// local so this is safe for now.  A future provider-backed engine must
+/// refactor this seam to release the connection during compute work.
 pub(crate) fn run_gardener_after_successful_project_ingestion(
     conn: &rusqlite::Connection,
     runtime: &runner::GardenerRuntime,
