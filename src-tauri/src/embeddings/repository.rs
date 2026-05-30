@@ -217,7 +217,14 @@ fn add_seconds_to_rfc3339(now_utc: &str, seconds: u64) -> Option<String> {
     let mut time_parts = time_part.splitn(3, ':');
     let hour: i64 = time_parts.next()?.parse().ok()?;
     let min: i64 = time_parts.next()?.parse().ok()?;
-    let sec: i64 = time_parts.next()?.trim_end_matches('Z').parse().ok()?;
+    let sec_str = time_parts.next()?.trim_end_matches('Z');
+    // Strip sub-second part if present
+    let sec_str = if let Some(pos) = sec_str.find('.') {
+        &sec_str[..pos]
+    } else {
+        sec_str
+    };
+    let sec: i64 = sec_str.parse().ok()?;
 
     // Days per month (non-leap year); we use a simple epoch seconds approach.
     // Convert to a rough unix-seconds offset from a fixed epoch, add, convert back.
@@ -255,6 +262,8 @@ fn add_seconds_to_rfc3339(now_utc: &str, seconds: u64) -> Option<String> {
     // Rough inverse: start from approximate year, then adjust
     let approx_year = remaining / 365;
     let mut y = approx_year;
+    // Safe for the call sites that pass rate_limit_backoff_seconds (max ~3600 seconds);
+    // would need a bound for untrusted large values.
     loop {
         let days_up_to_y = days_from_epoch(y + 1, 1, 1) - 1;
         if days_up_to_y < remaining {
@@ -577,24 +586,6 @@ pub(crate) fn seed_source_and_document(conn: &Connection, document_id: &str, con
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-
-    pub(crate) fn seed_source_and_document(conn: &Connection, document_id: &str, content_hash: &str) {
-        conn.execute(
-            "INSERT OR IGNORE INTO source_systems (id, kind, display_name, created_at, updated_at) \
-             VALUES ('srcsys_1', 'jira', 'Jira', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        ).unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO work_items (id, source_system_id, source_kind, upstream_id, title, state, last_seen_at, raw_updated_hash, created_at, updated_at) \
-             VALUES ('wi_1', 'srcsys_1', 'jira_issue', '1001', 'Login bug', 'open', '2026-01-01T00:00:00Z', 'raw', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        ).unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO indexable_documents (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
-             VALUES (?1, 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', 'Login bug', 'Cannot sign in', '{}', ?2, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            rusqlite::params![document_id, content_hash],
-        ).unwrap();
-    }
 
     #[test]
     fn schema_creates_embedding_tables() {
