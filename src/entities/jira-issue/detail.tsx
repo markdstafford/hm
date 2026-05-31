@@ -1,20 +1,25 @@
 import { useEffect, useState } from "react";
 import { Badge } from "../../ui/data/Badge";
+import type { EntityDetailProps } from "../../views/collection/types";
 import type { JiraIssueListItem, JiraIssueStatusTransition } from "../../bindings";
-import { UpdatedCell } from "./cells";
 import { loadJiraIssueStatusHistory } from "./history";
 import { Spinner } from "../../ui/feedback/Spinner";
 import { EmptyState } from "../../ui/feedback/EmptyState";
 import { formatLocalDateTime } from "../../lib/formatDateTime";
+import { PreviewFields } from "../../views/collection/preview/PreviewFields";
+import {
+  JIRA_ISSUE_PREVIEW_FIELDS,
+  resolveJiraIssuePreviewFieldConfig,
+} from "./previewFields";
 
-type Props = { item: JiraIssueListItem };
+type Props = EntityDetailProps<JiraIssueListItem>;
 
 type HistoryState =
   | { phase: "loading" }
   | { phase: "error" }
   | { phase: "ok"; transitions: JiraIssueStatusTransition[]; partial: boolean };
 
-export function JiraIssueDetail({ item }: Props) {
+export function JiraIssueDetail({ item, preview }: Props) {
   const [history, setHistory] = useState<HistoryState>({ phase: "loading" });
 
   useEffect(() => {
@@ -35,30 +40,21 @@ export function JiraIssueDetail({ item }: Props) {
 
   return (
     <div className="p-4 flex flex-col gap-3">
-      <span className="font-mono text-xs text-subtext">{item.key || "Unknown key"}</span>
-      <h2 className="text-base font-medium text-text leading-snug">{item.title}</h2>
-
-      <div className="flex items-center gap-2 flex-wrap">
-        {item.status_name && <Badge>{item.status_name}</Badge>}
-        <span className="text-sm text-subtext">
-          {item.assignee_display_name ?? "Unassigned"}
-        </span>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-mono text-xs text-subtext">{item.key || "Unknown key"}</span>
+          {item.status_name && <Badge>{item.status_name}</Badge>}
+        </div>
+        <h2 className="text-base font-medium text-text leading-snug">{item.title}</h2>
       </div>
 
-      {item.project_key && (
-        <span
-          data-testid="detail-project-key"
-          className="font-mono text-xs text-subtext"
-        >
-          {item.project_key}
-        </span>
-      )}
-
-      {item.updated_at_source && (
-        <span data-testid="detail-updated" className="text-xs text-subtext">
-          <UpdatedCell item={item} property="updated_at_source" />
-        </span>
-      )}
+      <PreviewFields
+        item={item}
+        definitions={JIRA_ISSUE_PREVIEW_FIELDS}
+        config={resolveJiraIssuePreviewFieldConfig()}
+        preview={preview}
+        ariaLabel="Issue fields"
+      />
 
       <section aria-labelledby="jira-status-history-heading" className="mt-2 flex flex-col gap-2">
         <h3 id="jira-status-history-heading" className="text-sm font-medium text-text">

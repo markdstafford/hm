@@ -19,7 +19,16 @@ const entity: EntityContract<Item, Prop> = {
   properties: [{ id: "name", label: "Name", kind: "text", renderCell: ({ item }) => <span>{item.name}</span>, isStretch: true }],
   defaultProperties: [{ property: "name", side: "left", visible: true }],
   defaultSort: () => 0,
-  Detail: ({ item }) => <div data-testid="entity-detail">{item.name}</div>,
+  Detail: ({ item, preview }) => (
+    <div data-testid="entity-detail">
+      {item.name}
+      {preview && (
+        <span data-testid="full-page-preview-metadata">
+          {preview.surface}:{preview.sizeClass}:{preview.width ?? "unknown"}:{preview.height ?? "unknown"}
+        </span>
+      )}
+    </div>
+  ),
   defaultViews: [],
 };
 
@@ -97,6 +106,13 @@ describe("FullPagePreview", () => {
     renderFull({ onMoveNext });
     fireEvent.click(screen.getByRole("button", { name: "Next issue" }));
     expect(onMoveNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes roomy full-page preview metadata to the entity detail", () => {
+    renderFull();
+    expect(screen.getByTestId("full-page-preview-metadata")).toHaveTextContent(
+      "full-page:roomy:unknown:unknown",
+    );
   });
 
   it("has no axe violations", async () => {
