@@ -88,6 +88,12 @@ export type UseEntityCollectionViewerResult<TItem = unknown> = {
   header: ReactNode;
   /** Goes into the AppShell's `mainContent` slot. */
   body: ReactNode;
+  /** Live items backing the viewer (post-load, pre-filter). */
+  items: TItem[];
+  /** True while the underlying data is still loading. */
+  loading: boolean;
+  /** Error message from the underlying data source, if any. */
+  error: string | null;
   /**
    * Select an item by its entity id. If the item is hidden by the active
    * view's filters, optionally pushes a scoped root containing just that
@@ -799,6 +805,9 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   return {
     header,
     body,
+    items,
+    loading,
+    error,
     openItemById,
     openSingleEdge: handleOpenSingleEdge,
     openSetEdge: handleOpenSetEdge,
