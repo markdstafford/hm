@@ -15,6 +15,7 @@ import { PreviewDescription } from "../../views/collection/preview/PreviewDescri
 import { PreviewComments } from "../../views/collection/preview/PreviewComments";
 import type { PreviewComment } from "../../views/collection/preview/commentsModel";
 import { loadJiraIssuePreviewContent } from "./previewContent";
+import { PreviewConnections } from "../../views/collection/preview/PreviewConnections";
 
 type Props = EntityDetailProps<JiraIssueListItem>;
 
@@ -28,7 +29,7 @@ type PreviewContentState =
   | { phase: "error" }
   | { phase: "ok"; body: string | null; comments: PreviewComment[] };
 
-export function JiraIssueDetail({ item, preview }: Props) {
+export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpenSetEdge }: Props) {
   const [history, setHistory] = useState<HistoryState>({ phase: "loading" });
   const [previewContent, setPreviewContent] = useState<PreviewContentState>({ phase: "loading" });
 
@@ -105,6 +106,12 @@ export function JiraIssueDetail({ item, preview }: Props) {
           <PreviewComments comments={previewContent.comments} resetKey={item.work_item_id} />
         </>
       )}
+
+      <PreviewConnections
+        edges={edges}
+        onOpenSingle={onOpenSingleEdge}
+        onOpenSet={onOpenSetEdge}
+      />
 
       <section aria-labelledby="jira-status-history-heading" className="mt-2 flex flex-col gap-2">
         <h3 id="jira-status-history-heading" className="text-sm font-medium text-text">

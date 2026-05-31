@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { JiraIssueDetail } from "./detail";
@@ -240,6 +240,53 @@ describe("JiraIssueDetail", () => {
 
     expect(await screen.findByText("Second issue body")).toBeInTheDocument();
     expect(screen.queryByText("First issue body")).not.toBeInTheDocument();
+  });
+
+  it("renders connections after preview content and before status history", async () => {
+    const onOpenSingleEdge = vi.fn();
+    render(
+      <JiraIssueDetail
+        item={full}
+        edges={[{
+          id: "duplicates:AMP-1102",
+          kind: "source",
+          shape: "single",
+          relationship: "duplicates",
+          targetRef: { entityId: "jira-issue", displayKey: "AMP-1102", title: "Consolidate sync retries" },
+          target: { ...full, work_item_id: "wi-2", key: "AMP-1102", title: "Consolidate sync retries" },
+        }]}
+        onOpenSingleEdge={onOpenSingleEdge}
+      />,
+    );
+    expect(await screen.findByRole("region", { name: "Connections" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open duplicates AMP-1102" }));
+    expect(onOpenSingleEdge).toHaveBeenCalledTimes(1);
+    const headings = screen.getAllByRole("heading").map((heading) => heading.textContent);
+    expect(headings.findIndex((h) => h?.includes("Connections"))).toBeLessThan(headings.findIndex((h) => h?.includes("Status history")));
+  });
+
+  it("does not render the connections region when there are no edges", async () => {
+    render(<JiraIssueDetail item={full} edges={[]} />);
+    await screen.findByRole("heading", { name: full.title });
+    expect(screen.queryByRole("region", { name: "Connections" })).not.toBeInTheDocument();
+  });
+
+  it("shows dangling Jira edges as disabled with a reason", async () => {
+    render(
+      <JiraIssueDetail
+        item={full}
+        edges={[{
+          id: "blocks:SEC-441",
+          kind: "source",
+          shape: "single",
+          relationship: "blocks",
+          danglingReason: "not-ingested",
+          targetRef: { entityId: "jira-issue", displayKey: "SEC-441", title: "External secret rotation" },
+        }]}
+      />,
+    );
+    const row = await screen.findByRole("button", { name: "blocks SEC-441, Not ingested" });
+    expect(row).toHaveAttribute("aria-disabled", "true");
   });
 
 });
