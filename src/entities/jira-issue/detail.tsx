@@ -36,7 +36,7 @@ type RelationshipsState =
   | { phase: "error" }
   | { phase: "ok"; edges: CollectionEdge<JiraIssueListItem>[] };
 
-export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpenSetEdge }: Props) {
+export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpenSetEdge, connectionShortcutIndexByEdgeId }: Props) {
   const [history, setHistory] = useState<HistoryState>({ phase: "loading" });
   const [previewContent, setPreviewContent] = useState<PreviewContentState>({ phase: "loading" });
   const [relationships, setRelationships] = useState<RelationshipsState>({ phase: "loading" });
@@ -141,6 +141,7 @@ export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpen
         edges={activeEdges}
         onOpenSingle={onOpenSingleEdge}
         onOpenSet={onOpenSetEdge}
+        shortcutIndexByEdgeId={connectionShortcutIndexByEdgeId}
       />
 
       <section aria-labelledby="jira-status-history-heading" className="mt-2 flex flex-col gap-2">

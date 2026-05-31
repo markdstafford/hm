@@ -123,6 +123,7 @@ export type EntityDetailProps<TItem> = {
   edges?: CollectionEdge<TItem>[];
   onOpenSingleEdge?: (edge: SingleTargetEdge<TItem>) => void;
   onOpenSetEdge?: (edge: SetTargetEdge<TItem>) => void;
+  connectionShortcutIndexByEdgeId?: Record<string, number>;
 };
 
 export type EntityContract<TItem, TProperty extends string> = {

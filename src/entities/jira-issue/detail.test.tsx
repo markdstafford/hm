@@ -6,9 +6,11 @@ import { JiraIssueDetail } from "./detail";
 import type { JiraIssueListItem, JiraIssueStatusTransition } from "../../bindings";
 import * as historyModule from "./history";
 import * as previewContentModule from "./previewContent";
+import * as relationshipsModule from "./relationships";
 
 vi.mock("./history");
 vi.mock("./previewContent");
+vi.mock("./relationships");
 
 const baseItem = (): JiraIssueListItem => ({
   work_item_id: "wi_amp_1043",
@@ -52,6 +54,7 @@ describe("JiraIssueDetail", () => {
     // Tests that assert on loaded state override these with their own mock setup.
     vi.mocked(historyModule.loadJiraIssueStatusHistory).mockReturnValue(new Promise(() => {}));
     vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockReturnValue(new Promise(() => {}));
+    vi.mocked(relationshipsModule.loadJiraIssueRelationships).mockReturnValue(new Promise(() => {}));
   });
 
   it("renders the key and title", async () => {
@@ -294,8 +297,9 @@ describe("JiraIssueDetail", () => {
 describe("JiraIssueDetail — status history", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Keep previewContent pending so status-history-only tests avoid act() warnings.
+    // Keep previewContent and relationships pending so status-history-only tests avoid act() warnings.
     vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockReturnValue(new Promise(() => {}));
+    vi.mocked(relationshipsModule.loadJiraIssueRelationships).mockReturnValue(new Promise(() => {}));
   });
 
   it("shows loading spinner while history is pending", () => {
@@ -410,5 +414,34 @@ describe("JiraIssueDetail — status history", () => {
     const { container } = render(<JiraIssueDetail item={baseItem()} />);
     await screen.findByRole("list", { name: "Status history" });
     expect(await axe(container)).toHaveNoViolations();
+  });
+});
+
+describe("JiraIssueDetail quick switcher connection shortcuts", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(historyModule.loadJiraIssueStatusHistory).mockReturnValue(new Promise(() => {}));
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockReturnValue(new Promise(() => {}));
+    vi.mocked(relationshipsModule.loadJiraIssueRelationships).mockResolvedValue({ status: "ok", edges: [] });
+  });
+
+  it("passes shortcut numbers to PreviewConnections", async () => {
+    render(
+      <JiraIssueDetail
+        item={full}
+        preview={{ surface: "quick-switcher", width: 480, height: null, sizeClass: "compact" }}
+        connectionShortcutIndexByEdgeId={{ "edge-1": 1 }}
+        edges={[{
+          id: "edge-1",
+          kind: "source",
+          shape: "single",
+          relationship: "blocks",
+          targetRef: { entityId: "jira-issue", displayKey: "AMP-2", title: "Second" },
+          target: { ...full, work_item_id: "wi-2", key: "AMP-2", title: "Second" },
+        }]}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: /Shortcut 1, Open blocks AMP-2/i })).toBeInTheDocument();
   });
 });

@@ -44,6 +44,14 @@ function numberedEdgesFor<TItem>(allEdges: CollectionEdge<TItem>[]): QuickSwitch
     .map((edge, index) => ({ number: index + 1, edge }));
 }
 
+function shortcutMap<TItem>(numbered: QuickSwitcherNumberedEdge<TItem>[]): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const { number, edge } of numbered) {
+    result[edge.id] = number;
+  }
+  return result;
+}
+
 export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }: QuickSwitcherProps) {
   const [query, setQuery] = useState(initialQuery);
   const [keyboard, setKeyboard] = useState<QuickSwitcherKeyboardState>(() =>
@@ -277,6 +285,7 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
                     const opened = activeResult.source.openSetEdge?.(edge) ?? false;
                     if (opened) close();
                   }}
+                  connectionShortcutIndexByEdgeId={shortcutMap(numberedEdges)}
                 />
               </div>
             )}

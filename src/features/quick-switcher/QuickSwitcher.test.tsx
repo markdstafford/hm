@@ -127,4 +127,50 @@ describe("QuickSwitcher", () => {
     rerender(<QuickSwitcher open onOpenChange={vi.fn()} sources={[makeSource()]} initialQuery="missing" />);
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it("opens numbered drillable connections only from results focus", () => {
+    const target: Item = { id: "b", key: "AMP-1014", title: "Create LSP shim", project: "AMP", status: "Backlog" };
+    const edge: CollectionEdge<Item> = {
+      id: "edge-b",
+      kind: "source",
+      shape: "single",
+      relationship: "blocks",
+      targetRef: { entityId: "test-entity", displayKey: "AMP-1014", title: "Create LSP shim" },
+      target,
+    };
+    const openSingleEdge = vi.fn().mockReturnValue(true);
+    const source = makeSource();
+    source.items = [{ ...items[0], edges: [edge] }, target];
+    source.openSingleEdge = openSingleEdge;
+    const onOpenChange = vi.fn();
+
+    render(<QuickSwitcher open onOpenChange={onOpenChange} sources={[source]} />);
+
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search items" }), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("listbox", { name: "Quick switcher results" }), { key: "1" });
+
+    expect(openSingleEdge).toHaveBeenCalledWith(edge);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("does not number or activate dangling connections", () => {
+    const edge: CollectionEdge<Item> = {
+      id: "missing",
+      kind: "source",
+      shape: "single",
+      relationship: "blocks",
+      targetRef: { entityId: "jira-issue", displayKey: "AMP-404", title: "Missing" },
+      danglingReason: "not-ingested",
+    };
+    const source = makeSource();
+    source.items = [{ ...items[0], edges: [edge] }];
+    source.openSingleEdge = vi.fn().mockReturnValue(true);
+
+    render(<QuickSwitcher open onOpenChange={vi.fn()} sources={[source]} />);
+
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search items" }), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("listbox", { name: "Quick switcher results" }), { key: "1" });
+
+    expect(source.openSingleEdge).not.toHaveBeenCalled();
+  });
 });
