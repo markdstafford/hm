@@ -14,13 +14,13 @@ export const PREVIEW_OPTIONS: PreviewOption[] = [
   {
     value: "side-peek",
     label: "Side",
-    description: "Detail opens in a 440px right rail.",
+    description: "Detail opens in a resizable right rail, defaulting to 440px wide.",
     icon: <PanelRight size={14} aria-hidden />,
   },
   {
     value: "bottom-peek",
     label: "Bottom",
-    description: "Detail opens in a 280px bottom pane.",
+    description: "Detail opens in a resizable bottom pane, defaulting to 280px tall.",
     icon: <PanelBottom size={14} aria-hidden />,
   },
   {
