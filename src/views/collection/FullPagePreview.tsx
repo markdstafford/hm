@@ -1,5 +1,5 @@
 import { ArrowUp, ArrowDown } from "lucide-react";
-import type { EntityContract } from "./types";
+import type { EntityContract, EntityPreviewMetadata } from "./types";
 
 type Props<TItem, TProperty extends string> = {
   item: TItem;
@@ -18,6 +18,12 @@ export function FullPagePreview<TItem, TProperty extends string>({
 }: Props<TItem, TProperty>) {
   const EntityDetail = entity.Detail;
   const noun = entity.detailLabel ?? entity.id;
+  const previewMetadata: EntityPreviewMetadata = {
+    surface: "full-page",
+    width: null,
+    height: null,
+    sizeClass: "roomy",
+  };
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
@@ -57,7 +63,7 @@ export function FullPagePreview<TItem, TProperty extends string>({
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <EntityDetail item={item} />
+        <EntityDetail item={item} preview={previewMetadata} />
       </div>
     </div>
   );
