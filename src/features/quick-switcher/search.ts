@@ -1,4 +1,4 @@
-import type { QuickSwitcherMatchKind, QuickSwitcherResult, QuickSwitcherSource } from "./types";
+import type { QuickSwitcherItem, QuickSwitcherMatchKind, QuickSwitcherResult, QuickSwitcherSource } from "./types";
 
 const SCORE: Record<QuickSwitcherMatchKind, number> = {
   exact: 600,
@@ -28,7 +28,7 @@ function titleWords(title: string): string[] {
 }
 
 function classifyMatch<TItem>(
-  item: ReturnType<QuickSwitcherSource<TItem>["toQuickSwitcherItem"]>,
+  item: QuickSwitcherItem<TItem>,
   query: string,
 ): { kind: QuickSwitcherMatchKind; field: string | null } | null {
   const exactFields = normalizedFields([item.primaryLabel, ...(item.rankBoosts?.exact ?? [])]);
