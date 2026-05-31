@@ -15,6 +15,7 @@ type BodySelection<TItem> = {
 type Props<TItem, TProperty extends string> = {
   items: TItem[];
   unfilteredCount?: number;
+  scopedEmptyLabel?: string;
   entity: EntityContract<TItem, TProperty>;
   properties?: PropertyConfig<TProperty>[];
   group?: GroupConfig;
@@ -29,6 +30,7 @@ type Props<TItem, TProperty extends string> = {
 export function Body<TItem, TProperty extends string>({
   items,
   unfilteredCount,
+  scopedEmptyLabel,
   entity,
   properties,
   group,
@@ -75,7 +77,7 @@ export function Body<TItem, TProperty extends string>({
     if ((unfilteredCount ?? 0) > 0) {
       return (
         <EmptyState
-          title={`No matching ${entity.label}`}
+          title={`No matching ${scopedEmptyLabel ?? entity.label}`}
           description="Try changing or clearing filters for this view."
         />
       );

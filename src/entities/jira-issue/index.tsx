@@ -20,6 +20,7 @@ import {
   JIRA_ISSUE_PREVIEW_FIELDS,
   resolveJiraIssuePreviewFieldConfig,
 } from "./previewFields";
+import { resolveJiraIssueEdges } from "./connections";
 
 const PROPERTY_DEFINITIONS: PropertyDefinition<JiraIssueListItem, JiraIssueProperty>[] = [
   {
@@ -141,6 +142,7 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
   label: "Jira issues",
   detailLabel: "issue",
   getId: (item) => item.work_item_id,
+  getFocusLabel: (item) => item.key || item.work_item_id,
   getRowLabel: (item) => {
     const key = item.key || "Unknown key";
     return item.title ? `Open ${key}: ${item.title}` : `Open ${key}`;
@@ -150,6 +152,7 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
   previewFields: JIRA_ISSUE_PREVIEW_FIELDS,
   defaultPreviewFields: JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS,
   resolvePreviewFieldConfig: (_item) => resolveJiraIssuePreviewFieldConfig(),
+  resolveEdges: resolveJiraIssueEdges,
   defaultSort: defaultJiraSort,
   sortableProperties: [
     { property: "key", compare: compareJiraIssueByKey, isNull: (item) => !item.key?.trim() },

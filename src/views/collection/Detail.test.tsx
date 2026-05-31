@@ -1,5 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { axe } from "jest-axe";
 import { Detail } from "./Detail";
 import type { EntityContract } from "./types";
 import {
@@ -239,5 +240,40 @@ describe("Detail", () => {
     fireEvent.keyDown(separator, { key: "ArrowDown", shiftKey: true });
     expect(aside).toHaveStyle({ height: "232px" });
     expect(onResizeCommit).toHaveBeenLastCalledWith("bottom-peek", 232);
+  });
+
+  it("renders a focus breadcrumb between host chrome and side detail content", () => {
+    const onPickFocusCrumb = vi.fn();
+    renderDetail({
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+      onPickFocusCrumb,
+    });
+    expect(screen.getByRole("navigation", { name: "Preview focus path" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Return to AMP-1087" }));
+    expect(onPickFocusCrumb).toHaveBeenCalledWith(0);
+  });
+
+  it("renders a focus breadcrumb in bottom peek previews", () => {
+    renderDetail({
+      surface: "bottom-peek",
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+    });
+    expect(screen.getByRole("navigation", { name: "Preview focus path" })).toBeInTheDocument();
+  });
+
+  it("has no axe violations with a focus breadcrumb", async () => {
+    const { container } = renderDetail({
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+    });
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

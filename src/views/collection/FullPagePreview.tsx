@@ -1,5 +1,7 @@
 import { ArrowUp, ArrowDown } from "lucide-react";
 import type { EntityContract, EntityPreviewMetadata } from "./types";
+import { PreviewBreadcrumb } from "./preview/PreviewBreadcrumb";
+import type { CollectionEdge, FocusTrailEntry, SingleTargetEdge, SetTargetEdge } from "./navigation/types";
 
 type Props<TItem, TProperty extends string> = {
   item: TItem;
@@ -11,10 +13,16 @@ type Props<TItem, TProperty extends string> = {
   onBack: () => void;
   onMovePrevious: () => void;
   onMoveNext: () => void;
+  focusTrail?: FocusTrailEntry<TItem>[];
+  onPickFocusCrumb?: (index: number) => void;
+  edges?: CollectionEdge<TItem>[];
+  onOpenSingleEdge?: (edge: SingleTargetEdge<TItem>) => void;
+  onOpenSetEdge?: (edge: SetTargetEdge<TItem>) => void;
 };
 
 export function FullPagePreview<TItem, TProperty extends string>({
   item, entity, index, total, canMovePrevious, canMoveNext, onBack, onMovePrevious, onMoveNext,
+  focusTrail, onPickFocusCrumb, edges, onOpenSingleEdge, onOpenSetEdge,
 }: Props<TItem, TProperty>) {
   const EntityDetail = entity.Detail;
   const noun = entity.detailLabel ?? entity.id;
@@ -62,8 +70,15 @@ export function FullPagePreview<TItem, TProperty extends string>({
           j / k
         </span>
       </div>
+      <PreviewBreadcrumb trail={focusTrail} onPickCrumb={onPickFocusCrumb} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <EntityDetail item={item} preview={previewMetadata} />
+        <EntityDetail
+          item={item}
+          preview={previewMetadata}
+          edges={edges}
+          onOpenSingleEdge={onOpenSingleEdge}
+          onOpenSetEdge={onOpenSetEdge}
+        />
       </div>
     </div>
   );

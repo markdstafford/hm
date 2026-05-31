@@ -33,6 +33,26 @@ import { buildConfigPatchView, buildRenameView } from "./viewConfigPersistence";
 import { ViewSettingsMenu } from "../../views/collection/menu/ViewSettingsMenu";
 import { useKeyboardNavigation } from "../../views/collection/useKeyboardNavigation";
 import { useSelection } from "../../views/collection/selection/useSelection";
+import {
+  appendFocusTarget,
+  currentFocusItem,
+  initializeFocusTrail,
+  resetFocusTrail,
+  truncateFocusTrail,
+} from "../../views/collection/navigation/focusTrail";
+import type {
+  ActiveCollectionRoot,
+  CollectionEdge,
+  FocusTrailEntry,
+  SingleTargetEdge,
+  SetTargetEdge,
+} from "../../views/collection/navigation/types";
+import { ReRootBanner } from "../../views/collection/ReRootBanner";
+import {
+  createBaseRoot,
+  pushScopedRoot,
+  returnToPreviousRoot,
+} from "../../views/collection/navigation/rerootStack";
 
 const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -90,6 +110,24 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   const [viewError, setViewError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [focusTrail, setFocusTrail] = useState<FocusTrailEntry<TItem>[]>([]);
+  const [rootStack, setRootStack] = useState<ActiveCollectionRoot<TItem>[]>([]);
+
+  const getFocusLabel = useCallback(
+    (item: TItem) => {
+      if (entity.getFocusLabel) {
+        const label = entity.getFocusLabel(item);
+        if (label?.trim()) return label;
+      }
+      const keyProperty = entity.properties.find((p) => p.id === ("key" as TProperty));
+      if (keyProperty) {
+        const rendered = keyProperty.renderCell({ item, property: keyProperty.id });
+        if (typeof rendered === "string" && rendered.trim()) return rendered;
+      }
+      return entity.getId(item);
+    },
+    [entity],
+  );
 
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
 
@@ -98,9 +136,37 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
     [activeView?.config, entity],
   );
 
+  const activeRoot = useMemo(
+    () =>
+      rootStack.length > 0
+        ? rootStack[rootStack.length - 1]
+        : createBaseRoot(items, selectedId, previewOpen),
+    [rootStack, items, selectedId, previewOpen],
+  );
+
+  const rootItems = activeRoot.base ? items : activeRoot.items;
+
+  useEffect(() => {
+    if (rootStack.length === 0) return;
+    const baseIds = new Set(items.map((item) => entity.getId(item)));
+    setRootStack((current) =>
+      current.map((root) => {
+        if (!root.base) return root;
+        const selectedStillExists = root.selectedId ? baseIds.has(root.selectedId) : false;
+        return {
+          ...root,
+          items,
+          selectedId: selectedStillExists ? root.selectedId : null,
+          previewOpen: selectedStillExists ? root.previewOpen : false,
+        };
+      }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, entity, rootStack.length]);
+
   const filteredItems = useMemo(
-    () => filterCollectionItems({ items, entity, filters: activeConfig.filters }),
-    [items, entity, activeConfig.filters],
+    () => filterCollectionItems({ items: rootItems, entity, filters: activeConfig.filters }),
+    [rootItems, entity, activeConfig.filters],
   );
 
   const sortedItems = useMemo(
@@ -137,7 +203,13 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
     if (displayItems.some((item) => entity.getId(item) === selectedId)) return;
     const first = displayItems[0];
     setSelectedId(first ? entity.getId(first) : null);
-  }, [displayItems, selectedId, entity]);
+    // Sync the focus trail so the preview doesn't show a filtered-out item
+    if (first) {
+      setFocusTrail((current) => resetFocusTrail(current, first, getFocusLabel, entity.getId));
+    } else {
+      setFocusTrail([]);
+    }
+  }, [displayItems, selectedId, entity, getFocusLabel]);
 
   const selectedIndex = useMemo(
     () =>
@@ -153,25 +225,42 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   const canMoveNext =
     selectedIndex >= 0 && selectedIndex < displayItems.length - 1;
 
+  const previewFocusItem = currentFocusItem(focusTrail) ?? selectedItem;
+
+  const previewEdges: CollectionEdge<TItem>[] = useMemo(
+    () => previewFocusItem && entity.resolveEdges
+      ? entity.resolveEdges({ item: previewFocusItem, allItems: items })
+      : [],
+    [entity, previewFocusItem, items],
+  );
+
   const movePrevious = useCallback(() => {
     if (selectedIndex <= 0) return;
-    setSelectedId(entity.getId(displayItems[selectedIndex - 1]));
-  }, [displayItems, selectedIndex, entity]);
+    const nextItem = displayItems[selectedIndex - 1];
+    setSelectedId(entity.getId(nextItem));
+    setFocusTrail((current) => resetFocusTrail(current, nextItem, getFocusLabel, entity.getId));
+  }, [displayItems, selectedIndex, entity, getFocusLabel]);
 
   const moveNext = useCallback(() => {
     if (selectedIndex < 0 || selectedIndex >= displayItems.length - 1) return;
-    setSelectedId(entity.getId(displayItems[selectedIndex + 1]));
-  }, [displayItems, selectedIndex, entity]);
+    const nextItem = displayItems[selectedIndex + 1];
+    setSelectedId(entity.getId(nextItem));
+    setFocusTrail((current) => resetFocusTrail(current, nextItem, getFocusLabel, entity.getId));
+  }, [displayItems, selectedIndex, entity, getFocusLabel]);
 
   const selectFirst = useCallback(() => {
     if (displayItems.length === 0) return;
-    setSelectedId(entity.getId(displayItems[0]));
-  }, [displayItems, entity]);
+    const nextItem = displayItems[0];
+    setSelectedId(entity.getId(nextItem));
+    setFocusTrail((current) => resetFocusTrail(current, nextItem, getFocusLabel, entity.getId));
+  }, [displayItems, entity, getFocusLabel]);
 
   const selectLast = useCallback(() => {
     if (displayItems.length === 0) return;
-    setSelectedId(entity.getId(displayItems[displayItems.length - 1]));
-  }, [displayItems, entity]);
+    const nextItem = displayItems[displayItems.length - 1];
+    setSelectedId(entity.getId(nextItem));
+    setFocusTrail((current) => resetFocusTrail(current, nextItem, getFocusLabel, entity.getId));
+  }, [displayItems, entity, getFocusLabel]);
 
   const toggleGroupCollapsed = useCallback((bucketKey: string) => {
     setCollapsedGroupKeys((current) => {
@@ -379,12 +468,86 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
 
   function handleSelect(item: TItem) {
     setSelectedId(entity.getId(item));
+    setFocusTrail((current) => resetFocusTrail(current, item, getFocusLabel, entity.getId));
     setPreviewOpen(true);
   }
 
   function handleClosePreview() {
     setPreviewOpen(false);
     // selectedId stays — row remains highlighted after preview closes.
+  }
+
+  function handleOpenSingleEdge(edge: SingleTargetEdge<TItem>) {
+    const target = edge.target;
+    if (!target || edge.danglingReason) return;
+    setFocusTrail((current) => {
+      const baseTrail = current.length > 0
+        ? current
+        : selectedItem
+          ? initializeFocusTrail(selectedItem, getFocusLabel, entity.getId)
+          : [];
+      return appendFocusTarget(baseTrail, target, () => edge.targetRef.displayKey, entity.getId);
+    });
+    setPreviewOpen(true);
+  }
+
+  function handlePickFocusCrumb(index: number) {
+    setFocusTrail((current) => truncateFocusTrail(current, index));
+  }
+
+  function handleOpenSetEdge(edge: SetTargetEdge<TItem>) {
+    if (edge.danglingReason || !edge.items) return;
+    // Merge live selectedId/previewOpen into the snapshot so that row navigation
+    // performed *after* entering a scoped root is captured before we push scope2.
+    const currentRoot =
+      rootStack.length > 0
+        ? { ...rootStack[rootStack.length - 1], selectedId, previewOpen }
+        : createBaseRoot(rootItems, selectedId, previewOpen);
+    const nextSelected = edge.items[0] ? entity.getId(edge.items[0]) : null;
+    const result = pushScopedRoot({
+      activeRoot: currentRoot,
+      stack: rootStack.slice(0, -1),
+      nextRoot: {
+        id: edge.id,
+        label: edge.label,
+        items: edge.items,
+        selectedId: nextSelected,
+        previewOpen: edge.items.length > 0,
+      },
+    });
+    setRootStack([...result.stack, result.activeRoot]);
+    setSelectedId(nextSelected);
+    if (edge.items[0]) {
+      setFocusTrail(initializeFocusTrail(edge.items[0], getFocusLabel, entity.getId));
+    } else {
+      setFocusTrail([]);
+    }
+    setPreviewOpen(edge.items.length > 0);
+  }
+
+  function handleReturnFromRoot() {
+    if (rootStack.length === 0) return;
+    const active = rootStack[rootStack.length - 1];
+    const result = returnToPreviousRoot({
+      activeRoot: active,
+      stack: rootStack.slice(0, -1),
+      getId: entity.getId,
+    });
+    // When we've returned all the way to base, clear the stack entirely so
+    // activeRoot is computed from the live `items` prop rather than a snapshot.
+    // For non-base returns, preserve the full stack (including any base entry)
+    // so further Back presses can unwind all the way.
+    if (result.activeRoot.base) {
+      setRootStack([]);
+    } else {
+      setRootStack([...result.stack, result.activeRoot]);
+    }
+    setSelectedId(result.activeRoot.selectedId);
+    setPreviewOpen(result.activeRoot.previewOpen);
+    const restored = result.activeRoot.selectedId
+      ? result.activeRoot.items.find((item) => entity.getId(item) === result.activeRoot.selectedId)
+      : null;
+    setFocusTrail(restored ? initializeFocusTrail(restored, getFocusLabel, entity.getId) : []);
   }
 
   // ---- Header ---------------------------------------------------------
@@ -415,8 +578,8 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
             onRenameView={handleRename}
             onPatchConfig={handlePatchViewConfig}
             onOpenChange={setSettingsOpen}
-            items={items}
-            filterOptionContext={{ items }}
+            items={rootItems}
+            filterOptionContext={{ items: rootItems }}
           />
         }
       />
@@ -451,12 +614,12 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   } else {
     const preview = activeConfig.layout.preview;
     const showFullPage =
-      preview === "full-page" && !!selectedItem && previewOpen;
+      preview === "full-page" && !!previewFocusItem && previewOpen;
 
     if (showFullPage) {
       bodyContent = (
         <FullPagePreview
-          item={selectedItem}
+          item={previewFocusItem}
           entity={entity}
           index={selectedIndex}
           total={displayItems.length}
@@ -465,6 +628,11 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
           onBack={() => setPreviewOpen(false)}
           onMovePrevious={movePrevious}
           onMoveNext={moveNext}
+          focusTrail={focusTrail}
+          onPickFocusCrumb={handlePickFocusCrumb}
+          edges={previewEdges}
+          onOpenSingleEdge={handleOpenSingleEdge}
+          onOpenSetEdge={handleOpenSetEdge}
         />
       );
     } else {
@@ -477,6 +645,15 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
           }`}
         >
           <div className="flex-1 overflow-y-auto">
+            {!activeRoot.base && (
+              <ReRootBanner
+                label={activeRoot.label}
+                totalCount={activeRoot.items.length}
+                matchingCount={sortedItems.length}
+                backLabel="Back to All"
+                onBack={handleReturnFromRoot}
+              />
+            )}
             {partialFailures && partialFailures.length > 0 && (
               <div role="status" className="border-b border-yellow/40 bg-yellow/10 px-3 py-2 text-sm text-text">
                 {partialFailures.map((failure) => (
@@ -489,7 +666,8 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
             )}
             <Body
               items={sortedItems}
-              unfilteredCount={items.length}
+              unfilteredCount={rootItems.length}
+              scopedEmptyLabel={activeRoot.base ? undefined : "related items"}
               entity={entity}
               properties={activeConfig.propertyVisibility as PropertyConfig<TProperty>[]}
               group={activeConfig.group}
@@ -505,9 +683,9 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
               onSelect={handleSelect}
             />
           </div>
-          {selectedItem && previewOpen && preview !== "full-page" && (
+          {previewFocusItem && previewOpen && preview !== "full-page" && (
             <Detail
-              item={selectedItem}
+              item={previewFocusItem}
               entity={entity}
               surface={peekSurface}
               sidePeekWidth={activeConfig.layout.sidePeekWidth}
@@ -520,6 +698,11 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
               onMovePrevious={movePrevious}
               onMoveNext={moveNext}
               onResizeCommit={handleResizePreview}
+              focusTrail={focusTrail}
+              onPickFocusCrumb={handlePickFocusCrumb}
+              edges={previewEdges}
+              onOpenSingleEdge={handleOpenSingleEdge}
+              onOpenSetEdge={handleOpenSetEdge}
             />
           )}
         </div>

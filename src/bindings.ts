@@ -59,6 +59,7 @@ export const commands = {
 } | null, string>(__TAURI_INVOKE("jira_issue_ingestion_progress", { sourceId })),
 	jiraIssuesList: (filter: JiraIssueListFilter) => typedError<JiraIssueListItem[], string>(__TAURI_INVOKE("jira_issues_list", { filter })),
 	jiraIssuePreviewContent: (workItemId: string) => typedError<JiraIssuePreviewContent, string>(__TAURI_INVOKE("jira_issue_preview_content", { workItemId })),
+	jiraIssueRelationships: (workItemId: string) => typedError<JiraIssueRelationshipRow[], string>(__TAURI_INVOKE("jira_issue_relationships", { workItemId })),
 	collectionViewsList: (entityKind: string) => typedError<CollectionViewRecord[], string>(__TAURI_INVOKE("collection_views_list", { entityKind })),
 	collectionViewSave: (view: CollectionViewSaveInput) => typedError<CollectionViewRecord, string>(__TAURI_INVOKE("collection_view_save", { view })),
 	collectionViewDelete: (id: string) => typedError<null, string>(__TAURI_INVOKE("collection_view_delete", { id })),
@@ -487,6 +488,24 @@ export type JiraIssuePreviewContent = {
 	work_item_id: string,
 	body: string | null,
 	comments: JiraIssuePreviewComment[],
+};
+
+export type JiraIssueRelationshipRow = {
+	id: string,
+	relationship_type: string,
+	/**  "from" = this issue is the from_upstream_key party; "to" = to_upstream_key party. */
+	side: string,
+	other_key: string,
+	/**  Full target item fields — None when the target has not been ingested. */
+	target_work_item_id: string | null,
+	target_key: string | null,
+	target_title: string | null,
+	target_status_name: string | null,
+	target_assignee_display_name: string | null,
+	target_updated_at_source: string | null,
+	target_project_key: string | null,
+	target_priority_name: string | null,
+	target_labels: string[],
 };
 
 export type JiraIssueStatusTransition = {

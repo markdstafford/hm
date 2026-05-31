@@ -920,6 +920,61 @@ describe("CollectionViewerPage", () => {
     expect(screen.queryByRole("button", { name: /open amp-2: second issue/i })).not.toHaveAttribute("aria-pressed", "true");
   });
 
+  it("Back after nested re-root restores the selection changed inside scope1, not the entry-time selection", async () => {
+    type FixtureIssue = JiraIssueListItem & {
+      __hmFixtureEdges?: Array<
+        | { id: string; kind: "local"; shape: "set"; relationship: string; label: string; targetKeys: string[] }
+      >;
+    };
+    // AMP-3 has a set edge (so it can trigger a nested re-root from within scope1)
+    const amp3: FixtureIssue = {
+      work_item_id: "wid-3", key: "AMP-3", title: "Gamma issue", status_name: "Open",
+      assignee_display_name: null, updated_at_source: null, project_key: "AMP", priority_name: null, labels: [],
+      __hmFixtureEdges: [
+        { id: "set:stale", kind: "local", shape: "set", relationship: "stale linked", label: "Stale linked to AMP-3", targetKeys: ["AMP-2"] },
+      ],
+    };
+    const amp2: FixtureIssue = {
+      work_item_id: "wid-2", key: "AMP-2", title: "Beta issue", status_name: "Open",
+      assignee_display_name: null, updated_at_source: null, project_key: "AMP", priority_name: null, labels: [],
+    };
+    const amp1: FixtureIssue = {
+      work_item_id: "wid-1", key: "AMP-1", title: "Alpha issue", status_name: "Open",
+      assignee_display_name: null, updated_at_source: null, project_key: "AMP", priority_name: null, labels: [],
+      __hmFixtureEdges: [
+        { id: "set:related", kind: "local", shape: "set", relationship: "all related", label: "Related to AMP-1", targetKeys: ["AMP-2", "AMP-3"] },
+      ],
+    };
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: [amp1, amp2, amp3] as JiraIssueListItem[], loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    // Select AMP-1 and open preview
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: alpha issue/i }));
+    await screen.findByRole("button", { name: /close issue detail/i });
+
+    // Activate the set edge → enter scope1 (AMP-2 and AMP-3); AMP-2 auto-selected first
+    fireEvent.click(await screen.findByRole("button", { name: /open related to amp-1, 2 items/i }));
+    await screen.findByText(/related to amp-1/i);
+
+    // Inside scope1, click AMP-3 to change the selection (AMP-2 was auto-selected on entry)
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-3: gamma issue/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /open amp-3: gamma issue/i })).toHaveAttribute("aria-pressed", "true"),
+    );
+
+    // AMP-3's preview shows its connections; activate the set edge → enter scope2
+    fireEvent.click(await screen.findByRole("button", { name: /open stale linked to amp-3, 1 item/i }));
+    await screen.findByText(/stale linked to amp-3/i);
+
+    // Press Back from scope2 → should restore scope1 with AMP-3 selected (not AMP-2)
+    fireEvent.click(screen.getByRole("button", { name: /back to all/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /open amp-3: gamma issue/i })).toHaveAttribute("aria-pressed", "true"),
+    );
+    expect(screen.getByRole("button", { name: /open amp-2: beta issue/i })).not.toHaveAttribute("aria-pressed", "true");
+  });
+
   it("passes active view property visibility to rows so hidden properties disappear", async () => {
     const records = [
       {
