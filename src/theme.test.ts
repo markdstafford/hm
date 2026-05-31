@@ -245,9 +245,7 @@ describe("applyColorScheme", () => {
 
 describe("styles.css token contract", () => {
   it("defines secondary-highlight and sentiment token names", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const { resolve } = await import("node:path");
-    const css = await readFile(resolve(__dirname, "styles.css"), "utf8");
+    const { default: css } = await import("./styles.css?raw");
     for (const token of [
       "--hm-primary-accent",
       "--hm-secondary-accent",

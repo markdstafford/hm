@@ -124,7 +124,7 @@ export function themeSupportsAccent(themeId: unknown, accentId: unknown): accent
 }
 
 export function resolveThemeAccent(
-  themeId: ThemeId,
+  _themeId: ThemeId,
   accentId: unknown,
   role: "primary" | "secondary"
 ): string {
