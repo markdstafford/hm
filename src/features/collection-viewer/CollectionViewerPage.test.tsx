@@ -358,7 +358,7 @@ describe("CollectionViewerPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
     await screen.findByRole("button", { name: /close issue detail/i });
     const aside = document.querySelector("aside[aria-label='Issue detail']");
-    expect(aside).toHaveClass("w-[440px]");
+    expect(aside).toHaveStyle({ width: "440px" });
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
   });
 
@@ -382,7 +382,7 @@ describe("CollectionViewerPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
     await waitFor(() => {
       const aside = document.querySelector("aside[aria-label='Issue detail']");
-      expect(aside).toHaveClass("h-[280px]");
+      expect(aside).toHaveStyle({ height: "280px" });
     });
     // List rows still visible
     expect(screen.getByRole("button", { name: /open amp-2: second issue/i })).toBeInTheDocument();
@@ -465,7 +465,7 @@ describe("CollectionViewerPage", () => {
     // Same item should still be visible in the detail (previewOpen stays true across layout change)
     await waitFor(() => {
       const aside = document.querySelector("aside[aria-label='Issue detail']");
-      expect(aside).toHaveClass("h-[280px]");
+      expect(aside).toHaveStyle({ height: "280px" });
     });
     expect(screen.getAllByText("First issue").length).toBeGreaterThanOrEqual(1);
   });
