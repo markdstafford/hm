@@ -64,7 +64,9 @@ export function resolveJiraIssueEdges({
     const resolvedItems = edge.targetKeys
       .map((key) => localByKey.get(key))
       .filter((candidate): candidate is JiraIssueListItem => Boolean(candidate));
-    const hasUnresolved = resolvedItems.length < totalCount;
+    // Only mark the whole set dangling when zero items resolved; partial resolution
+    // is navigable — the re-rooted list shows resolved members.
+    const fullyDangling = resolvedItems.length === 0 && totalCount > 0;
 
     return {
       id: edge.id,
@@ -75,7 +77,7 @@ export function resolveJiraIssueEdges({
       confidence: edge.confidence,
       count: totalCount,
       items: resolvedItems,
-      danglingReason: hasUnresolved ? ("not-ingested" as const) : undefined,
+      danglingReason: fullyDangling ? ("not-ingested" as const) : undefined,
     };
   });
 }

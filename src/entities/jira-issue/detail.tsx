@@ -15,7 +15,9 @@ import { PreviewDescription } from "../../views/collection/preview/PreviewDescri
 import { PreviewComments } from "../../views/collection/preview/PreviewComments";
 import type { PreviewComment } from "../../views/collection/preview/commentsModel";
 import { loadJiraIssuePreviewContent } from "./previewContent";
+import { loadJiraIssueRelationships } from "./relationships";
 import { PreviewConnections } from "../../views/collection/preview/PreviewConnections";
+import type { CollectionEdge } from "../../views/collection/navigation/types";
 
 type Props = EntityDetailProps<JiraIssueListItem>;
 
@@ -29,9 +31,15 @@ type PreviewContentState =
   | { phase: "error" }
   | { phase: "ok"; body: string | null; comments: PreviewComment[] };
 
+type RelationshipsState =
+  | { phase: "loading" }
+  | { phase: "error" }
+  | { phase: "ok"; edges: CollectionEdge<JiraIssueListItem>[] };
+
 export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpenSetEdge }: Props) {
   const [history, setHistory] = useState<HistoryState>({ phase: "loading" });
   const [previewContent, setPreviewContent] = useState<PreviewContentState>({ phase: "loading" });
+  const [relationships, setRelationships] = useState<RelationshipsState>({ phase: "loading" });
 
   useEffect(() => {
     setHistory({ phase: "loading" });
@@ -64,6 +72,28 @@ export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpen
       cancelled = true;
     };
   }, [item.work_item_id]);
+
+  useEffect(() => {
+    setRelationships({ phase: "loading" });
+    let cancelled = false;
+    loadJiraIssueRelationships(item.work_item_id).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") {
+        setRelationships({ phase: "error" });
+      } else {
+        setRelationships({ phase: "ok", edges: result.edges });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.work_item_id]);
+
+  // Use DB-fetched edges when available; fall back to prop edges (test fixtures).
+  const activeEdges: CollectionEdge<JiraIssueListItem>[] =
+    relationships.phase === "ok" && relationships.edges.length > 0
+      ? relationships.edges
+      : (edges ?? []);
 
   return (
     <div className="p-4 flex flex-col gap-3">
@@ -108,7 +138,7 @@ export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpen
       )}
 
       <PreviewConnections
-        edges={edges}
+        edges={activeEdges}
         onOpenSingle={onOpenSingleEdge}
         onOpenSet={onOpenSetEdge}
       />

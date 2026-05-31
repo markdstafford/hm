@@ -876,6 +876,107 @@ pub(crate) fn jira_issue_preview_content_from_conn(
     })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct JiraIssueRelationshipRow {
+    pub id: String,
+    pub relationship_type: String,
+    /// "from" = this issue is the from_upstream_key party; "to" = to_upstream_key party.
+    pub side: String,
+    pub other_key: String,
+    /// Full target item fields — None when the target has not been ingested.
+    pub target_work_item_id: Option<String>,
+    pub target_key: Option<String>,
+    pub target_title: Option<String>,
+    pub target_status_name: Option<String>,
+    pub target_assignee_display_name: Option<String>,
+    pub target_updated_at_source: Option<String>,
+    pub target_project_key: Option<String>,
+    pub target_priority_name: Option<String>,
+    pub target_labels: Vec<String>,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn jira_issue_relationships(
+    work_item_id: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<Vec<JiraIssueRelationshipRow>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    jira_issue_relationships_from_conn(&conn, &work_item_id)
+}
+
+pub(crate) fn jira_issue_relationships_from_conn(
+    conn: &Connection,
+    work_item_id: &str,
+) -> Result<Vec<JiraIssueRelationshipRow>, String> {
+    let key: Option<String> = conn
+        .query_row(
+            "SELECT key FROM work_items WHERE id = ?1 AND source_kind = 'jira_issue'",
+            [work_item_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let key = match key {
+        Some(k) => k,
+        None => return Ok(vec![]),
+    };
+
+    let labels_subq = "(SELECT GROUP_CONCAT(wt.term_name, '\x1f') \
+                          FROM work_item_terms wt \
+                         WHERE wt.work_item_id = w.id AND wt.term_kind = 'label')";
+
+    let sql = format!(
+        "SELECT r.id, r.relationship_type, 'from' AS side, r.to_upstream_key AS other_key, \
+                w.id, w.key, w.title, w.status_name, p.display_name, w.updated_at_source, \
+                w.project_key, w.priority_name, {labels_subq} \
+           FROM work_item_relationships r \
+           LEFT JOIN work_items w ON w.key = r.to_upstream_key AND w.source_kind = 'jira_issue' \
+           LEFT JOIN people p ON p.id = w.assignee_person_id \
+          WHERE r.source_kind = 'jira_issue' AND r.from_upstream_key = ?1 \
+            AND r.to_upstream_key IS NOT NULL \
+         UNION ALL \
+         SELECT r.id, r.relationship_type, 'to' AS side, r.from_upstream_key AS other_key, \
+                w.id, w.key, w.title, w.status_name, p.display_name, w.updated_at_source, \
+                w.project_key, w.priority_name, {labels_subq} \
+           FROM work_item_relationships r \
+           LEFT JOIN work_items w ON w.key = r.from_upstream_key AND w.source_kind = 'jira_issue' \
+           LEFT JOIN people p ON p.id = w.assignee_person_id \
+          WHERE r.source_kind = 'jira_issue' AND r.to_upstream_key = ?1 \
+            AND r.from_upstream_key IS NOT NULL"
+    );
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([&key], |row| {
+            let labels_concat: Option<String> = row.get(12)?;
+            let labels = labels_concat
+                .map(|s| s.split('\x1f').map(str::to_owned).collect())
+                .unwrap_or_default();
+            Ok(JiraIssueRelationshipRow {
+                id: row.get(0)?,
+                relationship_type: row.get(1)?,
+                side: row.get(2)?,
+                other_key: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                target_work_item_id: row.get(4)?,
+                target_key: row.get(5)?,
+                target_title: row.get(6)?,
+                target_status_name: row.get(7)?,
+                target_assignee_display_name: row.get(8)?,
+                target_updated_at_source: row.get(9)?,
+                target_project_key: row.get(10)?,
+                target_priority_name: row.get(11)?,
+                target_labels: labels,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn collection_views_list(

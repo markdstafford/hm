@@ -69,19 +69,20 @@ describe("resolveJiraIssueEdges", () => {
     expect(edges[0]).toMatchObject({ shape: "set", label: "Related to AMP-1087", count: 2, items: [first, second], danglingReason: undefined });
   });
 
-  it("marks a fixture set edge as not-ingested when some target keys are absent locally", () => {
+  it("keeps a partially-resolved fixture set edge drillable (no danglingReason) when some target keys are absent locally", () => {
     const base = issue({ key: "AMP-1087" }) as FixtureIssue;
     base.__hmFixtureEdges = [
       { id: "related:partial", kind: "local", shape: "set", relationship: "all related", label: "Related to AMP-1087", targetKeys: ["AMP-1102", "SEC-441"] },
     ];
     const present = issue({ work_item_id: "wi-2", key: "AMP-1102" });
-    // SEC-441 is not in allItems — simulates an un-ingested cross-project issue
+    // SEC-441 is not in allItems — simulates an un-ingested cross-project issue.
+    // Partial resolution: set stays drillable; only fully-empty sets are marked dangling.
     const edges = resolveJiraIssueEdges({ item: base, allItems: [base, present] });
     expect(edges[0]).toMatchObject({
       shape: "set",
       count: 2,
       items: [present],
-      danglingReason: "not-ingested",
+      danglingReason: undefined,
     });
   });
 
