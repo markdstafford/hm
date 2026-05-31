@@ -20,6 +20,7 @@ import {
   JIRA_ISSUE_PREVIEW_FIELDS,
   resolveJiraIssuePreviewFieldConfig,
 } from "./previewFields";
+import { resolveJiraIssueEdges } from "./connections";
 
 const PROPERTY_DEFINITIONS: PropertyDefinition<JiraIssueListItem, JiraIssueProperty>[] = [
   {
@@ -150,6 +151,7 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
   previewFields: JIRA_ISSUE_PREVIEW_FIELDS,
   defaultPreviewFields: JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS,
   resolvePreviewFieldConfig: (_item) => resolveJiraIssuePreviewFieldConfig(),
+  resolveEdges: resolveJiraIssueEdges,
   defaultSort: defaultJiraSort,
   sortableProperties: [
     { property: "key", compare: compareJiraIssueByKey, isNull: (item) => !item.key?.trim() },
