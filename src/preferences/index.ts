@@ -2,32 +2,27 @@ import {
   isLightTheme,
   isDarkTheme,
   CATPPUCCIN_ACCENTS,
+  DEFAULT_PRIMARY_ACCENT,
+  DEFAULT_SECONDARY_ACCENT,
+  isAccentId,
+  type AccentId,
 } from "../theme";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type ThemeBrightness = "light" | "dark";
 export type ThemeId = string;
-export type CatppuccinAccent =
-  | "rosewater"
-  | "flamingo"
-  | "pink"
-  | "mauve"
-  | "red"
-  | "maroon"
-  | "peach"
-  | "yellow"
-  | "green"
-  | "teal"
-  | "sky"
-  | "sapphire"
-  | "blue"
-  | "lavender";
+export type CatppuccinAccent = AccentId;
+export type { AccentId };
 
 export type AppPreferences = {
   appearance?: {
     themeMode?: ThemeMode;
     lightTheme?: ThemeId;
     darkTheme?: ThemeId;
+    accents?: {
+      primary?: AccentId;
+      secondary?: AccentId;
+    };
     themeFeatures?: {
       catppuccin?: {
         accent?: CatppuccinAccent;
@@ -56,6 +51,10 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
     themeMode: "system",
     lightTheme: "catppuccin-latte",
     darkTheme: "catppuccin-macchiato",
+    accents: {
+      primary: DEFAULT_PRIMARY_ACCENT,
+      secondary: DEFAULT_SECONDARY_ACCENT,
+    },
     themeFeatures: {
       catppuccin: { accent: "sapphire" },
     },
@@ -108,23 +107,44 @@ export function normalizePreferences(raw: unknown): AppPreferences {
       appearance.darkTheme = DEFAULT_PREFERENCES.appearance!.darkTheme;
     }
 
-    // themeFeatures
+    // themeFeatures — normalize legacy catppuccin accent
+    let legacyPrimary: AccentId = DEFAULT_PRIMARY_ACCENT;
     if (typeof ap.themeFeatures === "object" && ap.themeFeatures !== null) {
       const tf = ap.themeFeatures as Record<string, unknown>;
       const features: Record<string, unknown> = { ...tf };
       if (typeof tf.catppuccin === "object" && tf.catppuccin !== null) {
         const ctp = tf.catppuccin as Record<string, unknown>;
         const accent = typeof ctp.accent === "string" && (CATPPUCCIN_ACCENTS as readonly string[]).includes(ctp.accent)
-          ? (ctp.accent as CatppuccinAccent)
-          : "sapphire";
+          ? (ctp.accent as AccentId)
+          : DEFAULT_PRIMARY_ACCENT;
+        legacyPrimary = accent;
         features.catppuccin = { ...ctp, accent };
       } else {
-        features.catppuccin = { accent: "sapphire" };
+        features.catppuccin = { accent: DEFAULT_PRIMARY_ACCENT };
       }
       appearance.themeFeatures = features;
     } else {
-      appearance.themeFeatures = { catppuccin: { accent: "sapphire" } };
+      appearance.themeFeatures = { catppuccin: { accent: DEFAULT_PRIMARY_ACCENT } };
     }
+
+    // accents — canonical primary/secondary (canonical wins over legacy)
+    const rawAccents = typeof ap.accents === "object" && ap.accents !== null
+      ? (ap.accents as Record<string, unknown>)
+      : {};
+    const primaryAccent: AccentId = isAccentId(rawAccents.primary)
+      ? rawAccents.primary
+      : legacyPrimary;
+    const secondaryAccent: AccentId = isAccentId(rawAccents.secondary)
+      ? rawAccents.secondary
+      : DEFAULT_SECONDARY_ACCENT;
+    appearance.accents = { primary: primaryAccent, secondary: secondaryAccent };
+
+    // Mirror primary back to themeFeatures.catppuccin.accent for compat
+    const tf = appearance.themeFeatures as Record<string, unknown>;
+    const ctpFeature = typeof tf.catppuccin === "object" && tf.catppuccin !== null
+      ? { ...(tf.catppuccin as Record<string, unknown>), accent: primaryAccent }
+      : { accent: primaryAccent };
+    appearance.themeFeatures = { ...tf, catppuccin: ctpFeature };
 
     // fonts
     appearance.uiFont =
@@ -188,6 +208,9 @@ export function mergePreferences(current: AppPreferences, patch: Partial<AppPref
       ...current.appearance,
       ...(patch.appearance ? {
         ...patch.appearance,
+        accents: patch.appearance.accents !== undefined
+          ? { ...current.appearance?.accents, ...patch.appearance.accents }
+          : current.appearance?.accents,
         themeFeatures: patch.appearance.themeFeatures !== undefined
           ? { ...current.appearance?.themeFeatures, ...patch.appearance.themeFeatures }
           : current.appearance?.themeFeatures,
@@ -230,24 +253,38 @@ export function resolveThemeSlots(prefs: AppPreferences): {
 export function resolveTheme(
   prefs: AppPreferences,
   prefersDark: boolean,
-): { themeId: ThemeId; brightness: "light" | "dark" } {
+): { themeId: ThemeId; brightness: "light" | "dark"; primaryAccent: AccentId; secondaryAccent: AccentId } {
   const mode: ThemeMode =
     typeof prefs.appearance?.themeMode === "string" &&
     VALID_THEME_MODES.includes(prefs.appearance.themeMode as ThemeMode)
       ? (prefs.appearance.themeMode as ThemeMode)
       : "system";
   const { lightTheme, darkTheme } = resolveThemeSlots(prefs);
-  if (mode === "light") return { themeId: lightTheme, brightness: "light" };
-  if (mode === "dark") return { themeId: darkTheme, brightness: "dark" };
+  const accents = resolveAppearanceAccents(prefs);
+  if (mode === "light") return { themeId: lightTheme, brightness: "light", ...accents };
+  if (mode === "dark") return { themeId: darkTheme, brightness: "dark", ...accents };
   return prefersDark
-    ? { themeId: darkTheme, brightness: "dark" }
-    : { themeId: lightTheme, brightness: "light" };
+    ? { themeId: darkTheme, brightness: "dark", ...accents }
+    : { themeId: lightTheme, brightness: "light", ...accents };
 }
 
 export function resolveCatppuccinAccent(prefs: AppPreferences): CatppuccinAccent {
+  const canonical = prefs.appearance?.accents?.primary;
+  if (isAccentId(canonical)) return canonical;
   const saved = prefs.appearance?.themeFeatures?.catppuccin?.accent;
-  if (typeof saved === "string" && (CATPPUCCIN_ACCENTS as readonly string[]).includes(saved)) {
-    return saved as CatppuccinAccent;
-  }
-  return "sapphire";
+  if (isAccentId(saved)) return saved;
+  return DEFAULT_PRIMARY_ACCENT;
+}
+
+export function resolveAppearanceAccents(prefs: AppPreferences): {
+  primaryAccent: AccentId;
+  secondaryAccent: AccentId;
+} {
+  const primary = isAccentId(prefs.appearance?.accents?.primary)
+    ? prefs.appearance!.accents!.primary!
+    : resolveCatppuccinAccent(prefs);
+  const secondary = isAccentId(prefs.appearance?.accents?.secondary)
+    ? prefs.appearance!.accents!.secondary!
+    : DEFAULT_SECONDARY_ACCENT;
+  return { primaryAccent: primary, secondaryAccent: secondary };
 }
