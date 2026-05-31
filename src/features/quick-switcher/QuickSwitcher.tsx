@@ -32,13 +32,13 @@ function isDrillable<TItem>(edge: CollectionEdge<TItem>): boolean {
   return Array.isArray(edge.items) && edge.items.length > 0;
 }
 
-function numberedEdgesFor<TItem>(result: QuickSwitcherResult<TItem> | null): QuickSwitcherNumberedEdge<TItem>[] {
-  if (!result?.source.entity.resolveEdges) return [];
-  const edges = result.source.entity.resolveEdges({
-    item: result.item.item,
-    allItems: result.source.items,
-  });
-  return edges
+function resolveAllEdges<TItem>(result: QuickSwitcherResult<TItem>): CollectionEdge<TItem>[] {
+  if (!result.source.entity.resolveEdges) return [];
+  return result.source.entity.resolveEdges({ item: result.item.item, allItems: result.source.items });
+}
+
+function numberedEdgesFor<TItem>(allEdges: CollectionEdge<TItem>[]): QuickSwitcherNumberedEdge<TItem>[] {
+  return allEdges
     .filter(isDrillable)
     .slice(0, 9)
     .map((edge, index) => ({ number: index + 1, edge }));
@@ -58,7 +58,8 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
   const activeResult = activeIndex >= 0 ? results[activeIndex] : null;
   const loading = sources.some((source) => source.loading);
   const sourceError = sources.find((source) => source.error)?.error ?? null;
-  const numberedEdges = useMemo(() => numberedEdgesFor(activeResult), [activeResult]);
+  const previewEdges = useMemo(() => (activeResult ? resolveAllEdges(activeResult) : []), [activeResult]);
+  const numberedEdges = useMemo(() => numberedEdgesFor(previewEdges), [previewEdges]);
 
   useEffect(() => {
     if (!open) return;
@@ -121,7 +122,10 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
 
     if (next.action === "focus-results") resultsRef.current?.focus();
     if (next.action === "focus-input") inputRef.current?.focus();
-    if (next.action === "open-result") openResult(activeResult);
+    if (next.action === "open-result") {
+      const targetIndex = Math.min(Math.max(next.state.activeIndex, 0), results.length - 1);
+      openResult(results[targetIndex] ?? null);
+    }
     if (next.action === "open-edge") openNumberedEdge(Number(event.key));
   }
 
@@ -130,12 +134,6 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
   }
 
   const EntityDetail = activeResult?.source.entity.Detail;
-  const previewEdges = activeResult?.source.entity.resolveEdges
-    ? activeResult.source.entity.resolveEdges({
-        item: activeResult.item.item,
-        allItems: activeResult.source.items,
-      })
-    : [];
   const previewMetadata: EntityPreviewMetadata = {
     surface: "quick-switcher",
     width: 480,
