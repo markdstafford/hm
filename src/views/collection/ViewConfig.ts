@@ -1,5 +1,10 @@
 import type { PropertySide, EntityContract, GroupableProperty } from "./types";
 import { normalizeFilterRows, summarizeFilters } from "./filter/config";
+import {
+  DEFAULT_BOTTOM_PEEK_HEIGHT,
+  DEFAULT_SIDE_PEEK_WIDTH,
+  clampPreviewSize,
+} from "./previewSizing";
 
 export type LayoutType = "table";
 export type ViewDensity = "compact" | "regular";
@@ -35,8 +40,16 @@ export type ConditionalColorConfig = {
   rules: [];
 };
 
+export type LayoutConfig = {
+  type: LayoutType;
+  density: ViewDensity;
+  preview: PreviewSurface;
+  sidePeekWidth: number;
+  bottomPeekHeight: number;
+};
+
 export type ViewConfig = {
-  layout: { type: LayoutType; density: ViewDensity; preview: PreviewSurface };
+  layout: LayoutConfig;
   propertyVisibility: PropertyVisibilityConfig[];
   sort: SortLevelConfig[];
   group: GroupConfig;
@@ -63,6 +76,10 @@ export type SortPropertyOption = {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function isDensity(value: unknown): value is ViewDensity {
@@ -200,7 +217,13 @@ function propertyLabel(entity: EntityContract<any, any>, propertyId: string): st
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function defaultViewConfig(entity: EntityContract<any, any>): ViewConfig {
   return {
-    layout: { type: "table", density: "regular", preview: "side-peek" },
+    layout: {
+      type: "table",
+      density: "regular",
+      preview: "side-peek",
+      sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH,
+      bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
+    },
     propertyVisibility: entity.defaultProperties.map((p) => ({
       property: p.property,
       side: p.side,
@@ -234,6 +257,14 @@ export function normalizeViewConfig(input: unknown, entity: EntityContract<any, 
     }
     if (rawLayout["type"] === "table") {
       layout = { ...layout, type: "table" };
+    }
+    const rawSidePeekWidth = finiteNumber(rawLayout["sidePeekWidth"]);
+    if (rawSidePeekWidth !== null) {
+      layout = { ...layout, sidePeekWidth: clampPreviewSize("side-peek", rawSidePeekWidth) };
+    }
+    const rawBottomPeekHeight = finiteNumber(rawLayout["bottomPeekHeight"]);
+    if (rawBottomPeekHeight !== null) {
+      layout = { ...layout, bottomPeekHeight: clampPreviewSize("bottom-peek", rawBottomPeekHeight) };
     }
   }
 

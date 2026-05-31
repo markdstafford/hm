@@ -21,12 +21,26 @@ import {
   removeGrouping,
   setHideEmptyGroups,
 } from "./ViewConfig";
+import {
+  DEFAULT_BOTTOM_PEEK_HEIGHT,
+  DEFAULT_SIDE_PEEK_WIDTH,
+  MAX_BOTTOM_PEEK_HEIGHT,
+  MAX_SIDE_PEEK_WIDTH,
+  MIN_BOTTOM_PEEK_HEIGHT,
+  MIN_SIDE_PEEK_WIDTH,
+} from "./previewSizing";
 
 describe("defaultViewConfig", () => {
   it("builds full config from entity", () => {
     const config = defaultViewConfig(jiraIssueEntity);
 
-    expect(config.layout).toEqual({ type: "table", density: "regular", preview: "side-peek" });
+    expect(config.layout).toEqual({
+      type: "table",
+      density: "regular",
+      preview: "side-peek",
+      sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH,
+      bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
+    });
     expect(config.sort).toEqual([]);
     expect(config.group).toEqual({ property: null, hideEmptyGroups: true });
     expect(config.filters).toEqual([]);
@@ -75,6 +89,8 @@ describe("normalizeViewConfig", () => {
     expect(result.layout.density).toBe("compact");
     expect(result.layout.type).toBe("table");
     expect(result.layout.preview).toBe("side-peek");
+    expect(result.layout.sidePeekWidth).toBe(DEFAULT_SIDE_PEEK_WIDTH);
+    expect(result.layout.bottomPeekHeight).toBe(DEFAULT_BOTTOM_PEEK_HEIGHT);
     expect(result.sort).toEqual([{ property: "updated_at_source", direction: "desc" }]);
     // Other fields should be defaults
     expect(result.propertyVisibility).toEqual(defaultViewConfig(jiraIssueEntity).propertyVisibility);
@@ -168,7 +184,88 @@ describe("normalizeViewConfig", () => {
       type: "table",
       density: "regular",
       preview: "side-peek",
+      sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH,
+      bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
     });
+  });
+
+  it("normalizes legacy layouts without peek size fields to default peek sizes", () => {
+    const config = normalizeViewConfig(
+      { layout: { type: "table", density: "compact", preview: "bottom-peek" } },
+      jiraIssueEntity,
+    );
+
+    expect(config.layout).toEqual({
+      type: "table",
+      density: "compact",
+      preview: "bottom-peek",
+      sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH,
+      bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
+    });
+  });
+
+  it("preserves valid persisted peek sizes", () => {
+    const config = normalizeViewConfig(
+      {
+        layout: {
+          type: "table",
+          density: "regular",
+          preview: "side-peek",
+          sidePeekWidth: 512,
+          bottomPeekHeight: 360,
+        },
+      },
+      jiraIssueEntity,
+    );
+
+    expect(config.layout.sidePeekWidth).toBe(512);
+    expect(config.layout.bottomPeekHeight).toBe(360);
+  });
+
+  it("clamps invalid persisted peek sizes to safe bounds", () => {
+    const tooSmall = normalizeViewConfig(
+      {
+        layout: {
+          type: "table",
+          density: "regular",
+          preview: "side-peek",
+          sidePeekWidth: MIN_SIDE_PEEK_WIDTH - 100,
+          bottomPeekHeight: MIN_BOTTOM_PEEK_HEIGHT - 100,
+        },
+      },
+      jiraIssueEntity,
+    );
+    const tooLarge = normalizeViewConfig(
+      {
+        layout: {
+          type: "table",
+          density: "regular",
+          preview: "side-peek",
+          sidePeekWidth: MAX_SIDE_PEEK_WIDTH + 100,
+          bottomPeekHeight: MAX_BOTTOM_PEEK_HEIGHT + 100,
+        },
+      },
+      jiraIssueEntity,
+    );
+    const invalidTypes = normalizeViewConfig(
+      {
+        layout: {
+          type: "table",
+          density: "regular",
+          preview: "side-peek",
+          sidePeekWidth: "wide",
+          bottomPeekHeight: Number.NaN,
+        },
+      },
+      jiraIssueEntity,
+    );
+
+    expect(tooSmall.layout.sidePeekWidth).toBe(MIN_SIDE_PEEK_WIDTH);
+    expect(tooSmall.layout.bottomPeekHeight).toBe(MIN_BOTTOM_PEEK_HEIGHT);
+    expect(tooLarge.layout.sidePeekWidth).toBe(MAX_SIDE_PEEK_WIDTH);
+    expect(tooLarge.layout.bottomPeekHeight).toBe(MAX_BOTTOM_PEEK_HEIGHT);
+    expect(invalidTypes.layout.sidePeekWidth).toBe(DEFAULT_SIDE_PEEK_WIDTH);
+    expect(invalidTypes.layout.bottomPeekHeight).toBe(DEFAULT_BOTTOM_PEEK_HEIGHT);
   });
 });
 
@@ -226,9 +323,10 @@ describe("summarizeViewConfig", () => {
   });
 
   it("shows compact density label", () => {
+    const base = defaultViewConfig(jiraIssueEntity);
     const config = {
-      ...defaultViewConfig(jiraIssueEntity),
-      layout: { type: "table" as const, density: "compact" as const, preview: "side-peek" as const },
+      ...base,
+      layout: { ...base.layout, density: "compact" as const },
     };
     const summary = summarizeViewConfig(config, jiraIssueEntity);
     expect(summary.layout).toBe("Table · Compact");
@@ -251,7 +349,7 @@ describe("patchViewConfig", () => {
     const originalSort = [...original.sort];
 
     const patched = patchViewConfig(original, {
-      layout: { type: "table", density: "compact", preview: "side-peek" },
+      layout: { ...original.layout, density: "compact", preview: "side-peek" },
       sort: [{ property: "key", direction: "asc" }],
     });
 
@@ -267,7 +365,7 @@ describe("patchViewConfig", () => {
   it("merges layout fields without replacing unspecified fields", () => {
     const original = defaultViewConfig(jiraIssueEntity);
     const patched = patchViewConfig(original, {
-      layout: { type: "table", density: "compact", preview: "full-page" },
+      layout: { ...original.layout, density: "compact", preview: "full-page" },
     });
     expect(patched.layout.type).toBe("table");
     expect(patched.layout.density).toBe("compact");
@@ -315,18 +413,54 @@ describe("patchViewConfig", () => {
     );
 
     const patched = patchViewConfig(base, {
-      layout: { type: "table", density: "compact", preview: "bottom-peek" },
+      layout: { ...base.layout, density: "compact", preview: "bottom-peek" },
     });
 
     expect(patched.layout).toEqual({
       type: "table",
       density: "compact",
       preview: "bottom-peek",
+      sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH,
+      bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
     });
     expect(patched.propertyVisibility).toEqual(base.propertyVisibility);
     expect(patched.sort).toEqual(base.sort);
     expect(patched.group).toEqual(base.group);
     expect(patched.filters).toEqual(base.filters);
+  });
+
+  it("patches one persisted peek size while preserving unrelated config fields", () => {
+    const base = normalizeViewConfig(
+      {
+        layout: {
+          type: "table",
+          density: "compact",
+          preview: "bottom-peek",
+          sidePeekWidth: 500,
+          bottomPeekHeight: 320,
+        },
+        sort: [{ property: "updated_at_source", direction: "desc" }],
+        group: { property: "status", hideEmptyGroups: false },
+        filters: [],
+      },
+      jiraIssueEntity,
+    );
+
+    const patched = patchViewConfig(base, {
+      layout: { ...base.layout, sidePeekWidth: 560 },
+    });
+
+    expect(patched.layout).toEqual({
+      type: "table",
+      density: "compact",
+      preview: "bottom-peek",
+      sidePeekWidth: 560,
+      bottomPeekHeight: 320,
+    });
+    expect(patched.sort).toEqual(base.sort);
+    expect(patched.group).toEqual(base.group);
+    expect(patched.filters).toEqual(base.filters);
+    expect(patched.propertyVisibility).toEqual(base.propertyVisibility);
   });
 });
 
