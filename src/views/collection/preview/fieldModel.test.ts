@@ -93,6 +93,59 @@ describe("resolvePreviewFieldConfig", () => {
   });
 });
 
+describe("versioned preview field source config", () => {
+  it("supports a versioned frontend model for the future shared setting key preview_fields.config", () => {
+    const stored = {
+      version: 1,
+      sources: [
+        {
+          sourceId: "jira-main",
+          entityId: "jira-issue",
+          fields: [{ property: "team", tier: 2, pinned: true }],
+        },
+      ],
+    } satisfies { version: 1; sources: PreviewFieldSourceConfig<Property>[] };
+
+    expect(
+      resolvePreviewFieldConfig({
+        definitions,
+        defaults,
+        sourceConfigs: stored.sources,
+        entityId: "jira-issue",
+        sourceId: "jira-main",
+      }),
+    ).toEqual([
+      { property: "team", tier: 2, pinned: true },
+      { property: "priority", tier: 1 },
+      { property: "labels", tier: 2 },
+      { property: "count", tier: 3 },
+    ]);
+  });
+
+  it("keeps non-matching source overrides isolated", () => {
+    const stored = {
+      version: 1,
+      sources: [
+        {
+          sourceId: "jira-main",
+          entityId: "jira-issue",
+          fields: [{ property: "team", tier: 2, pinned: true }],
+        },
+      ],
+    } satisfies { version: 1; sources: PreviewFieldSourceConfig<Property>[] };
+
+    expect(
+      resolvePreviewFieldConfig({
+        definitions,
+        defaults,
+        sourceConfigs: stored.sources,
+        entityId: "jira-issue",
+        sourceId: "jira-other",
+      }),
+    ).toEqual(defaults);
+  });
+});
+
 describe("partitionPreviewFields", () => {
   it("omits empty fields, promotes pinned fields to tier 1, and keeps tier 2/3 together as secondary", () => {
     const item: Item = {
