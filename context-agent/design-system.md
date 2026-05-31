@@ -47,9 +47,14 @@ Type scale is intentionally compact for an information-dense app. Do not introdu
 | `--color-text` | `--ctp-text` | Primary text. |
 | `--color-subtext` | `--ctp-subtext0` | Secondary text. |
 | `--color-subtext-1` | `--ctp-subtext1` | Tertiary text. |
-| `--color-primary` | `--ctp-sapphire` | Focus rings, selected states, links, primary CTAs. |
+| `--color-primary` | `--hm-primary-accent` | User intent: focus rings, selected states, links, active nav, primary actions. **User-configurable** via `appearance.accents.primary`; default `sapphire`. |
+| `--color-secondary` | `--hm-secondary-accent` | Second user-configurable accent for decorative pairings. **User-configurable** via `appearance.accents.secondary`; default `teal`. |
+| `--color-secondary-highlight-bg` / `-text` / `-border` | Mixed from secondary accent + surface | Muted hint treatment for confidence, relevance, and relatedness chips. Not a selected state; not a categorical meaning. |
+| `--color-sentiment-good-bg` / `-text` / `-border` | Theme-local green sentiment | Explicit positive/healthy/complete evaluation. Pair with visible text or an accessible label. |
+| `--color-sentiment-ok-bg` / `-text` / `-border` | Theme-local amber sentiment | Explicit acceptable/needs-review evaluation. Pair with visible text or an accessible label. |
+| `--color-sentiment-bad-bg` / `-text` / `-border` | Theme-local red sentiment | Explicit negative/blocked/risky evaluation. Pair with visible text or an accessible label. |
 | `--color-border` | `--ctp-surface2` | Default borders. |
-| `--color-focus` | `--ctp-sapphire` | Focus rings (same as primary). |
+| `--color-focus` | `--hm-primary-accent` | Focus rings (same as primary). |
 | `--color-green` / `red` / `yellow` / `mauve` / `peach` | Catppuccin accents | Semantic / status (use sparingly). |
 
 **Color space:** `oklch` — perceptually uniform. Theme adjustments stay predictable.
@@ -57,6 +62,14 @@ Type scale is intentionally compact for an information-dense app. Do not introdu
 **Default palette:** Catppuccin. Latte for light mode; Macchiato for dark. Both ship in v1 with equal design weight. Default follows `prefers-color-scheme`; user can override via `data-theme` attribute on `<html>` (`latte` / `macchiato`).
 
 **Palette is user-configurable.** Color-scheme configuration is its own feature. The architecture supports swappable token sets via the `data-theme` attribute — write components against the **semantic** tokens (`--color-text`, `--color-primary`, etc.), never against Catppuccin-specific names (`--ctp-sapphire`).
+
+**Accent and semantic color rules:**
+
+1. **Primary accent** (`--color-primary`) is for user intent and app emphasis only: focus, selected state, active nav, links, and primary actions.
+2. **Secondary accent** (`--color-secondary`) is a second user preference. Use it directly only for a deliberate decorative pair or chart pair; use secondary-highlight tokens for confidence/relevance hints.
+3. **Secondary-highlight** is the only shared hint treatment for confidence, relevance, and relatedness chips. Do not use `text-primary` or `bg-primary/*` for those values.
+4. **Sentiment tokens** (`good`, `ok`, `bad`) require visible text or an accessible label. Sentiment colors are not aliases for user-selected primary or secondary accents.
+5. **Category meaning** (source/local/suggested links) is carried by icon shape plus text or accessible labels — not by assigning category-specific colors.
 
 **Contrast:** WCAG AA verified on all foreground/background pairings. New combinations must be checked.
 
@@ -101,6 +114,20 @@ Type scale is intentionally compact for an information-dense app. Do not introdu
 - 16px default in chrome UI.
 - 14px when inline with text.
 - 11–12px for small/dense affordances (chip buttons, footer icons).
+
+#### Link-kind icon mapping
+
+`src/ui/data/linkKindIcons.tsx` is the shared source of truth for connection-kind glyphs:
+
+| Kind | Icon (Lucide) | Label | Meaning |
+| --- | --- | --- | --- |
+| `source` | `Link2` | `Source link` | The source system stores this real link. |
+| `local` | `Network` | `Local link` | hm stores this real local link because sources cannot represent it. |
+| `suggested` | `Sparkles` | `Suggested link` | Computed related item, not a real link yet. |
+
+**Color rule:** All three use neutral text/subtext color. Category meaning comes from icon shape plus text or accessible labels — not from color assignment.
+
+**Accessibility:** Rows with visible kind text may mark the icon `aria-hidden="true"`. Icon-only uses must expose `Source link`, `Local link`, or `Suggested link` as the accessible name and should use tooltips where helpful.
 
 ---
 
@@ -251,7 +278,9 @@ Composable pieces used by the shell's sidebar column.
 | `Avatar` | layout | User / scope visual (initial or image). |
 | `Badge` | layout | Small label pill. Tones: neutral / primary / green / red / yellow / mauve / peach. |
 | `Tag` | layout | Removable label with optional `onRemove` callback. |
-| `ConfidenceChip` | layout | AI-confidence percentage chip with high/low styling (≥85% = primary accent; below = muted). |
+| `SecondaryHighlightChip` | `src/ui/data/SecondaryHighlightChip.tsx` | Generic muted hint chip for confidence, relevance, relatedness, or short contextual hints. Uses `--color-secondary-highlight-bg/-text/-border` tokens. Never uses primary accent classes. |
+| `ConfidenceChip` | `src/ui/data/ConfidenceChip.tsx` | Numeric confidence percentage (`N%`). Composes `SecondaryHighlightChip`; **never** uses primary accent classes for any confidence level. Clamps to 0–100. |
+| `SentimentBadge` | `src/ui/data/SentimentBadge.tsx` | Explicit good/ok/bad evaluation badge. Accepts `tone: "good" \| "ok" \| "bad"`. Requires visible content or an accessible label. Uses sentiment token classes only — no primary, no secondary-highlight. |
 
 ### Text — `src/ui/text/`
 
@@ -555,9 +584,16 @@ Stored in per-user preferences (ADR-008) and threaded into `<AppShell>` at app m
 
 `latte` / `macchiato` / `system` (follows `prefers-color-scheme`). Stored in per-user preferences; set on `<html data-theme="...">`.
 
-### Color scheme + accent
+### Color scheme, theme pair, and accents
 
-The Catppuccin palette and primary accent are user-configurable as a separate feature. The architecture supports swappable token sets via the `data-theme` attribute; component code writes against semantic tokens (see "Tokens → Color").
+`data-theme` on `<html>` drives which theme block is active. Users configure theme mode (system/light/dark), light theme, dark theme, primary accent, and secondary accent in Settings → Appearance.
+
+**Accent preference paths:**
+- `appearance.accents.primary` — canonical primary accent (14 Catppuccin-compatible ids; default `sapphire`).
+- `appearance.accents.secondary` — canonical secondary accent (same set; default `teal`).
+- `appearance.themeFeatures.catppuccin.accent` — deprecated compatibility path; still read when canonical primary is absent; mirrored from primary on new writes.
+
+Primary accent drives `--hm-primary-accent` → `--color-primary` and `--color-focus`. Secondary accent drives `--hm-secondary-accent` → `--color-secondary`. Secondary-highlight tokens are derived from `--hm-secondary-accent` and the surface token, not from user preferences directly. Sentiment tokens are non-configurable and are not aliases for any user-selected accent.
 
 ### Fonts
 
@@ -770,6 +806,7 @@ In the **same PR** as the change:
 6. Introducing a new pattern that other components should follow.
 7. Adopting a new Radix package — add to the Radix table.
 8. Graduating a primitive from one location to another (file path changes).
+9. Adding, removing, or changing shared tokens, theme roles, data chips, sentiment treatments, or recurring icon-kind mappings requires updating this document in the same PR.
 
 ### When you must consult this doc
 
