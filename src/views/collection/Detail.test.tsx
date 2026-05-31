@@ -5,6 +5,10 @@ import type { EntityContract } from "./types";
 import {
   DEFAULT_BOTTOM_PEEK_HEIGHT,
   DEFAULT_SIDE_PEEK_WIDTH,
+  MAX_BOTTOM_PEEK_HEIGHT,
+  MAX_SIDE_PEEK_WIDTH,
+  MIN_BOTTOM_PEEK_HEIGHT,
+  MIN_SIDE_PEEK_WIDTH,
 } from "./previewSizing";
 
 beforeAll(() => {
@@ -75,16 +79,16 @@ describe("Detail", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("side surface renders as a 440px aside", () => {
+  it("side surface renders at the configured default width", () => {
     const { container } = renderDetail({ surface: "side-peek" });
     const aside = container.querySelector("aside");
-    expect(aside).toHaveStyle({ width: "440px" });
+    expect(aside).toHaveStyle({ width: `${DEFAULT_SIDE_PEEK_WIDTH}px` });
   });
 
-  it("bottom surface renders as a 280px aside", () => {
+  it("bottom surface renders at the configured default height", () => {
     const { container } = renderDetail({ surface: "bottom-peek" });
     const aside = container.querySelector("aside");
-    expect(aside).toHaveStyle({ height: "280px" });
+    expect(aside).toHaveStyle({ height: `${DEFAULT_BOTTOM_PEEK_HEIGHT}px` });
   });
 
   it("shows M of N position text", () => {
@@ -133,5 +137,107 @@ describe("Detail", () => {
     renderDetail({ surface: "bottom-peek", bottomPeekHeight: 384 });
     expect(screen.getByTestId("preview-metadata")).toHaveTextContent("bottom-peek:roomy");
     expect(screen.getByTestId("preview-metadata")).toHaveTextContent("384");
+  });
+
+  it("renders a vertical separator for side resizing", () => {
+    renderDetail({ surface: "side-peek" });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    expect(separator).toHaveAttribute("aria-orientation", "vertical");
+    expect(separator).toHaveAttribute("aria-valuemin", String(MIN_SIDE_PEEK_WIDTH));
+    expect(separator).toHaveAttribute("aria-valuemax", String(MAX_SIDE_PEEK_WIDTH));
+    expect(separator).toHaveAttribute("aria-valuenow", String(DEFAULT_SIDE_PEEK_WIDTH));
+  });
+
+  it("renders a horizontal separator for bottom resizing", () => {
+    renderDetail({ surface: "bottom-peek" });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    expect(separator).toHaveAttribute("aria-orientation", "horizontal");
+    expect(separator).toHaveAttribute("aria-valuemin", String(MIN_BOTTOM_PEEK_HEIGHT));
+    expect(separator).toHaveAttribute("aria-valuemax", String(MAX_BOTTOM_PEEK_HEIGHT));
+    expect(separator).toHaveAttribute("aria-valuenow", String(DEFAULT_BOTTOM_PEEK_HEIGHT));
+  });
+
+  it("dragging the side splitter left increases width and commits the clamped size", () => {
+    const onResizeCommit = vi.fn();
+    const { container } = renderDetail({ surface: "side-peek", onResizeCommit });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    const aside = container.querySelector("aside");
+    fireEvent.pointerDown(separator, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(separator, { pointerId: 1, clientX: 420 });
+    expect(aside).toHaveStyle({ width: "520px" });
+    fireEvent.pointerUp(separator, { pointerId: 1, clientX: 420 });
+    expect(onResizeCommit).toHaveBeenCalledWith("side-peek", 520);
+  });
+
+  it("dragging the side splitter clamps at minimum and maximum", () => {
+    const onResizeCommit = vi.fn();
+    const { container } = renderDetail({ surface: "side-peek", onResizeCommit });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    const aside = container.querySelector("aside");
+    fireEvent.pointerDown(separator, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(separator, { pointerId: 1, clientX: 900 });
+    expect(aside).toHaveStyle({ width: `${MIN_SIDE_PEEK_WIDTH}px` });
+    fireEvent.pointerUp(separator, { pointerId: 1, clientX: 900 });
+    expect(onResizeCommit).toHaveBeenLastCalledWith("side-peek", MIN_SIDE_PEEK_WIDTH);
+    fireEvent.pointerDown(separator, { pointerId: 2, clientX: 500 });
+    fireEvent.pointerMove(separator, { pointerId: 2, clientX: -500 });
+    expect(aside).toHaveStyle({ width: `${MAX_SIDE_PEEK_WIDTH}px` });
+    fireEvent.pointerUp(separator, { pointerId: 2, clientX: -500 });
+    expect(onResizeCommit).toHaveBeenLastCalledWith("side-peek", MAX_SIDE_PEEK_WIDTH);
+  });
+
+  it("dragging the bottom splitter up increases height and commits the clamped size", () => {
+    const onResizeCommit = vi.fn();
+    const { container } = renderDetail({ surface: "bottom-peek", onResizeCommit });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    const aside = container.querySelector("aside");
+    fireEvent.pointerDown(separator, { pointerId: 1, clientY: 700 });
+    fireEvent.pointerMove(separator, { pointerId: 1, clientY: 620 });
+    expect(aside).toHaveStyle({ height: "360px" });
+    fireEvent.pointerUp(separator, { pointerId: 1, clientY: 620 });
+    expect(onResizeCommit).toHaveBeenCalledWith("bottom-peek", 360);
+  });
+
+  it("dragging the bottom splitter clamps at minimum and maximum", () => {
+    const onResizeCommit = vi.fn();
+    const { container } = renderDetail({ surface: "bottom-peek", onResizeCommit });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    const aside = container.querySelector("aside");
+    fireEvent.pointerDown(separator, { pointerId: 1, clientY: 700 });
+    fireEvent.pointerMove(separator, { pointerId: 1, clientY: 900 });
+    expect(aside).toHaveStyle({ height: `${MIN_BOTTOM_PEEK_HEIGHT}px` });
+    fireEvent.pointerUp(separator, { pointerId: 1, clientY: 900 });
+    expect(onResizeCommit).toHaveBeenLastCalledWith("bottom-peek", MIN_BOTTOM_PEEK_HEIGHT);
+    fireEvent.pointerDown(separator, { pointerId: 2, clientY: 700 });
+    fireEvent.pointerMove(separator, { pointerId: 2, clientY: 0 });
+    expect(aside).toHaveStyle({ height: `${MAX_BOTTOM_PEEK_HEIGHT}px` });
+    fireEvent.pointerUp(separator, { pointerId: 2, clientY: 0 });
+    expect(onResizeCommit).toHaveBeenLastCalledWith("bottom-peek", MAX_BOTTOM_PEEK_HEIGHT);
+  });
+
+  it("ArrowLeft and ArrowRight resize the side separator", () => {
+    const onResizeCommit = vi.fn();
+    const { container } = renderDetail({ surface: "side-peek", onResizeCommit });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    const aside = container.querySelector("aside");
+    fireEvent.keyDown(separator, { key: "ArrowLeft" });
+    expect(aside).toHaveStyle({ width: "456px" });
+    expect(onResizeCommit).toHaveBeenLastCalledWith("side-peek", 456);
+    fireEvent.keyDown(separator, { key: "ArrowRight", shiftKey: true });
+    expect(aside).toHaveStyle({ width: "392px" });
+    expect(onResizeCommit).toHaveBeenLastCalledWith("side-peek", 392);
+  });
+
+  it("ArrowUp and ArrowDown resize the bottom separator", () => {
+    const onResizeCommit = vi.fn();
+    const { container } = renderDetail({ surface: "bottom-peek", onResizeCommit });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    const aside = container.querySelector("aside");
+    fireEvent.keyDown(separator, { key: "ArrowUp" });
+    expect(aside).toHaveStyle({ height: "296px" });
+    expect(onResizeCommit).toHaveBeenLastCalledWith("bottom-peek", 296);
+    fireEvent.keyDown(separator, { key: "ArrowDown", shiftKey: true });
+    expect(aside).toHaveStyle({ height: "232px" });
+    expect(onResizeCommit).toHaveBeenLastCalledWith("bottom-peek", 232);
   });
 });
