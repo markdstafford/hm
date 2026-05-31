@@ -1,5 +1,6 @@
 import type { JiraIssueListItem } from "../../bindings";
-import type { PreviewFieldConfig, PreviewFieldDefinition } from "../../views/collection/types";
+import type { PreviewFieldConfig, PreviewFieldDefinition, PreviewFieldSourceConfig } from "../../views/collection/types";
+import { resolvePreviewFieldConfig } from "../../views/collection/preview/fieldModel";
 import { AssigneeCell, LabelsCell, PriorityCell, UpdatedCell } from "./cells";
 import type { JiraIssueProperty } from "./properties";
 
@@ -47,3 +48,17 @@ export const JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS: PreviewFieldConfig<JiraIssueProp
   { property: "labels", tier: 2 },
   { property: "updated_at_source", tier: 2 },
 ];
+
+// JiraIssueListItem does not yet expose source_id; sourceId: null matches null-keyed source configs
+// and will be threaded through once the backend binding exposes it.
+export function resolveJiraIssuePreviewFieldConfig(
+  sourceConfigs: PreviewFieldSourceConfig<JiraIssueProperty>[] = [],
+): PreviewFieldConfig<JiraIssueProperty>[] {
+  return resolvePreviewFieldConfig({
+    definitions: JIRA_ISSUE_PREVIEW_FIELDS,
+    defaults: JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS,
+    sourceConfigs,
+    entityId: "jira-issue",
+    sourceId: null,
+  });
+}

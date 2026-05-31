@@ -140,7 +140,9 @@ describe("PreviewFields", () => {
 
     rerender(<PreviewFields item={item} definitions={definitions} config={config} preview={roomyPreview} />);
     await user.click(screen.getByRole("button", { name: "More fields (2)" }));
-    expect(screen.getByTestId("preview-secondary-fields")).toHaveClass("sm:grid-cols-2");
+    const secondary = screen.getByTestId("preview-secondary-fields");
+    expect(secondary).toHaveClass("grid-cols-2");
+    expect(secondary).not.toHaveClass("sm:grid-cols-2");
   });
 
   it("has no axe violations when collapsed or expanded", async () => {

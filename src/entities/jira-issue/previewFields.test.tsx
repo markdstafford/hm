@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { JiraIssueListItem } from "../../bindings";
+import type { PreviewFieldSourceConfig } from "../../views/collection/types";
 import { partitionPreviewFields } from "../../views/collection/preview/fieldModel";
 import {
   JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS,
   JIRA_ISSUE_PREVIEW_FIELDS,
+  resolveJiraIssuePreviewFieldConfig,
 } from "./previewFields";
+import type { JiraIssueProperty } from "./properties";
+
 
 function item(overrides: Partial<JiraIssueListItem> = {}): JiraIssueListItem {
   return {
@@ -55,6 +59,58 @@ describe("Jira preview fields", () => {
       "labels",
       "updated_at_source",
     ]);
+  });
+
+  it("resolves effective config from defaults when no source config exists", () => {
+    expect(resolveJiraIssuePreviewFieldConfig()).toEqual(JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS);
+  });
+
+  it("promotes a field when a matching source config (sourceId: null) overrides its tier", () => {
+    const sourceConfigs: PreviewFieldSourceConfig<JiraIssueProperty>[] = [
+      {
+        sourceId: null,
+        entityId: "jira-issue",
+        fields: [{ property: "labels", tier: 1 }],
+      },
+    ];
+    const result = resolveJiraIssuePreviewFieldConfig(sourceConfigs);
+    const labels = result.find((f) => f.property === "labels");
+    expect(labels?.tier).toBe(1);
+    const priority = result.find((f) => f.property === "priority");
+    expect(priority?.tier).toBe(1);
+  });
+
+  it("keeps non-matching source configs isolated — a different sourceId does not promote fields", () => {
+    const sourceConfigs: PreviewFieldSourceConfig<JiraIssueProperty>[] = [
+      {
+        sourceId: "jira-other",
+        entityId: "jira-issue",
+        fields: [{ property: "labels", tier: 1 }],
+      },
+    ];
+    const result = resolveJiraIssuePreviewFieldConfig(sourceConfigs);
+    const labels = result.find((f) => f.property === "labels");
+    expect(labels?.tier).toBe(2);
+  });
+
+  it("resolver + partition: matching source config (sourceId: null) promotes labels to tier 1 and non-matching sourceId stays isolated", () => {
+    const withLabels = item({ labels: ["promoted"] });
+
+    const matchingConfig: PreviewFieldSourceConfig<JiraIssueProperty>[] = [
+      { sourceId: null, entityId: "jira-issue", fields: [{ property: "labels", tier: 1 }] },
+    ];
+    const resolved = resolveJiraIssuePreviewFieldConfig(matchingConfig);
+    const promoted = partitionPreviewFields(withLabels, JIRA_ISSUE_PREVIEW_FIELDS, resolved);
+    expect(promoted.tierOne.map((f) => f.definition.property)).toContain("labels");
+    expect(promoted.secondary.map((f) => f.definition.property)).not.toContain("labels");
+
+    const nonMatchingConfig: PreviewFieldSourceConfig<JiraIssueProperty>[] = [
+      { sourceId: "jira-other", entityId: "jira-issue", fields: [{ property: "labels", tier: 1 }] },
+    ];
+    const resolvedNonMatch = resolveJiraIssuePreviewFieldConfig(nonMatchingConfig);
+    const notPromoted = partitionPreviewFields(withLabels, JIRA_ISSUE_PREVIEW_FIELDS, resolvedNonMatch);
+    expect(notPromoted.secondary.map((f) => f.definition.property)).toContain("labels");
+    expect(notPromoted.tierOne.map((f) => f.definition.property)).not.toContain("labels");
   });
 
   it("reuses existing cell renderers for priority, labels, project, assignee, and updated date", () => {

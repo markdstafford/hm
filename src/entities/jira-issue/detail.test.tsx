@@ -133,6 +133,22 @@ describe("JiraIssueDetail", () => {
     await user.click(screen.getByRole("button", { name: "More fields (2)" }));
     expect(screen.getByTestId("preview-secondary-fields")).toHaveClass("grid-cols-1");
   });
+
+  it("uses roomy measured width for two-column secondary fields without a viewport breakpoint", async () => {
+    const user = userEvent.setup();
+    render(
+      <JiraIssueDetail
+        item={{ ...full, priority_name: "P1", labels: ["preview"], updated_at_source: "2024-06-01T10:00:00Z" }}
+        preview={{ surface: "bottom-peek", width: 720, height: null, sizeClass: "roomy" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "More fields (2)" }));
+    const secondary = screen.getByTestId("preview-secondary-fields");
+    expect(secondary).toHaveClass("grid-cols-2");
+    expect(secondary).not.toHaveClass("sm:grid-cols-2");
+  });
+
 });
 
 describe("JiraIssueDetail — status history", () => {

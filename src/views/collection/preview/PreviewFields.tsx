@@ -21,9 +21,9 @@ type Props<TItem, TProperty extends string> = {
 
 function secondaryLayoutClass(preview?: EntityPreviewMetadata): string {
   if (preview?.width !== null && preview?.width !== undefined) {
-    return preview.width >= ROOMY_SECONDARY_WIDTH ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1";
+    return preview.width >= ROOMY_SECONDARY_WIDTH ? "grid-cols-2" : "grid-cols-1";
   }
-  return preview?.sizeClass === "roomy" ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1";
+  return preview?.sizeClass === "roomy" ? "grid-cols-2" : "grid-cols-1";
 }
 
 function PreviewFieldValue<TItem, TProperty extends string>({

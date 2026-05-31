@@ -8,8 +8,8 @@ import { EmptyState } from "../../ui/feedback/EmptyState";
 import { formatLocalDateTime } from "../../lib/formatDateTime";
 import { PreviewFields } from "../../views/collection/preview/PreviewFields";
 import {
-  JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS,
   JIRA_ISSUE_PREVIEW_FIELDS,
+  resolveJiraIssuePreviewFieldConfig,
 } from "./previewFields";
 
 type Props = EntityDetailProps<JiraIssueListItem>;
@@ -51,7 +51,7 @@ export function JiraIssueDetail({ item, preview }: Props) {
       <PreviewFields
         item={item}
         definitions={JIRA_ISSUE_PREVIEW_FIELDS}
-        config={JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS}
+        config={resolveJiraIssuePreviewFieldConfig()}
         preview={preview}
         ariaLabel="Issue fields"
       />
