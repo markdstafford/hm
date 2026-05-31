@@ -91,6 +91,12 @@ describe("buildQuickSwitcherResults", () => {
     expect(results[0].match.kind).toBe("title-word-prefix");
   });
 
+  it("includes title substring matches below word-prefix matches", () => {
+    const results = buildQuickSwitcherResults({ sources: [source()], query: "ardinality" });
+    expect(results[0].item.primaryLabel).toBe("AMP-1087");
+    expect(results[0].match.kind).toBe("title-substring");
+  });
+
   it("includes context substring matches below title matches", () => {
     const results = buildQuickSwitcherResults({ sources: [source()], query: "backlog" });
     expect(results.map((result) => result.item.primaryLabel)).toEqual(["OPS-190"]);
