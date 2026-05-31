@@ -497,9 +497,11 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
 
   function handleOpenSetEdge(edge: SetTargetEdge<TItem>) {
     if (edge.danglingReason || !edge.items) return;
+    // Merge live selectedId/previewOpen into the snapshot so that row navigation
+    // performed *after* entering a scoped root is captured before we push scope2.
     const currentRoot =
       rootStack.length > 0
-        ? rootStack[rootStack.length - 1]
+        ? { ...rootStack[rootStack.length - 1], selectedId, previewOpen }
         : createBaseRoot(rootItems, selectedId, previewOpen);
     const nextSelected = edge.items[0] ? entity.getId(edge.items[0]) : null;
     const result = pushScopedRoot({

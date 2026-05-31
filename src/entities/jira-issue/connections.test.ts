@@ -66,6 +66,36 @@ describe("resolveJiraIssueEdges", () => {
     const first = issue({ work_item_id: "wi-2", key: "AMP-1102" });
     const second = issue({ work_item_id: "wi-3", key: "AMP-800" });
     const edges = resolveJiraIssueEdges({ item: base, allItems: [base, first, second] });
-    expect(edges[0]).toMatchObject({ shape: "set", label: "Related to AMP-1087", count: 2, items: [first, second] });
+    expect(edges[0]).toMatchObject({ shape: "set", label: "Related to AMP-1087", count: 2, items: [first, second], danglingReason: undefined });
+  });
+
+  it("marks a fixture set edge as not-ingested when some target keys are absent locally", () => {
+    const base = issue({ key: "AMP-1087" }) as FixtureIssue;
+    base.__hmFixtureEdges = [
+      { id: "related:partial", kind: "local", shape: "set", relationship: "all related", label: "Related to AMP-1087", targetKeys: ["AMP-1102", "SEC-441"] },
+    ];
+    const present = issue({ work_item_id: "wi-2", key: "AMP-1102" });
+    // SEC-441 is not in allItems — simulates an un-ingested cross-project issue
+    const edges = resolveJiraIssueEdges({ item: base, allItems: [base, present] });
+    expect(edges[0]).toMatchObject({
+      shape: "set",
+      count: 2,
+      items: [present],
+      danglingReason: "not-ingested",
+    });
+  });
+
+  it("marks a fixture set edge as not-ingested when ALL target keys are absent locally", () => {
+    const base = issue({ key: "AMP-1087" }) as FixtureIssue;
+    base.__hmFixtureEdges = [
+      { id: "related:empty", kind: "local", shape: "set", relationship: "all related", label: "Related to AMP-1087", targetKeys: ["SEC-100", "SEC-200"] },
+    ];
+    const edges = resolveJiraIssueEdges({ item: base, allItems: [base] });
+    expect(edges[0]).toMatchObject({
+      shape: "set",
+      count: 2,
+      items: [],
+      danglingReason: "not-ingested",
+    });
   });
 });

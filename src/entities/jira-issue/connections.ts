@@ -60,9 +60,11 @@ export function resolveJiraIssueEdges({
       };
     }
 
+    const totalCount = edge.targetKeys.length;
     const resolvedItems = edge.targetKeys
       .map((key) => localByKey.get(key))
       .filter((candidate): candidate is JiraIssueListItem => Boolean(candidate));
+    const hasUnresolved = resolvedItems.length < totalCount;
 
     return {
       id: edge.id,
@@ -71,9 +73,9 @@ export function resolveJiraIssueEdges({
       relationship: edge.relationship,
       label: edge.label,
       confidence: edge.confidence,
-      count: resolvedItems.length,
+      count: totalCount,
       items: resolvedItems,
-      danglingReason: undefined,
+      danglingReason: hasUnresolved ? ("not-ingested" as const) : undefined,
     };
   });
 }
