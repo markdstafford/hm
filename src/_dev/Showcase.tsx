@@ -2,12 +2,11 @@ import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Search, Inbox } from "lucide-react";
 import {
   THEME_CATALOG,
-  CATPPUCCIN_ACCENTS,
+  ACCENT_OPTIONS,
   applyColorScheme,
   applyFonts,
   getThemeMeta,
-  themeSupportsFeature,
-  type CatppuccinAccent,
+  type AccentId,
 } from "../theme";
 import { Heading } from "../ui/text/Heading";
 import { Button } from "../ui/buttons/Button";
@@ -158,7 +157,8 @@ function ShowcaseContent() {
   const initialRef = useRef<null | {
     themeId: string;
     brightness: "light" | "dark";
-    accent: CatppuccinAccent | undefined;
+    primaryAccent: AccentId;
+    secondaryAccent: AccentId;
     uiFont: string;
     monoFont: string;
   }>(null);
@@ -167,29 +167,31 @@ function ShowcaseContent() {
     const root = document.documentElement;
     const themeId = root.dataset.theme ?? "catppuccin-macchiato";
     const brightness = (root.dataset.themeMode === "light" ? "light" : "dark") as "light" | "dark";
-    const accent = (root.dataset.accent as CatppuccinAccent | undefined) || undefined;
+    const primaryAccent = ((root.dataset.primaryAccent) || "sapphire") as AccentId;
+    const secondaryAccent = ((root.dataset.secondaryAccent) || "teal") as AccentId;
     const sansVar = root.style.getPropertyValue("--font-sans") || getComputedStyle(root).getPropertyValue("--font-sans");
     const monoVar = root.style.getPropertyValue("--font-mono") || getComputedStyle(root).getPropertyValue("--font-mono");
     const firstFamily = (s: string) => (s.match(/^["']?([^"',]+)["']?/)?.[1] ?? "").trim();
     initialRef.current = {
       themeId,
       brightness,
-      accent,
+      primaryAccent,
+      secondaryAccent,
       uiFont: firstFamily(sansVar) || "Inter Variable",
       monoFont: firstFamily(monoVar) || "Fira Code",
     };
   }
 
   const [themeId, setThemeId] = useState(() => initialRef.current?.themeId ?? "catppuccin-macchiato");
-  const [accent, setAccent] = useState<CatppuccinAccent | undefined>(() => initialRef.current?.accent);
+  const [primaryAccent, setPrimaryAccent] = useState<AccentId>(() => initialRef.current?.primaryAccent ?? "sapphire");
+  const [secondaryAccent, setSecondaryAccent] = useState<AccentId>(() => initialRef.current?.secondaryAccent ?? "teal");
   const [uiFont, setUiFont] = useState(() => initialRef.current?.uiFont ?? "Inter Variable");
   const [monoFont, setMonoFont] = useState(() => initialRef.current?.monoFont ?? "Fira Code");
 
   useEffect(() => {
     const brightness = (getThemeMeta(themeId)?.brightness ?? "dark") as "light" | "dark";
-    const supportsAccent = themeSupportsFeature(themeId, "catppuccinAccent");
-    applyColorScheme({ themeId, brightness, accent: supportsAccent ? accent : undefined });
-  }, [themeId, accent]);
+    applyColorScheme({ themeId, brightness, primaryAccent, secondaryAccent });
+  }, [themeId, primaryAccent, secondaryAccent]);
 
   useEffect(() => {
     applyFonts(uiFont, monoFont);
@@ -199,18 +201,17 @@ function ShowcaseContent() {
     return () => {
       const initial = initialRef.current;
       if (!initial) return;
-      applyColorScheme({ themeId: initial.themeId, brightness: initial.brightness, accent: initial.accent });
+      applyColorScheme({ themeId: initial.themeId, brightness: initial.brightness, primaryAccent: initial.primaryAccent, secondaryAccent: initial.secondaryAccent });
       applyFonts(initial.uiFont, initial.monoFont);
     };
   }, []);
-
-  const supportsAccent = themeSupportsFeature(themeId, "catppuccinAccent");
 
   function reset() {
     const initial = initialRef.current;
     if (!initial) return;
     setThemeId(initial.themeId);
-    setAccent(initial.accent);
+    setPrimaryAccent(initial.primaryAccent);
+    setSecondaryAccent(initial.secondaryAccent);
     setUiFont(initial.uiFont);
     setMonoFont(initial.monoFont);
   }
@@ -229,16 +230,22 @@ function ShowcaseContent() {
             options={THEME_CATALOG.map((t) => ({ value: t.id, label: t.label }))}
           />
         </Card>
-        {supportsAccent && (
-          <Card caption="Catppuccin accent">
-            <Select
-              aria-label="Accent"
-              value={accent ?? "sapphire"}
-              onValueChange={(v) => setAccent(v as CatppuccinAccent)}
-              options={CATPPUCCIN_ACCENTS.map((a) => ({ value: a, label: a }))}
-            />
-          </Card>
-        )}
+        <Card caption="Primary accent">
+          <Select
+            aria-label="Primary accent"
+            value={primaryAccent}
+            onValueChange={(v) => setPrimaryAccent(v as AccentId)}
+            options={ACCENT_OPTIONS.map((a) => ({ value: a.value, label: a.label }))}
+          />
+        </Card>
+        <Card caption="Secondary accent">
+          <Select
+            aria-label="Secondary accent"
+            value={secondaryAccent}
+            onValueChange={(v) => setSecondaryAccent(v as AccentId)}
+            options={ACCENT_OPTIONS.map((a) => ({ value: a.value, label: a.label }))}
+          />
+        </Card>
         <Card caption="UI font">
           <TextField aria-label="UI font" value={uiFont} onChange={(e) => setUiFont(e.target.value)} />
         </Card>

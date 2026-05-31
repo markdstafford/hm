@@ -64,4 +64,72 @@ describe("AppearanceCategory", () => {
     );
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it("renders primary and secondary accent controls, not Catppuccin accent", () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AppearanceCategory
+        prefs={DEFAULT_PREFERENCES}
+        onUpdatePreferences={onUpdate}
+        prefersDark={false}
+      />,
+    );
+    expect(screen.getByText("Accent colors")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /Primary accent/ })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /Secondary accent/ })).toBeInTheDocument();
+    expect(screen.queryByText("Catppuccin accent")).not.toBeInTheDocument();
+  });
+
+  it("writes canonical primary accent patch with Catppuccin compat on change", async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AppearanceCategory
+        prefs={DEFAULT_PREFERENCES}
+        onUpdatePreferences={onUpdate}
+        prefersDark={false}
+      />,
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: /Primary accent/ }));
+    await userEvent.click(await screen.findByRole("option", { name: "Lavender" }));
+    expect(onUpdate).toHaveBeenCalledWith({
+      appearance: {
+        accents: { primary: "lavender" },
+        themeFeatures: { catppuccin: { accent: "lavender" } },
+      },
+    });
+  });
+
+  it("writes canonical secondary accent patch without primary", async () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AppearanceCategory
+        prefs={DEFAULT_PREFERENCES}
+        onUpdatePreferences={onUpdate}
+        prefersDark={false}
+      />,
+    );
+    await userEvent.click(screen.getByRole("combobox", { name: /Secondary accent/ }));
+    await userEvent.click(await screen.findByRole("option", { name: "Blue" }));
+    expect(onUpdate).toHaveBeenCalledWith({ appearance: { accents: { secondary: "blue" } } });
+  });
+
+  it("renders preview with primary, secondary-highlight, sentiment, and link-kind examples", () => {
+    const onUpdate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AppearanceCategory
+        prefs={DEFAULT_PREFERENCES}
+        onUpdatePreferences={onUpdate}
+        prefersDark={false}
+      />,
+    );
+    expect(screen.getByText("Primary link")).toBeInTheDocument();
+    expect(screen.getByText("Primary action")).toBeInTheDocument();
+    expect(screen.getByText("83% related")).toBeInTheDocument();
+    expect(screen.getByText("Good status")).toBeInTheDocument();
+    expect(screen.getByText("Ok status")).toBeInTheDocument();
+    expect(screen.getByText("Bad status")).toBeInTheDocument();
+    expect(screen.getByText("Source link")).toBeInTheDocument();
+    expect(screen.getByText("Local link")).toBeInTheDocument();
+    expect(screen.getByText("Suggested link")).toBeInTheDocument();
+  });
 });

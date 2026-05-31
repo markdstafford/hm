@@ -7,6 +7,7 @@ import {
   resolveThemeSlots,
   resolveTheme,
   resolveCatppuccinAccent,
+  resolveAppearanceAccents,
 } from "./index";
 
 describe("normalizePreferences", () => {
@@ -176,6 +177,47 @@ describe("color scheme normalization", () => {
     const features = ap.themeFeatures as Record<string, unknown>;
     expect(features.customTheme).toEqual({ option: "yes" });
   });
+
+  it("defaults canonical primary and secondary accents", () => {
+    const result = normalizePreferences({ appearance: {} });
+    expect(result.appearance?.accents?.primary).toBe("sapphire");
+    expect(result.appearance?.accents?.secondary).toBe("teal");
+  });
+
+  it("preserves valid canonical primary and secondary accents", () => {
+    const result = normalizePreferences({
+      appearance: { accents: { primary: "lavender", secondary: "blue" } },
+    });
+    expect(result.appearance?.accents?.primary).toBe("lavender");
+    expect(result.appearance?.accents?.secondary).toBe("blue");
+  });
+
+  it("maps legacy Catppuccin accent to primary when canonical primary is missing", () => {
+    const result = normalizePreferences({
+      appearance: { themeFeatures: { catppuccin: { accent: "green" } } },
+    });
+    expect(result.appearance?.accents?.primary).toBe("green");
+    expect(result.appearance?.themeFeatures?.catppuccin?.accent).toBe("green");
+  });
+
+  it("canonical primary wins over legacy Catppuccin accent", () => {
+    const result = normalizePreferences({
+      appearance: {
+        accents: { primary: "lavender" },
+        themeFeatures: { catppuccin: { accent: "green" } },
+      },
+    });
+    expect(result.appearance?.accents?.primary).toBe("lavender");
+    expect(result.appearance?.themeFeatures?.catppuccin?.accent).toBe("lavender");
+  });
+
+  it("rejects invalid canonical accents and falls back to documented defaults", () => {
+    const result = normalizePreferences({
+      appearance: { accents: { primary: "rainbow", secondary: "infrared" } },
+    });
+    expect(result.appearance?.accents?.primary).toBe("sapphire");
+    expect(result.appearance?.accents?.secondary).toBe("teal");
+  });
 });
 
 describe("mergePreferences", () => {
@@ -204,6 +246,18 @@ describe("mergePreferences", () => {
       "jira-issue": "recent",
       "github-issue": "mine",
     });
+  });
+
+  it("merges primary accent without erasing secondary accent", () => {
+    const current = { appearance: { accents: { primary: "sapphire" as const, secondary: "teal" as const } } };
+    const result = mergePreferences(current, { appearance: { accents: { primary: "lavender" } } });
+    expect(result.appearance?.accents).toEqual({ primary: "lavender", secondary: "teal" });
+  });
+
+  it("merges secondary accent without erasing primary accent", () => {
+    const current = { appearance: { accents: { primary: "sapphire" as const, secondary: "teal" as const } } };
+    const result = mergePreferences(current, { appearance: { accents: { secondary: "blue" } } });
+    expect(result.appearance?.accents).toEqual({ primary: "sapphire", secondary: "blue" });
   });
 });
 
@@ -245,6 +299,17 @@ describe("resolveTheme", () => {
     expect(result.brightness).toBe("light");
   });
 
+  it("light mode resolves to lightTheme with brightness light and accent ids", () => {
+    const result = resolveTheme(
+      { appearance: { themeMode: "light", lightTheme: "github-light", accents: { primary: "lavender", secondary: "blue" } } },
+      false,
+    );
+    expect(result.themeId).toBe("github-light");
+    expect(result.brightness).toBe("light");
+    expect(result.primaryAccent).toBe("lavender");
+    expect(result.secondaryAccent).toBe("blue");
+  });
+
   it("dark mode resolves to darkTheme with brightness dark", () => {
     const result = resolveTheme({ appearance: { themeMode: "dark", darkTheme: "dracula" } }, false);
     expect(result.themeId).toBe("dracula");
@@ -281,5 +346,19 @@ describe("resolveCatppuccinAccent", () => {
 
   it("returns sapphire for invalid accent", () => {
     expect(resolveCatppuccinAccent({ appearance: { themeFeatures: { catppuccin: { accent: "rainbow" as never } } } })).toBe("sapphire");
+  });
+});
+
+describe("resolveAppearanceAccents", () => {
+  it("returns canonical accent ids", () => {
+    expect(
+      resolveAppearanceAccents({ appearance: { accents: { primary: "mauve", secondary: "sky" } } }),
+    ).toEqual({ primaryAccent: "mauve", secondaryAccent: "sky" });
+  });
+
+  it("falls back through legacy Catppuccin accent for primary", () => {
+    expect(
+      resolveAppearanceAccents({ appearance: { themeFeatures: { catppuccin: { accent: "green" } } } }),
+    ).toEqual({ primaryAccent: "green", secondaryAccent: "teal" });
   });
 });
