@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { QuickSwitcherSource } from "./types";
 import { buildQuickSwitcherResults, normalizeQuickSwitcherQuery } from "./search";
+import type { JiraIssueListItem } from "../../bindings";
+import { createJiraQuickSwitcherSource } from "./jiraSource";
 
 type Item = {
   id: string;
@@ -116,5 +118,47 @@ describe("buildQuickSwitcherResults", () => {
       "first:AMP-1001",
       "second:AMP-1087",
     ]);
+  });
+});
+
+const jiraIssues: JiraIssueListItem[] = [
+  {
+    work_item_id: "wi-1087",
+    key: "AMP-1087",
+    title: "Cardinality mismatch in sync retries",
+    status_name: "Open",
+    assignee_display_name: "Elena",
+    updated_at_source: "2026-05-31T10:00:00Z",
+    project_key: "AMP",
+    priority_name: "P3",
+    labels: ["sync", "cardinality"],
+  },
+];
+
+describe("createJiraQuickSwitcherSource", () => {
+  it("maps Jira issue list items into generic quick-switcher items", () => {
+    const openItem = vi.fn().mockReturnValue(true);
+    const source = createJiraQuickSwitcherSource({ issues: jiraIssues, openIssue: openItem });
+    const item = source.toQuickSwitcherItem(jiraIssues[0]);
+
+    expect(source.id).toBe("jira-issues");
+    expect(source.entity.id).toBe("jira-issue");
+    expect(item).toMatchObject({
+      id: "wi-1087",
+      sourceId: "jira-issues",
+      entityId: "jira-issue",
+      kindLabel: "Jira",
+      primaryLabel: "AMP-1087",
+      title: "Cardinality mismatch in sync retries",
+      contextLabel: "AMP · Open · P3 · Elena",
+    });
+    expect(item.searchableText).toEqual(expect.arrayContaining(["AMP-1087", "Cardinality mismatch in sync retries", "AMP", "Open", "P3", "Elena", "sync", "cardinality"]));
+  });
+
+  it("delegates open behavior to the supplied collection handoff", () => {
+    const openIssue = vi.fn().mockReturnValue(true);
+    const source = createJiraQuickSwitcherSource({ issues: jiraIssues, openIssue });
+    expect(source.openItem(jiraIssues[0], { openPreview: true })).toBe(true);
+    expect(openIssue).toHaveBeenCalledWith("wi-1087", { openPreview: true, scopedFallback: true });
   });
 });
