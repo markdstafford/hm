@@ -909,17 +909,17 @@ pub(crate) fn jira_issue_relationships_from_conn(
     conn: &Connection,
     work_item_id: &str,
 ) -> Result<Vec<JiraIssueRelationshipRow>, String> {
-    let key: Option<String> = conn
+    let resolved: Option<(String, String)> = conn
         .query_row(
-            "SELECT key FROM work_items WHERE id = ?1 AND source_kind = 'jira_issue'",
+            "SELECT key, source_system_id FROM work_items WHERE id = ?1 AND source_kind = 'jira_issue'",
             [work_item_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let key = match key {
-        Some(k) => k,
+    let (key, source_system_id) = match resolved {
+        Some(r) => r,
         None => return Ok(vec![]),
     };
 
@@ -933,8 +933,10 @@ pub(crate) fn jira_issue_relationships_from_conn(
                 w.project_key, w.priority_name, {labels_subq} \
            FROM work_item_relationships r \
            LEFT JOIN work_items w ON w.key = r.to_upstream_key AND w.source_kind = 'jira_issue' \
+                                 AND w.source_system_id = r.source_system_id \
            LEFT JOIN people p ON p.id = w.assignee_person_id \
-          WHERE r.source_kind = 'jira_issue' AND r.from_upstream_key = ?1 \
+          WHERE r.source_kind = 'jira_issue' AND r.source_system_id = ?2 \
+            AND r.from_upstream_key = ?1 \
             AND r.to_upstream_key IS NOT NULL \
          UNION ALL \
          SELECT r.id, r.relationship_type, 'to' AS side, r.from_upstream_key AS other_key, \
@@ -942,14 +944,16 @@ pub(crate) fn jira_issue_relationships_from_conn(
                 w.project_key, w.priority_name, {labels_subq} \
            FROM work_item_relationships r \
            LEFT JOIN work_items w ON w.key = r.from_upstream_key AND w.source_kind = 'jira_issue' \
+                                 AND w.source_system_id = r.source_system_id \
            LEFT JOIN people p ON p.id = w.assignee_person_id \
-          WHERE r.source_kind = 'jira_issue' AND r.to_upstream_key = ?1 \
+          WHERE r.source_kind = 'jira_issue' AND r.source_system_id = ?2 \
+            AND r.to_upstream_key = ?1 \
             AND r.from_upstream_key IS NOT NULL"
     );
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map([&key], |row| {
+        .query_map(rusqlite::params![&key, &source_system_id], |row| {
             let labels_concat: Option<String> = row.get(12)?;
             let labels = labels_concat
                 .map(|s| s.split('\x1f').map(str::to_owned).collect())
@@ -1549,7 +1553,9 @@ mod tests {
     };
     use crate::issues::repository::{
         upsert_source_system, upsert_work_item, upsert_work_item_comment, upsert_work_item_term,
+        upsert_work_item_relationship,
         SourceSystemInput, WorkItemCommentInput, WorkItemInput, WorkItemTermInput,
+        WorkItemRelationshipInput,
     };
 
     const NOW: &str = "2026-05-25T17:00:00Z";
@@ -2792,5 +2798,117 @@ mod tests {
             ).unwrap()
         };
         assert_eq!(embedding_count, 2, "2 docs from unprocessed text_batches should remain in 'embedding' state");
+    }
+
+    // ── Relationship source-system scoping regression test ────────────────────
+
+    #[test]
+    fn jira_issue_relationships_scoped_to_source_system() {
+        // Two Jira source systems each with a work item that has the same key ("AMP-1").
+        // A relationship belonging to ssid_a must not appear when querying via ssid_b's work item.
+        let conn = open_in_memory().expect("db");
+        let ssid_a = seed_source_system(&conn, "src_a");
+        let ssid_b = seed_source_system(&conn, "src_b");
+
+        // Seed "AMP-1" in both sources plus a distinct target "AMP-2" in source A.
+        for ssid in [&ssid_a, &ssid_b] {
+            upsert_work_item(
+                &conn,
+                NOW,
+                &WorkItemInput {
+                    id: &format!("wi_{}_{}", ssid, "AMP-1"),
+                    source_system_id: ssid,
+                    source_kind: "jira_issue",
+                    upstream_id: "10001",
+                    key: Some("AMP-1"),
+                    url: None,
+                    title: "Issue AMP-1",
+                    body: None,
+                    state: "open",
+                    status_name: None,
+                    resolution_name: None,
+                    priority_name: None,
+                    item_type: None,
+                    project_key: Some("AMP"),
+                    project_name: Some("AMP"),
+                    assignee_person_id: None,
+                    reporter_person_id: None,
+                    created_at_source: None,
+                    updated_at_source: None,
+                    resolved_at_source: None,
+                    due_at_source: None,
+                    raw_updated_hash: "h",
+                },
+            )
+            .expect("upsert work item AMP-1");
+        }
+        upsert_work_item(
+            &conn,
+            NOW,
+            &WorkItemInput {
+                id: &format!("wi_{}_AMP-2", ssid_a),
+                source_system_id: &ssid_a,
+                source_kind: "jira_issue",
+                upstream_id: "10002",
+                key: Some("AMP-2"),
+                url: None,
+                title: "Issue AMP-2",
+                body: None,
+                state: "open",
+                status_name: None,
+                resolution_name: None,
+                priority_name: None,
+                item_type: None,
+                project_key: Some("AMP"),
+                project_name: Some("AMP"),
+                assignee_person_id: None,
+                reporter_person_id: None,
+                created_at_source: None,
+                updated_at_source: None,
+                resolved_at_source: None,
+                due_at_source: None,
+                raw_updated_hash: "h",
+            },
+        )
+        .expect("upsert work item AMP-2");
+
+        // Only source A has a relationship between AMP-1 and AMP-2.
+        upsert_work_item_relationship(
+            &conn,
+            NOW,
+            &WorkItemRelationshipInput {
+                id: "rel_a_dup",
+                source_system_id: &ssid_a,
+                source_kind: "jira_issue",
+                from_work_item_id: Some(&format!("wi_{}_AMP-1", ssid_a)),
+                to_work_item_id: Some(&format!("wi_{}_AMP-2", ssid_a)),
+                from_upstream_key: Some("AMP-1"),
+                to_upstream_key: Some("AMP-2"),
+                relationship_type: "duplicates",
+                direction: None,
+                raw_json: None,
+            },
+        )
+        .expect("upsert relationship");
+
+        // Querying via source A's work item returns the relationship.
+        let rows_a = jira_issue_relationships_from_conn(
+            &conn,
+            &format!("wi_{}_AMP-1", ssid_a),
+        )
+        .expect("relationships for ssid_a");
+        assert_eq!(rows_a.len(), 1, "ssid_a should have 1 relationship");
+        assert_eq!(rows_a[0].relationship_type, "duplicates");
+        assert_eq!(rows_a[0].other_key, "AMP-2");
+        // Target work item is in the same source, so it should be resolved.
+        assert!(rows_a[0].target_work_item_id.is_some(), "target should be resolved for ssid_a");
+
+        // Querying via source B's work item (same key, different source) returns nothing.
+        let rows_b = jira_issue_relationships_from_conn(
+            &conn,
+            &format!("wi_{}_AMP-1", ssid_b),
+        )
+        .expect("relationships for ssid_b");
+        assert!(rows_b.is_empty(), "ssid_b must not return ssid_a's relationships");
     }
 }

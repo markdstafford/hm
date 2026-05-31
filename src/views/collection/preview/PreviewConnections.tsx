@@ -49,8 +49,8 @@ function isSingleDrillable<TItem>(edge: SingleTargetEdge<TItem>): boolean {
 
 function isSetDrillable<TItem>(edge: SetTargetEdge<TItem>): boolean {
   // Allow partial-drill: navigate to resolved members even when some are unresolved.
-  // A set is drillable as long as at least one resolved item is present.
-  return Array.isArray(edge.items) && edge.items.length > 0;
+  // A set is drillable as long as at least one resolved item is present and no dangling reason is set.
+  return Array.isArray(edge.items) && edge.items.length > 0 && !edge.danglingReason;
 }
 
 export function PreviewConnections<TItem>({ edges = [], onOpenSingle, onOpenSet }: Props<TItem>) {

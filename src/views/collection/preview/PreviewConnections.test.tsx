@@ -89,6 +89,26 @@ describe("PreviewConnections", () => {
     expect(await axe(container)).toHaveNoViolations();
   });
 
+  it("does not activate a set edge that has items but also a dangling reason", () => {
+    const onOpenSet = vi.fn();
+    const danglingSet: CollectionEdge<Item> = {
+      id: "related:dangling-set",
+      kind: "source",
+      shape: "set",
+      relationship: "related",
+      label: "related issues",
+      danglingReason: "source-not-configured",
+      items: [target],
+    };
+    render(<PreviewConnections edges={[danglingSet]} onOpenSingle={vi.fn()} onOpenSet={onOpenSet} />);
+    const row = screen.getByRole("button", { name: "related issues, Source not configured" });
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(row);
+    fireEvent.keyDown(row, { key: "Enter" });
+    fireEvent.keyDown(row, { key: " " });
+    expect(onOpenSet).not.toHaveBeenCalled();
+  });
+
   it("activates drillable rows with Enter and Space", () => {
     const onOpenSingle = vi.fn();
     const onOpenSet = vi.fn();
