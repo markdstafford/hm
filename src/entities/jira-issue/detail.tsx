@@ -11,6 +11,10 @@ import {
   JIRA_ISSUE_PREVIEW_FIELDS,
   resolveJiraIssuePreviewFieldConfig,
 } from "./previewFields";
+import { PreviewDescription } from "../../views/collection/preview/PreviewDescription";
+import { PreviewComments } from "../../views/collection/preview/PreviewComments";
+import type { PreviewComment } from "../../views/collection/preview/commentsModel";
+import { loadJiraIssuePreviewContent } from "./previewContent";
 
 type Props = EntityDetailProps<JiraIssueListItem>;
 
@@ -19,8 +23,14 @@ type HistoryState =
   | { phase: "error" }
   | { phase: "ok"; transitions: JiraIssueStatusTransition[]; partial: boolean };
 
+type PreviewContentState =
+  | { phase: "loading" }
+  | { phase: "error" }
+  | { phase: "ok"; body: string | null; comments: PreviewComment[] };
+
 export function JiraIssueDetail({ item, preview }: Props) {
   const [history, setHistory] = useState<HistoryState>({ phase: "loading" });
+  const [previewContent, setPreviewContent] = useState<PreviewContentState>({ phase: "loading" });
 
   useEffect(() => {
     setHistory({ phase: "loading" });
@@ -31,6 +41,22 @@ export function JiraIssueDetail({ item, preview }: Props) {
         setHistory({ phase: "error" });
       } else {
         setHistory({ phase: "ok", transitions: result.transitions, partial: result.partial });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.work_item_id]);
+
+  useEffect(() => {
+    setPreviewContent({ phase: "loading" });
+    let cancelled = false;
+    loadJiraIssuePreviewContent(item.work_item_id).then((result) => {
+      if (cancelled) return;
+      if (result.status === "error") {
+        setPreviewContent({ phase: "error" });
+      } else {
+        setPreviewContent({ phase: "ok", body: result.body, comments: result.comments });
       }
     });
     return () => {
@@ -55,6 +81,27 @@ export function JiraIssueDetail({ item, preview }: Props) {
         preview={preview}
         ariaLabel="Issue fields"
       />
+
+      {previewContent.phase === "loading" && (
+        <div className="border-b border-border pb-3">
+          <Spinner label="Loading preview content…" />
+        </div>
+      )}
+
+      {previewContent.phase === "error" && (
+        <section aria-label="Preview content" className="flex flex-col gap-2 border-b border-border pb-3">
+          <p role="alert" className="text-sm text-subtext">
+            Could not load comments. Try syncing Jira again.
+          </p>
+        </section>
+      )}
+
+      {previewContent.phase === "ok" && (
+        <>
+          <PreviewDescription body={previewContent.body} resetKey={item.work_item_id} />
+          <PreviewComments comments={previewContent.comments} resetKey={item.work_item_id} />
+        </>
+      )}
 
       <section aria-labelledby="jira-status-history-heading" className="mt-2 flex flex-col gap-2">
         <h3 id="jira-status-history-heading" className="text-sm font-medium text-text">

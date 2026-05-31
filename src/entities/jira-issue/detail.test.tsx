@@ -5,8 +5,10 @@ import { axe } from "jest-axe";
 import { JiraIssueDetail } from "./detail";
 import type { JiraIssueListItem, JiraIssueStatusTransition } from "../../bindings";
 import * as historyModule from "./history";
+import * as previewContentModule from "./previewContent";
 
 vi.mock("./history");
+vi.mock("./previewContent");
 
 const baseItem = (): JiraIssueListItem => ({
   work_item_id: "wi_amp_1043",
@@ -50,6 +52,11 @@ describe("JiraIssueDetail", () => {
       status: "ok",
       transitions: [],
       partial: false,
+    });
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockResolvedValue({
+      status: "ok",
+      body: null,
+      comments: [],
     });
   });
 
@@ -149,11 +156,107 @@ describe("JiraIssueDetail", () => {
     expect(secondary).not.toHaveClass("sm:grid-cols-2");
   });
 
+  it("renders fields, description, comments, and status history in canonical order", async () => {
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockResolvedValue({
+      status: "ok",
+      body: "Issue description",
+      comments: [
+        {
+          id: "comment_1",
+          authorDisplayName: "Priya",
+          body: "Latest comment",
+          createdAtSource: "2026-05-30T10:00:00Z",
+          updatedAtSource: "2026-05-31T10:00:00Z",
+          ingestedAt: "2026-05-31T10:01:00Z",
+        },
+      ],
+    });
+
+    render(<JiraIssueDetail item={{ ...full, priority_name: "P1", project_key: "AMP" }} />);
+
+    const fields = screen.getByRole("region", { name: "Issue fields" });
+    const description = await screen.findByRole("heading", { name: "Description" });
+    const comments = screen.getByRole("heading", { name: "Comments (1)" });
+    const statusHistory = screen.getByRole("heading", { name: "Status history" });
+
+    expect(fields.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(description.compareDocumentPosition(comments) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(comments.compareDocumentPosition(statusHistory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Issue description")).toBeInTheDocument();
+    expect(screen.getByText("Latest comment")).toBeInTheDocument();
+  });
+
+  it("shows scoped preview-content loading without blocking status history", async () => {
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockReturnValue(new Promise(() => {}));
+    vi.mocked(historyModule.loadJiraIssueStatusHistory).mockResolvedValue({
+      status: "ok",
+      transitions: [transition()],
+      partial: false,
+    });
+
+    render(<JiraIssueDetail item={baseItem()} />);
+
+    expect(screen.getByRole("status", { name: "Loading preview content…" })).toBeInTheDocument();
+    await screen.findByRole("list", { name: "Status history" });
+    expect(screen.getByText("In Progress")).toBeInTheDocument();
+  });
+
+  it("shows No description after successful empty body load", async () => {
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockResolvedValue({
+      status: "ok",
+      body: "  ",
+      comments: [],
+    });
+
+    render(<JiraIssueDetail item={baseItem()} />);
+
+    expect(await screen.findByText("No description")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Comments/ })).not.toBeInTheDocument();
+  });
+
+  it("shows a scoped preview-content error and preserves status history", async () => {
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockResolvedValue({
+      status: "error",
+      body: null,
+      comments: [],
+    });
+    vi.mocked(historyModule.loadJiraIssueStatusHistory).mockResolvedValue({
+      status: "ok",
+      transitions: [transition()],
+      partial: false,
+    });
+
+    render(<JiraIssueDetail item={baseItem()} />);
+
+    expect(await screen.findByText("Could not load comments. Try syncing Jira again.")).toBeInTheDocument();
+    await screen.findByRole("list", { name: "Status history" });
+  });
+
+  it("ignores stale preview-content results after selected item changes", async () => {
+    let resolveFirst: (value: Awaited<ReturnType<typeof previewContentModule.loadJiraIssuePreviewContent>>) => void = () => {};
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ status: "ok", body: "Second issue body", comments: [] });
+
+    const { rerender } = render(<JiraIssueDetail item={baseItem()} />);
+    rerender(<JiraIssueDetail item={{ ...baseItem(), work_item_id: "wi_amp_1044", key: "AMP-1044" }} />);
+
+    resolveFirst({ status: "ok", body: "First issue body", comments: [] });
+
+    expect(await screen.findByText("Second issue body")).toBeInTheDocument();
+    expect(screen.queryByText("First issue body")).not.toBeInTheDocument();
+  });
+
 });
 
 describe("JiraIssueDetail — status history", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockResolvedValue({
+      status: "ok",
+      body: null,
+      comments: [],
+    });
   });
 
   it("shows loading spinner while history is pending", () => {
