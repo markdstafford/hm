@@ -357,7 +357,7 @@ describe("CollectionViewerPage", () => {
     });
   });
 
-  it("renders side detail rail (w-[440px]) after clicking a row", async () => {
+  it("renders side detail rail (default 440px) after clicking a row", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
@@ -367,7 +367,7 @@ describe("CollectionViewerPage", () => {
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
   });
 
-  it("switching to bottom preview shows h-[280px] detail pane with list rows still visible", async () => {
+  it("switching to bottom preview shows detail pane (default 280px) with list rows still visible", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     await screen.findByText("AMP-1");

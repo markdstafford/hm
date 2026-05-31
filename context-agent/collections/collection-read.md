@@ -145,11 +145,13 @@ Short option lists with descriptions or per-option iconography render as nested 
 ```
 ┌─────────────────────────────────────────────┐
 │  ⊟  Side peek (right)                       │
-│      Detail opens in a 440px right rail.    │
+│      Detail opens in a resizable right      │
+│      rail, defaulting to 440px wide.        │
 │      Default for Table.                     │
 │                                             │
 │  ⊟  Bottom peek                             │
-│      Detail opens in a 280px bottom rail.   │
+│      Detail opens in a resizable bottom     │
+│      pane, defaulting to 280px tall.        │
 │                                             │
 │  ⊟  Full page                          ✓    │
 │      Detail takes the whole content area.   │
@@ -324,32 +326,13 @@ Clicking anywhere on the row body (outside the checkbox) selects the row and ope
 
 The view's selected `Open pages in` option determines where the detail renders. Three options:
 
-### Side peek (right)
+### Side peek
 
-```
-┌──────────────────────────────────────────────────┬───────────────────┐
-│  body                                            │   detail          │
-│  rows…                                           │   header + close  │
-│                                                  │   …               │
-│                                                  │                   │
-└──────────────────────────────────────────────────┴───────────────────┘
-```
-
-A 440px right rail inside the content area. The list narrows to fill the remainder. The detail header carries an `X` close button. The list remains scrollable and selectable.
+A resizable right rail inside the content area. It defaults to 440px wide, clamps to a compact-safe minimum and a maximum that leaves a useful list area, and persists `layout.sidePeekWidth` on the active named view. A visible splitter sits between the list and detail rail. The splitter uses `role="separator"`, `aria-orientation="vertical"`, exposes value min/max/current attributes, supports pointer drag, and supports ArrowLeft/ArrowRight keyboard resize. The list narrows to fill the remainder. The detail header carries an `X` close button. The list remains scrollable and selectable.
 
 ### Bottom peek
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  body                                                                │
-│  rows…                                                               │
-├──────────────────────────────────────────────────────────────────────┤
-│  detail header + close                                               │
-│  …                                                                   │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-A 280px bottom pane inside the content area. The list takes the remaining height above. Otherwise identical to Side peek.
+A resizable bottom pane inside the content area. It defaults to 280px tall, clamps to a compact-safe minimum and a maximum that leaves a useful list area above it, and persists `layout.bottomPeekHeight` on the active named view. A visible splitter sits between the list and detail pane. The splitter uses `role="separator"`, `aria-orientation="horizontal"`, exposes value min/max/current attributes, supports pointer drag, and supports ArrowUp/ArrowDown keyboard resize. The list takes the remaining height above. Otherwise identical to Side peek.
 
 ### Full page
 
@@ -381,6 +364,8 @@ The detail component is entity-supplied. The same component renders identically 
 - A header strip with the entity's identity (key, title, status, etc.) plus the close affordance the surface provides.
 - A body with whatever the entity exposes: a structured panel, a markdown render of a body field, side-by-side comparison, etc. The entity decides.
 - Optional mutation affordances when `collection-write.md` is in play (Approve, Edit, Reassign). These are entity-defined.
+
+Detail components receive optional preview metadata from the generic host: `{ surface, width, height, sizeClass }`. The host also sets `data-preview-surface`, `data-preview-size`, `--preview-width`, and `--preview-height` on the detail content frame. Entity previews should adapt to measured width/height or `sizeClass`; they should not assume side peek, bottom peek, and full page map one-to-one to compact or roomy layouts.
 
 ## Persistence
 
