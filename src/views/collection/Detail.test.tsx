@@ -1,5 +1,6 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { axe } from "jest-axe";
 import { Detail } from "./Detail";
 import type { EntityContract } from "./types";
 import {
@@ -264,5 +265,15 @@ describe("Detail", () => {
       ],
     });
     expect(screen.getByRole("navigation", { name: "Preview focus path" })).toBeInTheDocument();
+  });
+
+  it("has no axe violations with a focus breadcrumb", async () => {
+    const { container } = renderDetail({
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+    });
+    expect(await axe(container)).toHaveNoViolations();
   });
 });

@@ -216,4 +216,20 @@ describe("useEntityCollectionViewer", () => {
     expect(screen.getByRole("button", { name: "Open test A-1" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
   });
+
+  it("keyboard movement uses the active re-rooted display list", async () => {
+    render(<DrillHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+      { id: "item-c", key: "C-1", title: "Gamma", score: 9 },
+    ]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Related to A-1" }));
+    fireEvent.keyDown(document, { key: "j" });
+    expect(screen.queryByRole("button", { name: "Open test A-1" })).not.toBeInTheDocument();
+    const pressedRows = screen
+      .getAllByRole("button", { name: /Open test [BC]-1/ })
+      .filter((el) => el.getAttribute("aria-pressed") === "true");
+    expect(pressedRows).toHaveLength(1);
+  });
 });

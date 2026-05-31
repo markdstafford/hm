@@ -143,4 +143,14 @@ describe("FullPagePreview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Return to AMP-1087" }));
     expect(onPickFocusCrumb).toHaveBeenCalledWith(0);
   });
+
+  it("has no axe violations with a focus breadcrumb", async () => {
+    const { container } = renderFull({
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+    });
+    expect(await axe(container)).toHaveNoViolations();
+  });
 });

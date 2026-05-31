@@ -88,4 +88,14 @@ describe("PreviewConnections", () => {
     const { container } = render(<PreviewConnections edges={edges} onOpenSingle={vi.fn()} onOpenSet={vi.fn()} />);
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it("activates drillable rows with Enter and Space", () => {
+    const onOpenSingle = vi.fn();
+    const onOpenSet = vi.fn();
+    render(<PreviewConnections edges={edges} onOpenSingle={onOpenSingle} onOpenSet={onOpenSet} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Open duplicates AMP-1102" }), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Open all related issues, 2 items" }), { key: " " });
+    expect(onOpenSingle).toHaveBeenCalledWith(edges[0]);
+    expect(onOpenSet).toHaveBeenCalledWith(edges[2]);
+  });
 });
