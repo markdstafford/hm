@@ -33,6 +33,19 @@ import { buildConfigPatchView, buildRenameView } from "./viewConfigPersistence";
 import { ViewSettingsMenu } from "../../views/collection/menu/ViewSettingsMenu";
 import { useKeyboardNavigation } from "../../views/collection/useKeyboardNavigation";
 import { useSelection } from "../../views/collection/selection/useSelection";
+import {
+  appendFocusTarget,
+  currentFocusItem,
+  initializeFocusTrail,
+  resetFocusTrail,
+  truncateFocusTrail,
+} from "../../views/collection/navigation/focusTrail";
+import type {
+  CollectionEdge,
+  FocusTrailEntry,
+  SingleTargetEdge,
+  SetTargetEdge,
+} from "../../views/collection/navigation/types";
 
 const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -90,6 +103,19 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   const [viewError, setViewError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [focusTrail, setFocusTrail] = useState<FocusTrailEntry<TItem>[]>([]);
+
+  const getFocusLabel = useCallback(
+    (item: TItem) => {
+      const keyProperty = entity.properties.find((p) => p.id === ("key" as TProperty));
+      if (keyProperty) {
+        const rendered = keyProperty.renderCell({ item, property: keyProperty.id });
+        if (typeof rendered === "string" && rendered.trim()) return rendered;
+      }
+      return entity.getId(item);
+    },
+    [entity],
+  );
 
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
 
@@ -153,25 +179,42 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   const canMoveNext =
     selectedIndex >= 0 && selectedIndex < displayItems.length - 1;
 
+  const previewFocusItem = currentFocusItem(focusTrail) ?? selectedItem;
+
+  const previewEdges: CollectionEdge<TItem>[] = useMemo(
+    () => previewFocusItem && entity.resolveEdges
+      ? entity.resolveEdges({ item: previewFocusItem, allItems: items })
+      : [],
+    [entity, previewFocusItem, items],
+  );
+
   const movePrevious = useCallback(() => {
     if (selectedIndex <= 0) return;
-    setSelectedId(entity.getId(displayItems[selectedIndex - 1]));
-  }, [displayItems, selectedIndex, entity]);
+    const nextItem = displayItems[selectedIndex - 1];
+    setSelectedId(entity.getId(nextItem));
+    setFocusTrail((current) => resetFocusTrail(current, nextItem, getFocusLabel, entity.getId));
+  }, [displayItems, selectedIndex, entity, getFocusLabel]);
 
   const moveNext = useCallback(() => {
     if (selectedIndex < 0 || selectedIndex >= displayItems.length - 1) return;
-    setSelectedId(entity.getId(displayItems[selectedIndex + 1]));
-  }, [displayItems, selectedIndex, entity]);
+    const nextItem = displayItems[selectedIndex + 1];
+    setSelectedId(entity.getId(nextItem));
+    setFocusTrail((current) => resetFocusTrail(current, nextItem, getFocusLabel, entity.getId));
+  }, [displayItems, selectedIndex, entity, getFocusLabel]);
 
   const selectFirst = useCallback(() => {
     if (displayItems.length === 0) return;
-    setSelectedId(entity.getId(displayItems[0]));
-  }, [displayItems, entity]);
+    const nextItem = displayItems[0];
+    setSelectedId(entity.getId(nextItem));
+    setFocusTrail((current) => resetFocusTrail(current, nextItem, getFocusLabel, entity.getId));
+  }, [displayItems, entity, getFocusLabel]);
 
   const selectLast = useCallback(() => {
     if (displayItems.length === 0) return;
-    setSelectedId(entity.getId(displayItems[displayItems.length - 1]));
-  }, [displayItems, entity]);
+    const nextItem = displayItems[displayItems.length - 1];
+    setSelectedId(entity.getId(nextItem));
+    setFocusTrail((current) => resetFocusTrail(current, nextItem, getFocusLabel, entity.getId));
+  }, [displayItems, entity, getFocusLabel]);
 
   const toggleGroupCollapsed = useCallback((bucketKey: string) => {
     setCollapsedGroupKeys((current) => {
@@ -379,12 +422,35 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
 
   function handleSelect(item: TItem) {
     setSelectedId(entity.getId(item));
+    setFocusTrail((current) => resetFocusTrail(current, item, getFocusLabel, entity.getId));
     setPreviewOpen(true);
   }
 
   function handleClosePreview() {
     setPreviewOpen(false);
     // selectedId stays — row remains highlighted after preview closes.
+  }
+
+  function handleOpenSingleEdge(edge: SingleTargetEdge<TItem>) {
+    const target = edge.target;
+    if (!target || edge.danglingReason) return;
+    setFocusTrail((current) => {
+      const baseTrail = current.length > 0
+        ? current
+        : selectedItem
+          ? initializeFocusTrail(selectedItem, getFocusLabel, entity.getId)
+          : [];
+      return appendFocusTarget(baseTrail, target, () => edge.targetRef.displayKey, entity.getId);
+    });
+    setPreviewOpen(true);
+  }
+
+  function handlePickFocusCrumb(index: number) {
+    setFocusTrail((current) => truncateFocusTrail(current, index));
+  }
+
+  function handleOpenSetEdge(_edge: SetTargetEdge<TItem>) {
+    // Implemented in Task 9 (set re-root).
   }
 
   // ---- Header ---------------------------------------------------------
@@ -451,12 +517,12 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   } else {
     const preview = activeConfig.layout.preview;
     const showFullPage =
-      preview === "full-page" && !!selectedItem && previewOpen;
+      preview === "full-page" && !!previewFocusItem && previewOpen;
 
     if (showFullPage) {
       bodyContent = (
         <FullPagePreview
-          item={selectedItem}
+          item={previewFocusItem}
           entity={entity}
           index={selectedIndex}
           total={displayItems.length}
@@ -465,6 +531,11 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
           onBack={() => setPreviewOpen(false)}
           onMovePrevious={movePrevious}
           onMoveNext={moveNext}
+          focusTrail={focusTrail}
+          onPickFocusCrumb={handlePickFocusCrumb}
+          edges={previewEdges}
+          onOpenSingleEdge={handleOpenSingleEdge}
+          onOpenSetEdge={handleOpenSetEdge}
         />
       );
     } else {
@@ -505,9 +576,9 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
               onSelect={handleSelect}
             />
           </div>
-          {selectedItem && previewOpen && preview !== "full-page" && (
+          {previewFocusItem && previewOpen && preview !== "full-page" && (
             <Detail
-              item={selectedItem}
+              item={previewFocusItem}
               entity={entity}
               surface={peekSurface}
               sidePeekWidth={activeConfig.layout.sidePeekWidth}
@@ -520,6 +591,11 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
               onMovePrevious={movePrevious}
               onMoveNext={moveNext}
               onResizeCommit={handleResizePreview}
+              focusTrail={focusTrail}
+              onPickFocusCrumb={handlePickFocusCrumb}
+              edges={previewEdges}
+              onOpenSingleEdge={handleOpenSingleEdge}
+              onOpenSetEdge={handleOpenSetEdge}
             />
           )}
         </div>

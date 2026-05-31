@@ -36,6 +36,52 @@ vi.mock("../../preferences/storage", () => ({ loadPreferences: vi.fn(), savePref
 import { commands } from "../../bindings";
 import { loadPreferences, savePreferences } from "../../preferences/storage";
 
+const drillEntity: EntityContract<Item, Prop> = {
+  ...entity,
+  resolveEdges: ({ item, allItems }) => {
+    if (item.id !== "item-a") return [];
+    const target = allItems.find((candidate) => candidate.id === "item-b");
+    return [
+      {
+        id: "duplicates:item-b",
+        kind: "source",
+        shape: "single",
+        relationship: "duplicates",
+        targetRef: { entityId: "test-entity", displayKey: "B-1", title: "Beta" },
+        target,
+        danglingReason: target ? undefined : "not-ingested",
+      } as import("../../views/collection/navigation/types").SingleTargetEdge<Item>,
+    ];
+  },
+  Detail: ({ item, edges, onOpenSingleEdge }) => (
+    <div>
+      <h2>{item.title}</h2>
+      {edges?.map((edge) => edge.shape === "single" && (
+        <button key={edge.id} type="button" onClick={() => onOpenSingleEdge?.(edge)}>
+          Open {edge.targetRef.displayKey}
+        </button>
+      ))}
+    </div>
+  ),
+};
+
+function DrillHarness({ items }: { items: Item[] }) {
+  const viewer = useEntityCollectionViewer({
+    active: true,
+    entity: drillEntity,
+    items,
+    loading: false,
+    error: null,
+    copy: {
+      loadingLabel: "Loading test items",
+      emptyTitle: "No test items",
+      emptyDescription: "No test items loaded.",
+      errorTitle: "Could not load test items",
+    },
+  });
+  return <div>{viewer.header}{viewer.body}</div>;
+}
+
 function Harness({ items = [{ id: "item-a", key: "A-1", title: "Alpha", score: 2 }] }: { items?: Item[] }) {
   const viewer = useEntityCollectionViewer({
     active: true,
@@ -86,5 +132,42 @@ describe("useEntityCollectionViewer", () => {
         collections: { activeViewId: { "test-entity": "test-all" } },
       }),
     );
+  });
+
+  it("focus-drills into a single-target edge without changing list selection", async () => {
+    render(<DrillHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+    ]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open B-1" }));
+    expect(screen.getByRole("heading", { name: "Beta" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open test A-1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("navigation", { name: "Preview focus path" })).toHaveTextContent("A-1");
+    expect(screen.getByRole("navigation", { name: "Preview focus path" })).toHaveTextContent("B-1");
+  });
+
+  it("truncates the focus trail when an earlier crumb is clicked", async () => {
+    render(<DrillHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+    ]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open B-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Return to A-1" }));
+    expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Preview focus path" })).not.toBeInTheDocument();
+  });
+
+  it("resets the focus trail when a different row is selected", async () => {
+    render(<DrillHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+    ]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open B-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open test B-1" }));
+    expect(screen.getByRole("heading", { name: "Beta" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Preview focus path" })).not.toBeInTheDocument();
   });
 });
