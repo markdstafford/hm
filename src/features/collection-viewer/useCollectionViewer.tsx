@@ -1,5 +1,6 @@
 import { jiraIssueEntity } from "../../entities/jira-issue";
 import { useEntityCollectionViewer, type UseEntityCollectionViewerResult } from "./useEntityCollectionViewer";
+import type { JiraIssueListItem } from "../../bindings";
 import { useJiraIssues } from "./data";
 
 export type UseCollectionViewerArgs = {
@@ -7,9 +8,9 @@ export type UseCollectionViewerArgs = {
   active: boolean;
 };
 
-export type { UseEntityCollectionViewerResult as UseCollectionViewerResult };
+export type UseCollectionViewerResult = UseEntityCollectionViewerResult<JiraIssueListItem>;
 
-export function useCollectionViewer({ active }: UseCollectionViewerArgs): UseEntityCollectionViewerResult {
+export function useCollectionViewer({ active }: UseCollectionViewerArgs): UseCollectionViewerResult {
   const { issues, loading, error } = useJiraIssues();
   return useEntityCollectionViewer({
     active,

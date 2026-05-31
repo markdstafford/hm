@@ -83,11 +83,32 @@ export type UseEntityCollectionViewerArgs<TItem, TProperty extends string> = {
   retry?: () => void;
 };
 
-export type UseEntityCollectionViewerResult = {
+export type UseEntityCollectionViewerResult<TItem = unknown> = {
   /** Goes into the AppShell's `mainHeader` slot. */
   header: ReactNode;
   /** Goes into the AppShell's `mainContent` slot. */
   body: ReactNode;
+  /**
+   * Select an item by its entity id. If the item is hidden by the active
+   * view's filters, optionally pushes a scoped root containing just that
+   * item so the selection is visible.
+   * Returns `true` if the id resolved to a known item, `false` otherwise.
+   */
+  openItemById: (
+    id: string,
+    options?: { openPreview?: boolean; scopedFallback?: boolean },
+  ) => boolean;
+  /**
+   * Open a single-target edge through the same path used by the in-preview
+   * focus-drill button. Returns `false` if the edge has no target or is
+   * dangling, `true` otherwise.
+   */
+  openSingleEdge: (edge: SingleTargetEdge<TItem>) => boolean;
+  /**
+   * Re-root the list into a set edge. Returns `false` for dangling or empty
+   * set edges, `true` otherwise.
+   */
+  openSetEdge: (edge: SetTargetEdge<TItem>) => boolean;
 };
 
 export function useEntityCollectionViewer<TItem, TProperty extends string>({
@@ -99,7 +120,7 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   copy,
   partialFailures,
   retry,
-}: UseEntityCollectionViewerArgs<TItem, TProperty>): UseEntityCollectionViewerResult {
+}: UseEntityCollectionViewerArgs<TItem, TProperty>): UseEntityCollectionViewerResult<TItem> {
   const rowSelection = useSelection();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<Set<string>>(new Set());
@@ -477,9 +498,9 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
     // selectedId stays — row remains highlighted after preview closes.
   }
 
-  function handleOpenSingleEdge(edge: SingleTargetEdge<TItem>) {
+  function handleOpenSingleEdge(edge: SingleTargetEdge<TItem>): boolean {
     const target = edge.target;
-    if (!target || edge.danglingReason) return;
+    if (!target || edge.danglingReason) return false;
     setFocusTrail((current) => {
       const baseTrail = current.length > 0
         ? current
@@ -489,14 +510,15 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
       return appendFocusTarget(baseTrail, target, () => edge.targetRef.displayKey, entity.getId);
     });
     setPreviewOpen(true);
+    return true;
   }
 
   function handlePickFocusCrumb(index: number) {
     setFocusTrail((current) => truncateFocusTrail(current, index));
   }
 
-  function handleOpenSetEdge(edge: SetTargetEdge<TItem>) {
-    if (edge.danglingReason || !edge.items) return;
+  function handleOpenSetEdge(edge: SetTargetEdge<TItem>): boolean {
+    if (edge.danglingReason || !edge.items || edge.items.length === 0) return false;
     // Merge live selectedId/previewOpen into the snapshot so that row navigation
     // performed *after* entering a scoped root is captured before we push scope2.
     const currentRoot =
@@ -523,6 +545,7 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
       setFocusTrail([]);
     }
     setPreviewOpen(edge.items.length > 0);
+    return true;
   }
 
   function handleReturnFromRoot() {
@@ -549,6 +572,58 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
       : null;
     setFocusTrail(restored ? initializeFocusTrail(restored, getFocusLabel, entity.getId) : []);
   }
+
+  const openItemById = useCallback(
+    (
+      id: string,
+      options: { openPreview?: boolean; scopedFallback?: boolean } = {},
+    ): boolean => {
+      const target = items.find((item) => entity.getId(item) === id);
+      if (!target) return false;
+      const targetId = entity.getId(target);
+      const visibleInCurrentPipeline = displayItems.some(
+        (item) => entity.getId(item) === targetId,
+      );
+      const wantPreview = options.openPreview !== false;
+
+      if (!visibleInCurrentPipeline && options.scopedFallback !== false) {
+        const label = `Opened ${getFocusLabel(target)}`;
+        const currentRoot =
+          rootStack.length > 0
+            ? { ...rootStack[rootStack.length - 1], selectedId, previewOpen }
+            : createBaseRoot(rootItems, selectedId, previewOpen);
+        const result = pushScopedRoot({
+          activeRoot: currentRoot,
+          stack: rootStack.slice(0, -1),
+          nextRoot: {
+            id: `quick-switcher:${targetId}`,
+            label,
+            items: [target],
+            selectedId: targetId,
+            previewOpen: wantPreview,
+          },
+        });
+        setRootStack([...result.stack, result.activeRoot]);
+      }
+
+      setSelectedId(targetId);
+      setFocusTrail((current) =>
+        resetFocusTrail(current, target, getFocusLabel, entity.getId),
+      );
+      setPreviewOpen(wantPreview);
+      return true;
+    },
+    [
+      displayItems,
+      entity,
+      getFocusLabel,
+      items,
+      previewOpen,
+      rootItems,
+      rootStack,
+      selectedId,
+    ],
+  );
 
   // ---- Header ---------------------------------------------------------
 
@@ -721,5 +796,11 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
     </div>
   );
 
-  return { header, body };
+  return {
+    header,
+    body,
+    openItemById,
+    openSingleEdge: handleOpenSingleEdge,
+    openSetEdge: handleOpenSetEdge,
+  };
 }
