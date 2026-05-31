@@ -344,6 +344,24 @@ pub struct JiraIssueListItem {
     pub labels: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct JiraIssuePreviewContent {
+    pub work_item_id: String,
+    pub body: Option<String>,
+    pub comments: Vec<JiraIssuePreviewComment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct JiraIssuePreviewComment {
+    pub id: String,
+    pub upstream_id: String,
+    pub author_display_name: Option<String>,
+    pub body: Option<String>,
+    pub created_at_source: Option<String>,
+    pub updated_at_source: Option<String>,
+    pub ingested_at: String,
+}
+
 /// Derive the synthetic `source_systems.id` we use for a given config
 /// `source_id`. Centralised so the run/cancel/status/list commands agree on
 /// the lookup key.
@@ -1331,6 +1349,8 @@ const _: () = {
         _assert_specta::<JiraIssueIngestionProgress>();
         _assert_specta::<JiraIssueListFilter>();
         _assert_specta::<JiraIssueListItem>();
+        _assert_specta::<JiraIssuePreviewContent>();
+        _assert_specta::<JiraIssuePreviewComment>();
         _assert_specta::<CollectionViewRecord>();
         _assert_specta::<CollectionViewSaveInput>();
         _assert_specta::<CollectionViewSeedInput>();
@@ -1614,6 +1634,50 @@ mod tests {
         assert_eq!(by_project[0].key, "AMP-1");
         assert_eq!(by_project[0].project_key.as_deref(), Some("AMP"));
         assert_eq!(by_project[0].status_name.as_deref(), Some("In Progress"));
+    }
+
+    #[test]
+    fn jira_issue_preview_content_excludes_raw_json_fields() {
+        let item = JiraIssuePreviewContent {
+            work_item_id: "wi_amp_1043".into(),
+            body: Some("Steps to reproduce".into()),
+            comments: vec![JiraIssuePreviewComment {
+                id: "comment_1".into(),
+                upstream_id: "10001".into(),
+                author_display_name: Some("Priya".into()),
+                body: Some("Latest update".into()),
+                created_at_source: Some("2026-05-30T09:00:00Z".into()),
+                updated_at_source: Some("2026-05-31T10:00:00Z".into()),
+                ingested_at: "2026-05-31T10:01:00Z".into(),
+            }],
+        };
+
+        let v = serde_json::to_value(&item).expect("serialize");
+        let keys: std::collections::BTreeSet<&str> =
+            v.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let expected: std::collections::BTreeSet<&str> =
+            ["work_item_id", "body", "comments"].into_iter().collect();
+        assert_eq!(keys, expected);
+
+        let comment = &v["comments"].as_array().unwrap()[0];
+        let comment_keys: std::collections::BTreeSet<&str> = comment
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        let expected_comment_keys: std::collections::BTreeSet<&str> = [
+            "id",
+            "upstream_id",
+            "author_display_name",
+            "body",
+            "created_at_source",
+            "updated_at_source",
+            "ingested_at",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(comment_keys, expected_comment_keys);
     }
 
     #[test]
