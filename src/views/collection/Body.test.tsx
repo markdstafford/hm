@@ -125,6 +125,21 @@ describe("Body", () => {
     expect(screen.getByText("Try changing or clearing filters for this view.")).toBeInTheDocument();
   });
 
+  it("uses scoped filtered-empty copy for re-rooted collections", () => {
+    render(
+      <Body
+        items={[]}
+        unfilteredCount={2}
+        scopedEmptyLabel="related items"
+        entity={entity}
+        selectedId={null}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("No matching related items")).toBeInTheDocument();
+    expect(screen.getByText("Try changing or clearing filters for this view.")).toBeInTheDocument();
+  });
+
   it("passes compact density to row elements (py-1 present, py-2 absent)", () => {
     const items: Item[] = [{ id: "x", name: "Xray", rank: 5 }];
     const { container } = render(

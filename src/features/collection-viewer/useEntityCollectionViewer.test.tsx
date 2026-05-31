@@ -41,6 +41,7 @@ const drillEntity: EntityContract<Item, Prop> = {
   resolveEdges: ({ item, allItems }) => {
     if (item.id !== "item-a") return [];
     const target = allItems.find((candidate) => candidate.id === "item-b");
+    const setItems = allItems.filter((candidate) => candidate.id === "item-b" || candidate.id === "item-c");
     return [
       {
         id: "duplicates:item-b",
@@ -49,18 +50,36 @@ const drillEntity: EntityContract<Item, Prop> = {
         relationship: "duplicates",
         targetRef: { entityId: "test-entity", displayKey: "B-1", title: "Beta" },
         target,
-        danglingReason: target ? undefined : "not-ingested",
-      } as import("../../views/collection/navigation/types").SingleTargetEdge<Item>,
-    ];
+        danglingReason: target ? undefined : ("not-ingested" as const),
+      },
+      {
+        id: "related:set",
+        kind: "local",
+        shape: "set",
+        relationship: "all related",
+        label: "Related to A-1",
+        count: setItems.length,
+        items: setItems,
+      },
+    ] as import("../../views/collection/navigation/types").CollectionEdge<Item>[];
   },
-  Detail: ({ item, edges, onOpenSingleEdge }) => (
+  Detail: ({ item, edges, onOpenSingleEdge, onOpenSetEdge }) => (
     <div>
       <h2>{item.title}</h2>
-      {edges?.map((edge) => edge.shape === "single" && (
-        <button key={edge.id} type="button" onClick={() => onOpenSingleEdge?.(edge)}>
-          Open {edge.targetRef.displayKey}
-        </button>
-      ))}
+      {edges?.map((edge) => {
+        if (edge.shape === "single") {
+          return (
+            <button key={edge.id} type="button" onClick={() => onOpenSingleEdge?.(edge)}>
+              Open {edge.targetRef.displayKey}
+            </button>
+          );
+        }
+        return (
+          <button key={edge.id} type="button" onClick={() => onOpenSetEdge?.(edge)}>
+            Open {edge.label}
+          </button>
+        );
+      })}
     </div>
   ),
 };
@@ -169,5 +188,32 @@ describe("useEntityCollectionViewer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open test B-1" }));
     expect(screen.getByRole("heading", { name: "Beta" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Preview focus path" })).not.toBeInTheDocument();
+  });
+
+  it("re-roots the list to a set edge before applying active sort", async () => {
+    render(<DrillHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+      { id: "item-c", key: "C-1", title: "Gamma", score: 9 },
+    ]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Related to A-1" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Related to A-1");
+    expect(screen.queryByRole("button", { name: "Open test A-1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open test B-1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open test C-1" })).toBeInTheDocument();
+  });
+
+  it("returns from a re-rooted set and restores prior selection", async () => {
+    render(<DrillHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+      { id: "item-c", key: "C-1", title: "Gamma", score: 9 },
+    ]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Related to A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to All" }));
+    expect(screen.getByRole("button", { name: "Open test A-1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "Alpha" })).toBeInTheDocument();
   });
 });

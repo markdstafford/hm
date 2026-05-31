@@ -41,11 +41,18 @@ import {
   truncateFocusTrail,
 } from "../../views/collection/navigation/focusTrail";
 import type {
+  ActiveCollectionRoot,
   CollectionEdge,
   FocusTrailEntry,
   SingleTargetEdge,
   SetTargetEdge,
 } from "../../views/collection/navigation/types";
+import { ReRootBanner } from "../../views/collection/ReRootBanner";
+import {
+  createBaseRoot,
+  pushScopedRoot,
+  returnToPreviousRoot,
+} from "../../views/collection/navigation/rerootStack";
 
 const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -104,6 +111,7 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [focusTrail, setFocusTrail] = useState<FocusTrailEntry<TItem>[]>([]);
+  const [rootStack, setRootStack] = useState<ActiveCollectionRoot<TItem>[]>([]);
 
   const getFocusLabel = useCallback(
     (item: TItem) => {
@@ -124,9 +132,37 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
     [activeView?.config, entity],
   );
 
+  const activeRoot = useMemo(
+    () =>
+      rootStack.length > 0
+        ? rootStack[rootStack.length - 1]
+        : createBaseRoot(items, selectedId, previewOpen),
+    [rootStack, items, selectedId, previewOpen],
+  );
+
+  const rootItems = activeRoot.base ? items : activeRoot.items;
+
+  useEffect(() => {
+    if (rootStack.length === 0) return;
+    const baseIds = new Set(items.map((item) => entity.getId(item)));
+    setRootStack((current) =>
+      current.map((root) => {
+        if (!root.base) return root;
+        const selectedStillExists = root.selectedId ? baseIds.has(root.selectedId) : false;
+        return {
+          ...root,
+          items,
+          selectedId: selectedStillExists ? root.selectedId : null,
+          previewOpen: selectedStillExists ? root.previewOpen : false,
+        };
+      }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, entity, rootStack.length]);
+
   const filteredItems = useMemo(
-    () => filterCollectionItems({ items, entity, filters: activeConfig.filters }),
-    [items, entity, activeConfig.filters],
+    () => filterCollectionItems({ items: rootItems, entity, filters: activeConfig.filters }),
+    [rootItems, entity, activeConfig.filters],
   );
 
   const sortedItems = useMemo(
@@ -449,8 +485,50 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
     setFocusTrail((current) => truncateFocusTrail(current, index));
   }
 
-  function handleOpenSetEdge(_edge: SetTargetEdge<TItem>) {
-    // Implemented in Task 9 (set re-root).
+  function handleOpenSetEdge(edge: SetTargetEdge<TItem>) {
+    if (edge.danglingReason || !edge.items) return;
+    const currentRoot =
+      rootStack.length > 0
+        ? rootStack[rootStack.length - 1]
+        : createBaseRoot(rootItems, selectedId, previewOpen);
+    const nextSelected = edge.items[0] ? entity.getId(edge.items[0]) : null;
+    const result = pushScopedRoot({
+      activeRoot: currentRoot,
+      stack: rootStack.slice(0, -1),
+      nextRoot: {
+        id: edge.id,
+        label: edge.label,
+        items: edge.items,
+        selectedId: nextSelected,
+        previewOpen: edge.items.length > 0,
+      },
+    });
+    setRootStack([...result.stack, result.activeRoot]);
+    setSelectedId(nextSelected);
+    if (edge.items[0]) {
+      setFocusTrail(initializeFocusTrail(edge.items[0], getFocusLabel, entity.getId));
+    } else {
+      setFocusTrail([]);
+    }
+    setPreviewOpen(edge.items.length > 0);
+  }
+
+  function handleReturnFromRoot() {
+    if (rootStack.length === 0) return;
+    const active = rootStack[rootStack.length - 1];
+    const result = returnToPreviousRoot({
+      activeRoot: active,
+      stack: rootStack.slice(0, -1),
+      getId: entity.getId,
+    });
+    const nextStack = [...result.stack, result.activeRoot].filter((root) => !root.base);
+    setRootStack(nextStack);
+    setSelectedId(result.activeRoot.selectedId);
+    setPreviewOpen(result.activeRoot.previewOpen);
+    const restored = result.activeRoot.selectedId
+      ? result.activeRoot.items.find((item) => entity.getId(item) === result.activeRoot.selectedId)
+      : null;
+    setFocusTrail(restored ? initializeFocusTrail(restored, getFocusLabel, entity.getId) : []);
   }
 
   // ---- Header ---------------------------------------------------------
@@ -481,8 +559,8 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
             onRenameView={handleRename}
             onPatchConfig={handlePatchViewConfig}
             onOpenChange={setSettingsOpen}
-            items={items}
-            filterOptionContext={{ items }}
+            items={rootItems}
+            filterOptionContext={{ items: rootItems }}
           />
         }
       />
@@ -548,6 +626,15 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
           }`}
         >
           <div className="flex-1 overflow-y-auto">
+            {!activeRoot.base && (
+              <ReRootBanner
+                label={activeRoot.label}
+                totalCount={activeRoot.items.length}
+                matchingCount={sortedItems.length}
+                backLabel="Back to All"
+                onBack={handleReturnFromRoot}
+              />
+            )}
             {partialFailures && partialFailures.length > 0 && (
               <div role="status" className="border-b border-yellow/40 bg-yellow/10 px-3 py-2 text-sm text-text">
                 {partialFailures.map((failure) => (
@@ -560,7 +647,8 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
             )}
             <Body
               items={sortedItems}
-              unfilteredCount={items.length}
+              unfilteredCount={rootItems.length}
+              scopedEmptyLabel={activeRoot.base ? undefined : "related items"}
               entity={entity}
               properties={activeConfig.propertyVisibility as PropertyConfig<TProperty>[]}
               group={activeConfig.group}
