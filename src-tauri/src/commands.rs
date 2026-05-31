@@ -805,6 +805,67 @@ pub(crate) fn list_jira_issues_from_conn(
     Ok(out)
 }
 
+pub(crate) fn jira_issue_preview_content_from_conn(
+    conn: &Connection,
+    work_item_id: &str,
+) -> Result<JiraIssuePreviewContent, String> {
+    let row: Option<Option<String>> = conn
+        .query_row(
+            "SELECT body FROM work_items WHERE id = ?1 AND source_kind = 'jira_issue'",
+            [work_item_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let body = row.ok_or_else(|| {
+        format!("Jira issue preview content not found for work item {work_item_id}")
+    })?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                c.id,
+                c.upstream_id,
+                COALESCE(p.display_name, si.display_name, si.username, si.email) AS author_display_name,
+                c.body,
+                c.created_at_source,
+                c.updated_at_source,
+                c.ingested_at
+             FROM work_item_comments c
+             LEFT JOIN source_identities si ON si.id = c.author_identity_id
+             LEFT JOIN people p ON p.id = si.person_id
+             WHERE c.work_item_id = ?1
+             ORDER BY
+                COALESCE(c.updated_at_source, c.created_at_source, c.ingested_at) DESC,
+                c.ingested_at DESC,
+                c.id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let comments = stmt
+        .query_map([work_item_id], |row| {
+            Ok(JiraIssuePreviewComment {
+                id: row.get(0)?,
+                upstream_id: row.get(1)?,
+                author_display_name: row.get(2)?,
+                body: row.get(3)?,
+                created_at_source: row.get(4)?,
+                updated_at_source: row.get(5)?,
+                ingested_at: row.get(6)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+
+    Ok(JiraIssuePreviewContent {
+        work_item_id: work_item_id.to_string(),
+        body,
+        comments,
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn collection_views_list(
@@ -1375,8 +1436,8 @@ mod tests {
         finish_run, start_run, update_progress, upsert_cursor,
     };
     use crate::issues::repository::{
-        upsert_source_system, upsert_work_item, upsert_work_item_term, SourceSystemInput,
-        WorkItemInput, WorkItemTermInput,
+        upsert_source_system, upsert_work_item, upsert_work_item_comment, upsert_work_item_term,
+        SourceSystemInput, WorkItemCommentInput, WorkItemInput, WorkItemTermInput,
     };
 
     const NOW: &str = "2026-05-25T17:00:00Z";
@@ -1678,6 +1739,185 @@ mod tests {
         .into_iter()
         .collect();
         assert_eq!(comment_keys, expected_comment_keys);
+    }
+
+    fn seed_preview_work_item(
+        conn: &Connection,
+        ssid: &str,
+        id: &str,
+        source_kind: &str,
+        body: Option<&str>,
+    ) {
+        upsert_work_item(
+            conn,
+            NOW,
+            &WorkItemInput {
+                id,
+                source_system_id: ssid,
+                source_kind,
+                upstream_id: id,
+                key: Some("AMP-1043"),
+                url: None,
+                title: "Preview issue",
+                body,
+                state: "open",
+                status_name: Some("Open"),
+                resolution_name: None,
+                priority_name: Some("P3"),
+                item_type: Some("Task"),
+                project_key: Some("AMP"),
+                project_name: Some("AMP"),
+                assignee_person_id: None,
+                reporter_person_id: None,
+                created_at_source: Some("2026-05-01T09:00:00Z"),
+                updated_at_source: Some("2026-05-31T09:00:00Z"),
+                resolved_at_source: None,
+                due_at_source: None,
+                raw_updated_hash: "hash-preview",
+            },
+        )
+        .expect("seed preview work item");
+    }
+
+    fn seed_source_identity(
+        conn: &Connection,
+        id: &str,
+        source_system_id: &str,
+        display_name: Option<&str>,
+        username: Option<&str>,
+        email: Option<&str>,
+        person_display_name: Option<&str>,
+    ) {
+        // person_id is NOT NULL in source_identities; always create a person row.
+        // Use person_display_name when set, otherwise fall back through display_name,
+        // username, and email so the person row doesn't shadow the source-identity fields
+        // in the COALESCE used by the query helper.
+        let person_label = person_display_name
+            .or(display_name)
+            .or(username)
+            .or(email)
+            .unwrap_or(id);
+        let person_id = format!("person_{id}");
+        conn.execute(
+            "INSERT INTO people (id, display_name, primary_email, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)",
+            rusqlite::params![&person_id, person_label, email, NOW],
+        )
+        .expect("seed person");
+
+        conn.execute(
+            "INSERT INTO source_identities (
+                id, source_system_id, source_kind, upstream_account_id, display_name, username,
+                email, avatar_url, raw_json, created_at, updated_at, person_id
+             ) VALUES (?1, ?2, 'jira', ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?7, ?8)",
+            rusqlite::params![
+                id,
+                source_system_id,
+                format!("upstream_{id}"),
+                display_name,
+                username,
+                email,
+                NOW,
+                &person_id,
+            ],
+        )
+        .expect("seed source identity");
+    }
+
+    fn seed_preview_comment(
+        conn: &Connection,
+        ssid: &str,
+        work_item_id: &str,
+        id: &str,
+        author_identity_id: Option<&str>,
+        body: Option<&str>,
+        created_at_source: Option<&str>,
+        updated_at_source: Option<&str>,
+        ingested_at: &str,
+    ) {
+        upsert_work_item_comment(
+            conn,
+            ingested_at,
+            &WorkItemCommentInput {
+                id,
+                work_item_id,
+                source_system_id: ssid,
+                upstream_id: id,
+                author_identity_id,
+                body,
+                visibility_json: None,
+                created_at_source,
+                updated_at_source,
+                raw_json: None,
+                body_hash: "comment-hash",
+            },
+        )
+        .expect("seed preview comment");
+    }
+
+    #[test]
+    fn jira_issue_preview_content_loads_body_and_empty_comments() {
+        let conn = open_in_memory().expect("db");
+        let ssid = seed_source_system(&conn, "src_jira");
+        seed_preview_work_item(&conn, &ssid, "wi_amp_1043", "jira_issue", Some("Issue body"));
+
+        let content = jira_issue_preview_content_from_conn(&conn, "wi_amp_1043").expect("content");
+
+        assert_eq!(content.work_item_id, "wi_amp_1043");
+        assert_eq!(content.body.as_deref(), Some("Issue body"));
+        assert!(content.comments.is_empty());
+    }
+
+    #[test]
+    fn jira_issue_preview_content_returns_comments_newest_first_with_author_names() {
+        let conn = open_in_memory().expect("db");
+        let ssid = seed_source_system(&conn, "src_jira");
+        seed_preview_work_item(&conn, &ssid, "wi_amp_1043", "jira_issue", Some("Issue body"));
+        seed_source_identity(&conn, "ident_person", &ssid, Some("Source Priya"), Some("priya"), Some("priya@example.com"), Some("Priya Person"));
+        seed_source_identity(&conn, "ident_source", &ssid, Some("Tarek Source"), Some("tarek"), Some("tarek@example.com"), None);
+        seed_source_identity(&conn, "ident_user", &ssid, None, Some("elena"), Some("elena@example.com"), None);
+
+        seed_preview_comment(
+            &conn, &ssid, "wi_amp_1043", "c_old_created",
+            Some("ident_user"), Some("Old by created"),
+            Some("2026-05-28T10:00:00Z"), None, "2026-05-28T10:01:00Z",
+        );
+        seed_preview_comment(
+            &conn, &ssid, "wi_amp_1043", "c_new_updated",
+            Some("ident_person"), Some("Newest by updated"),
+            Some("2026-05-27T10:00:00Z"), Some("2026-05-31T10:00:00Z"), "2026-05-31T10:01:00Z",
+        );
+        seed_preview_comment(
+            &conn, &ssid, "wi_amp_1043", "c_middle_source",
+            Some("ident_source"), Some("Middle by source display"),
+            Some("2026-05-30T10:00:00Z"), None, "2026-05-30T10:01:00Z",
+        );
+        seed_preview_comment(
+            &conn, &ssid, "wi_amp_1043", "c_ingested_fallback",
+            None, Some("Fallback by ingested"),
+            None, None, "2026-05-29T10:01:00Z",
+        );
+
+        let content = jira_issue_preview_content_from_conn(&conn, "wi_amp_1043").expect("content");
+        let ids: Vec<&str> = content.comments.iter().map(|c| c.id.as_str()).collect();
+
+        assert_eq!(ids, vec!["c_new_updated", "c_middle_source", "c_ingested_fallback", "c_old_created"]);
+        assert_eq!(content.comments[0].author_display_name.as_deref(), Some("Priya Person"));
+        assert_eq!(content.comments[1].author_display_name.as_deref(), Some("Tarek Source"));
+        assert_eq!(content.comments[3].author_display_name.as_deref(), Some("elena"));
+    }
+
+    #[test]
+    fn jira_issue_preview_content_rejects_missing_or_non_jira_work_item() {
+        let conn = open_in_memory().expect("db");
+        let ssid = seed_source_system(&conn, "src_jira");
+        seed_preview_work_item(&conn, &ssid, "wi_note_1", "github_issue", Some("Not Jira"));
+
+        let missing = jira_issue_preview_content_from_conn(&conn, "missing").unwrap_err();
+        assert_eq!(missing, "Jira issue preview content not found for work item missing");
+
+        let non_jira = jira_issue_preview_content_from_conn(&conn, "wi_note_1").unwrap_err();
+        assert_eq!(non_jira, "Jira issue preview content not found for work item wi_note_1");
     }
 
     #[test]
