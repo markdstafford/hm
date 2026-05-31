@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { beforeAll, vi } from "vitest";
@@ -82,6 +82,26 @@ describe("App", () => {
     const { container } = render(<App />);
     const results = await axe(container);
     expect(results).toHaveNoViolations();
+  });
+
+  it("applies canonical primary and secondary accent preferences", async () => {
+    const { loadPreferences } = await import("./preferences/storage");
+    vi.mocked(loadPreferences).mockResolvedValueOnce({
+      appearance: {
+        themeMode: "light",
+        lightTheme: "catppuccin-latte",
+        darkTheme: "catppuccin-macchiato",
+        accents: { primary: "lavender", secondary: "teal" },
+        themeFeatures: { catppuccin: { accent: "lavender" } },
+        uiFont: "Inter Variable",
+        monoFont: "Fira Code",
+      },
+    });
+
+    render(<App />);
+
+    await waitFor(() => expect(document.documentElement.dataset.primaryAccent).toBe("lavender"));
+    expect(document.documentElement.dataset.secondaryAccent).toBe("teal");
   });
 });
 

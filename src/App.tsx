@@ -5,7 +5,6 @@ import {
   type AppPreferences,
   DEFAULT_PREFERENCES,
   resolveTheme,
-  resolveCatppuccinAccent,
 } from "./preferences";
 import { applyColorScheme, applyFonts, getSystemPrefersDark } from "./theme";
 import { loadPreferences, savePreferences } from "./preferences/storage";
@@ -59,16 +58,14 @@ function App() {
   useEffect(() => {
     const prefersDarkNow = getSystemPrefersDark();
     const resolved = resolveTheme(prefs, prefersDarkNow);
-    const accent = resolveCatppuccinAccent(prefs);
-    applyColorScheme({ ...resolved, accent });
+    applyColorScheme(resolved);
 
     const mode = prefs.appearance?.themeMode ?? "system";
     if (mode !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
       const r = resolveTheme(prefs, mq.matches);
-      const a = resolveCatppuccinAccent(prefs);
-      applyColorScheme({ ...r, accent: a });
+      applyColorScheme(r);
     };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
@@ -76,6 +73,7 @@ function App() {
     prefs.appearance?.themeMode,
     prefs.appearance?.lightTheme,
     prefs.appearance?.darkTheme,
+    prefs.appearance?.accents,
     prefs.appearance?.themeFeatures,
   ]);
 
