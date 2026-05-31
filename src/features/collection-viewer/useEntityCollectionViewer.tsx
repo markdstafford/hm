@@ -27,7 +27,7 @@ import {
   seedCollectionViews,
   uniqueUntitledName,
 } from "../../views/collection/views/seed";
-import { normalizeViewConfig } from "../../views/collection/ViewConfig";
+import { normalizeViewConfig, patchViewConfig } from "../../views/collection/ViewConfig";
 import type { ViewConfig } from "../../views/collection/ViewConfig";
 import { buildConfigPatchView, buildRenameView } from "./viewConfigPersistence";
 import { ViewSettingsMenu } from "../../views/collection/menu/ViewSettingsMenu";
@@ -326,6 +326,19 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
     }
   }
 
+  function handleResizePreview(surface: "side-peek" | "bottom-peek", size: number) {
+    if (!activeView) return;
+    const layout =
+      surface === "side-peek"
+        ? { ...activeConfig.layout, sidePeekWidth: size }
+        : { ...activeConfig.layout, bottomPeekHeight: size };
+
+    void handlePatchViewConfig(
+      activeView.id,
+      patchViewConfig(activeConfig, { layout }),
+    );
+  }
+
   async function handleDuplicate(viewId: string) {
     const source = views.find((view) => view.id === viewId);
     if (!source) return;
@@ -497,6 +510,8 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
               item={selectedItem}
               entity={entity}
               surface={peekSurface}
+              sidePeekWidth={activeConfig.layout.sidePeekWidth}
+              bottomPeekHeight={activeConfig.layout.bottomPeekHeight}
               index={selectedIndex}
               total={displayItems.length}
               canMovePrevious={canMovePrevious}
@@ -504,6 +519,7 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
               onClose={handleClosePreview}
               onMovePrevious={movePrevious}
               onMoveNext={moveNext}
+              onResizeCommit={handleResizePreview}
             />
           )}
         </div>

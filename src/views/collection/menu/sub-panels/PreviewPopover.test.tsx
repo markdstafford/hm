@@ -30,8 +30,8 @@ describe("PreviewPopover", () => {
     expect(screen.getByRole("option", { name: /side/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("option", { name: /bottom/i })).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("option", { name: /full page/i })).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByText("Detail opens in a 440px right rail.")).toBeInTheDocument();
-    expect(screen.getByText("Detail opens in a 280px bottom pane.")).toBeInTheDocument();
+    expect(screen.getByText("Detail opens in a resizable right rail, defaulting to 440px wide.")).toBeInTheDocument();
+    expect(screen.getByText("Detail opens in a resizable bottom pane, defaulting to 280px tall.")).toBeInTheDocument();
     expect(screen.getByText("Detail takes the whole content area.")).toBeInTheDocument();
   });
 

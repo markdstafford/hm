@@ -3,6 +3,11 @@ import { vi, beforeAll, describe, it, expect, beforeEach } from "vitest";
 import { axe } from "jest-axe";
 import { CollectionViewerPage } from "./CollectionViewerPage";
 import type { JiraIssueListItem } from "../../bindings";
+import {
+  DEFAULT_BOTTOM_PEEK_HEIGHT,
+  DEFAULT_SIDE_PEEK_WIDTH,
+  MIN_BOTTOM_PEEK_HEIGHT,
+} from "../../views/collection/previewSizing";
 
 beforeAll(() => {
   (globalThis as any).PointerEvent = window.MouseEvent;
@@ -352,17 +357,17 @@ describe("CollectionViewerPage", () => {
     });
   });
 
-  it("renders side detail rail (w-[440px]) after clicking a row", async () => {
+  it("renders side detail rail (default 440px) after clicking a row", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
     await screen.findByRole("button", { name: /close issue detail/i });
     const aside = document.querySelector("aside[aria-label='Issue detail']");
-    expect(aside).toHaveClass("w-[440px]");
+    expect(aside).toHaveStyle({ width: `${DEFAULT_SIDE_PEEK_WIDTH}px` });
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
   });
 
-  it("switching to bottom preview shows h-[280px] detail pane with list rows still visible", async () => {
+  it("switching to bottom preview shows detail pane (default 280px) with list rows still visible", async () => {
     vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
     render(<CollectionViewerPage />);
     await screen.findByText("AMP-1");
@@ -382,7 +387,7 @@ describe("CollectionViewerPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
     await waitFor(() => {
       const aside = document.querySelector("aside[aria-label='Issue detail']");
-      expect(aside).toHaveClass("h-[280px]");
+      expect(aside).toHaveStyle({ height: `${DEFAULT_BOTTOM_PEEK_HEIGHT}px` });
     });
     // List rows still visible
     expect(screen.getByRole("button", { name: /open amp-2: second issue/i })).toBeInTheDocument();
@@ -465,7 +470,7 @@ describe("CollectionViewerPage", () => {
     // Same item should still be visible in the detail (previewOpen stays true across layout change)
     await waitFor(() => {
       const aside = document.querySelector("aside[aria-label='Issue detail']");
-      expect(aside).toHaveClass("h-[280px]");
+      expect(aside).toHaveStyle({ height: `${DEFAULT_BOTTOM_PEEK_HEIGHT}px` });
     });
     expect(screen.getAllByText("First issue").length).toBeGreaterThanOrEqual(1);
   });
@@ -761,6 +766,158 @@ describe("CollectionViewerPage", () => {
 
     // Checkbox remains checked after row body click
     expect(screen.getByRole("checkbox", { name: /select wid-1/i })).toHaveAttribute("data-state", "checked");
+  });
+
+  it("commits side resize by patching only layout.sidePeekWidth and keeps the selected item open", async () => {
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    await screen.findByRole("button", { name: /close issue detail/i });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+
+    fireEvent.pointerDown(separator, { pointerId: 1, clientX: 500 });
+    fireEvent.pointerMove(separator, { pointerId: 1, clientX: 380 });
+    fireEvent.pointerUp(separator, { pointerId: 1, clientX: 380 });
+
+    await waitFor(() => {
+      expect(commands.collectionViewSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "jira-issue-all-open",
+          config: expect.objectContaining({
+            layout: expect.objectContaining({
+              type: "table",
+              density: "regular",
+              preview: "side-peek",
+              sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH + 120,
+              bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
+            }),
+          }),
+        }),
+      );
+    });
+    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /close issue detail/i })).toBeInTheDocument();
+  });
+
+  it("commits bottom resize by patching only layout.bottomPeekHeight", async () => {
+    mockViewCommands([
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: {
+          layout: {
+            type: "table",
+            density: "regular",
+            preview: "bottom-peek",
+            sidePeekWidth: 500,
+            bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
+          },
+        },
+      },
+    ]);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    await screen.findByRole("button", { name: /close issue detail/i });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+
+    fireEvent.pointerDown(separator, { pointerId: 1, clientY: 700 });
+    fireEvent.pointerMove(separator, { pointerId: 1, clientY: 760 });
+    fireEvent.pointerUp(separator, { pointerId: 1, clientY: 760 });
+
+    await waitFor(() => {
+      expect(commands.collectionViewSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "jira-issue-all-open",
+          config: expect.objectContaining({
+            layout: expect.objectContaining({
+              preview: "bottom-peek",
+              sidePeekWidth: 500,
+              bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT - 60,
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
+  it("keyboard resize commits clamped values through view config persistence", async () => {
+    mockViewCommands([
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: {
+          layout: {
+            type: "table",
+            density: "regular",
+            preview: "bottom-peek",
+            sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH,
+            bottomPeekHeight: MIN_BOTTOM_PEEK_HEIGHT,
+          },
+        },
+      },
+    ]);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    await screen.findByRole("button", { name: /close issue detail/i });
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    fireEvent.keyDown(separator, { key: "ArrowDown", shiftKey: true });
+
+    await waitFor(() => {
+      expect(commands.collectionViewSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            layout: expect.objectContaining({ bottomPeekHeight: MIN_BOTTOM_PEEK_HEIGHT }),
+          }),
+        }),
+      );
+    });
+  });
+
+  it("bottom peek keyboard resize does not change the selected row", async () => {
+    mockViewCommands([
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: {
+          layout: {
+            type: "table",
+            density: "regular",
+            preview: "bottom-peek",
+            sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH,
+            bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
+          },
+        },
+      },
+    ]);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    await screen.findByRole("button", { name: /close issue detail/i });
+    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
+
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    // Fire ArrowUp and ArrowDown directly on the separator — should resize, not navigate rows
+    fireEvent.keyDown(separator, { key: "ArrowUp" });
+    fireEvent.keyDown(separator, { key: "ArrowDown" });
+
+    // AMP-1 must remain selected
+    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /open amp-2: second issue/i })).not.toHaveAttribute("aria-pressed", "true");
   });
 
   it("passes active view property visibility to rows so hidden properties disappear", async () => {

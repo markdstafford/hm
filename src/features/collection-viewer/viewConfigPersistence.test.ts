@@ -23,7 +23,7 @@ describe("viewConfigPersistence", () => {
   it("patches config while preserving view identity and display name", () => {
     const patchedConfig = {
       ...defaultViewConfig(jiraIssueEntity),
-      layout: { type: "table" as const, density: "compact" as const, preview: "side-peek" as const },
+      layout: { ...defaultViewConfig(jiraIssueEntity).layout, density: "compact" as const },
     };
     const patched = buildConfigPatchView(view, patchedConfig);
     expect(patched).toMatchObject({ id: view.id, displayName: "Mine", entityKind: "jira-issue" });
