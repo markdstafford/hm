@@ -142,6 +142,7 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
   label: "Jira issues",
   detailLabel: "issue",
   getId: (item) => item.work_item_id,
+  getFocusLabel: (item) => item.key || item.work_item_id,
   getRowLabel: (item) => {
     const key = item.key || "Unknown key";
     return item.title ? `Open ${key}: ${item.title}` : `Open ${key}`;

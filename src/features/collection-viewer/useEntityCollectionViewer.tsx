@@ -115,6 +115,10 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
 
   const getFocusLabel = useCallback(
     (item: TItem) => {
+      if (entity.getFocusLabel) {
+        const label = entity.getFocusLabel(item);
+        if (label?.trim()) return label;
+      }
       const keyProperty = entity.properties.find((p) => p.id === ("key" as TProperty));
       if (keyProperty) {
         const rendered = keyProperty.renderCell({ item, property: keyProperty.id });
@@ -199,7 +203,13 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
     if (displayItems.some((item) => entity.getId(item) === selectedId)) return;
     const first = displayItems[0];
     setSelectedId(first ? entity.getId(first) : null);
-  }, [displayItems, selectedId, entity]);
+    // Sync the focus trail so the preview doesn't show a filtered-out item
+    if (first) {
+      setFocusTrail((current) => resetFocusTrail(current, first, getFocusLabel, entity.getId));
+    } else {
+      setFocusTrail([]);
+    }
+  }, [displayItems, selectedId, entity, getFocusLabel]);
 
   const selectedIndex = useMemo(
     () =>
@@ -521,8 +531,15 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
       stack: rootStack.slice(0, -1),
       getId: entity.getId,
     });
-    const nextStack = [...result.stack, result.activeRoot].filter((root) => !root.base);
-    setRootStack(nextStack);
+    // When we've returned all the way to base, clear the stack entirely so
+    // activeRoot is computed from the live `items` prop rather than a snapshot.
+    // For non-base returns, preserve the full stack (including any base entry)
+    // so further Back presses can unwind all the way.
+    if (result.activeRoot.base) {
+      setRootStack([]);
+    } else {
+      setRootStack([...result.stack, result.activeRoot]);
+    }
     setSelectedId(result.activeRoot.selectedId);
     setPreviewOpen(result.activeRoot.previewOpen);
     const restored = result.activeRoot.selectedId

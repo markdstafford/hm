@@ -77,4 +77,37 @@ describe("rerootStack", () => {
     expect(returned.activeRoot.selectedId).toBeNull();
     expect(returned.activeRoot.previewOpen).toBe(false);
   });
+
+  it("supports two-level re-rooting: each Back step unwinds exactly one scope", () => {
+    const base = createBaseRoot([alpha, beta, gamma], "a", true);
+    const scope1 = pushScopedRoot({
+      activeRoot: base,
+      stack: [],
+      nextRoot: { id: "edge:scope1", label: "Scope 1", items: [beta, gamma], selectedId: "b", previewOpen: true },
+    });
+    // scope1.stack = [base], scope1.activeRoot is the scoped root
+    const scope2 = pushScopedRoot({
+      activeRoot: scope1.activeRoot,
+      stack: scope1.stack,
+      nextRoot: { id: "edge:scope2", label: "Scope 2", items: [gamma], selectedId: "c", previewOpen: true },
+    });
+    // scope2.stack = [base, scope1.activeRoot]
+
+    const returnedToScope1 = returnToPreviousRoot({
+      activeRoot: scope2.activeRoot,
+      stack: scope2.stack,
+      getId,
+    });
+    expect(returnedToScope1.activeRoot.id).toBe("edge:scope1");
+    expect(returnedToScope1.stack).toHaveLength(1);
+    expect(returnedToScope1.stack[0].id).toBe("base");
+
+    const returnedToBase = returnToPreviousRoot({
+      activeRoot: returnedToScope1.activeRoot,
+      stack: returnedToScope1.stack,
+      getId,
+    });
+    expect(returnedToBase.activeRoot.id).toBe("base");
+    expect(returnedToBase.stack).toHaveLength(0);
+  });
 });

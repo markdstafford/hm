@@ -38,6 +38,7 @@ import { loadPreferences, savePreferences } from "../../preferences/storage";
 
 const drillEntity: EntityContract<Item, Prop> = {
   ...entity,
+  filterableProperties: [{ property: "key" as Prop, kind: "text" as const, getValue: (item) => item.key }],
   resolveEdges: ({ item, allItems }) => {
     if (item.id !== "item-a") return [];
     const target = allItems.find((candidate) => candidate.id === "item-b");
@@ -96,6 +97,129 @@ function DrillHarness({ items }: { items: Item[] }) {
       emptyTitle: "No test items",
       emptyDescription: "No test items loaded.",
       errorTitle: "Could not load test items",
+    },
+  });
+  return <div>{viewer.header}{viewer.body}</div>;
+}
+
+// Entity where nested set-edges can re-root twice (A→[B,C], B→[C,D])
+const nestedDrillEntity: EntityContract<Item, Prop> = {
+  ...entity,
+  resolveEdges: ({ item, allItems }) => {
+    if (item.id === "item-a") {
+      const setItems = allItems.filter((i) => i.id === "item-b" || i.id === "item-c");
+      return [{
+        id: "set:from-a",
+        kind: "local" as const,
+        shape: "set" as const,
+        relationship: "related",
+        label: "Related to A-1",
+        count: setItems.length,
+        items: setItems,
+      }];
+    }
+    if (item.id === "item-b") {
+      const setItems = allItems.filter((i) => i.id === "item-c" || i.id === "item-d");
+      return [{
+        id: "set:from-b",
+        kind: "local" as const,
+        shape: "set" as const,
+        relationship: "related",
+        label: "Related to B-1",
+        count: setItems.length,
+        items: setItems,
+      }];
+    }
+    return [];
+  },
+  Detail: ({ item, edges, onOpenSetEdge }) => (
+    <div>
+      <h2>{item.title}</h2>
+      {edges?.map((edge) => {
+        if (edge.shape === "set") {
+          return (
+            <button key={edge.id} type="button" onClick={() => onOpenSetEdge?.(edge)}>
+              Open {edge.label}
+            </button>
+          );
+        }
+        return null;
+      })}
+    </div>
+  ),
+};
+
+function NestedDrillHarness({ items }: { items: Item[] }) {
+  const viewer = useEntityCollectionViewer({
+    active: true,
+    entity: nestedDrillEntity,
+    items,
+    loading: false,
+    error: null,
+    copy: {
+      loadingLabel: "Loading",
+      emptyTitle: "No items",
+      emptyDescription: "",
+      errorTitle: "Error",
+    },
+  });
+  return <div>{viewer.header}{viewer.body}</div>;
+}
+
+// Entity where getId returns an opaque id but getFocusLabel returns the readable key,
+// and the key property renderCell returns a React element (not a string)
+const opaqueIdEntity: EntityContract<Item, Prop> = {
+  ...entity,
+  getId: (item) => `opaque:${item.id}`,
+  getFocusLabel: (item) => item.key,
+  getRowLabel: (item) => `Open test ${item.key}`,
+  properties: [
+    { id: "key", label: "Key", kind: "text", renderCell: ({ item }) => <span className="mono">{item.key}</span> },
+    { id: "title", label: "Title", kind: "text", isStretch: true, renderCell: ({ item }) => item.title },
+    { id: "score", label: "Score", kind: "number", renderCell: ({ item }) => `${item.score}` },
+  ],
+  resolveEdges: ({ item, allItems }) => {
+    if (item.id !== "item-a") return [];
+    const target = allItems.find((i) => i.id === "item-b");
+    return [{
+      id: "dup:item-b",
+      kind: "source" as const,
+      shape: "single" as const,
+      relationship: "duplicates",
+      targetRef: { entityId: "test-entity", displayKey: "B-1", title: "Beta" },
+      target,
+      danglingReason: target ? undefined : ("not-ingested" as const),
+    }];
+  },
+  Detail: ({ item, edges, onOpenSingleEdge }) => (
+    <div>
+      <h2>{item.title}</h2>
+      {edges?.map((edge) => {
+        if (edge.shape === "single") {
+          return (
+            <button key={edge.id} type="button" onClick={() => onOpenSingleEdge?.(edge)}>
+              Open {edge.targetRef.displayKey}
+            </button>
+          );
+        }
+        return null;
+      })}
+    </div>
+  ),
+};
+
+function OpaqueIdHarness({ items }: { items: Item[] }) {
+  const viewer = useEntityCollectionViewer({
+    active: true,
+    entity: opaqueIdEntity,
+    items,
+    loading: false,
+    error: null,
+    copy: {
+      loadingLabel: "Loading",
+      emptyTitle: "No items",
+      emptyDescription: "",
+      errorTitle: "Error",
     },
   });
   return <div>{viewer.header}{viewer.body}</div>;
@@ -231,5 +355,86 @@ describe("useEntityCollectionViewer", () => {
       .getAllByRole("button", { name: /Open test [BC]-1/ })
       .filter((el) => el.getAttribute("aria-pressed") === "true");
     expect(pressedRows).toHaveLength(1);
+  });
+
+  it("coerces preview to first visible item when set-edge first item is filtered out (INIT-1)", async () => {
+    // Override the seeded view to include a filter that excludes B-1
+    vi.mocked(commands.collectionViewsSeedDefaults).mockResolvedValueOnce({
+      status: "ok" as const,
+      data: [{
+        id: "test-all",
+        entity_kind: "test-entity",
+        display_name: "All",
+        position: 0,
+        is_default: true,
+        config: {
+          filters: [{ id: "f1", property: "key", operator: "is-not", value: "B-1", active: true }],
+        },
+      }],
+    });
+
+    render(<DrillHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+      { id: "item-c", key: "C-1", title: "Gamma", score: 9 },
+    ]} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    // Set contains [B-1, C-1]. B-1 is filtered out by the active view filter.
+    fireEvent.click(screen.getByRole("button", { name: "Open Related to A-1" }));
+    // The preview must show Gamma (C-1, first visible item), not Beta (B-1, filtered out)
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Beta" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("heading", { name: "Gamma" })).toBeInTheDocument();
+  });
+
+  it("returns from nested re-roots all the way to All without losing the base snapshot (INIT-2)", async () => {
+    render(<NestedDrillHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+      { id: "item-c", key: "C-1", title: "Gamma", score: 9 },
+      { id: "item-d", key: "D-1", title: "Delta", score: 5 },
+    ]} />);
+
+    // Open scope1: Related to A-1 = [B, C]
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Related to A-1" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Related to A-1");
+
+    // Open scope2 from B-1: Related to B-1 = [C, D]
+    fireEvent.click(screen.getByRole("button", { name: "Open Related to B-1" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Related to B-1");
+
+    // First Back → scope1
+    fireEvent.click(screen.getByRole("button", { name: "Back to All" }));
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Related to A-1");
+    });
+
+    // Second Back → All (no re-root banner)
+    fireEvent.click(screen.getByRole("button", { name: "Back to All" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Open test A-1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open test B-1" })).toBeInTheDocument();
+  });
+
+  it("uses entity getFocusLabel rather than falling back to getId for breadcrumb labels (INIT-3)", async () => {
+    render(<OpaqueIdHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+    ]} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open test A-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open B-1" }));
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Preview focus path" });
+    expect(breadcrumb).toHaveTextContent("A-1");
+    expect(breadcrumb).toHaveTextContent("B-1");
+    // Must not fall back to the opaque getId value
+    expect(breadcrumb).not.toHaveTextContent("opaque:item-a");
+    expect(breadcrumb).not.toHaveTextContent("opaque:item-b");
   });
 });

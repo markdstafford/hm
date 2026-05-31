@@ -130,6 +130,8 @@ export type EntityContract<TItem, TProperty extends string> = {
   detailLabel?: string;
   getId: (item: TItem) => string;
   getRowLabel?: (item: TItem) => string;
+  /** Returns a short readable label for breadcrumbs and focus-trail entries. Falls back to renderCell("key") then getId. */
+  getFocusLabel?: (item: TItem) => string;
   properties: PropertyDefinition<TItem, TProperty>[];
   defaultProperties: PropertyConfig<TProperty>[];
   previewFields?: PreviewFieldDefinition<TItem, TProperty>[];
