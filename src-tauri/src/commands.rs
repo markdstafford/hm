@@ -738,6 +738,16 @@ pub(crate) fn read_progress_from_conn(
 
 #[tauri::command]
 #[specta::specta]
+pub fn jira_issue_preview_content(
+    work_item_id: String,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<JiraIssuePreviewContent, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    jira_issue_preview_content_from_conn(&conn, &work_item_id)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn jira_issues_list(
     filter: JiraIssueListFilter,
     db: tauri::State<'_, Mutex<rusqlite::Connection>>,
@@ -1412,6 +1422,7 @@ const _: () = {
         _assert_specta::<JiraIssueListItem>();
         _assert_specta::<JiraIssuePreviewContent>();
         _assert_specta::<JiraIssuePreviewComment>();
+        _assert_specta::<Result<JiraIssuePreviewContent, String>>();
         _assert_specta::<CollectionViewRecord>();
         _assert_specta::<CollectionViewSaveInput>();
         _assert_specta::<CollectionViewSeedInput>();

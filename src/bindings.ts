@@ -58,6 +58,7 @@ export const commands = {
 	error_summary: string | null,
 } | null, string>(__TAURI_INVOKE("jira_issue_ingestion_progress", { sourceId })),
 	jiraIssuesList: (filter: JiraIssueListFilter) => typedError<JiraIssueListItem[], string>(__TAURI_INVOKE("jira_issues_list", { filter })),
+	jiraIssuePreviewContent: (workItemId: string) => typedError<JiraIssuePreviewContent, string>(__TAURI_INVOKE("jira_issue_preview_content", { workItemId })),
 	collectionViewsList: (entityKind: string) => typedError<CollectionViewRecord[], string>(__TAURI_INVOKE("collection_views_list", { entityKind })),
 	collectionViewSave: (view: CollectionViewSaveInput) => typedError<CollectionViewRecord, string>(__TAURI_INVOKE("collection_view_save", { view })),
 	collectionViewDelete: (id: string) => typedError<null, string>(__TAURI_INVOKE("collection_view_delete", { id })),
@@ -470,6 +471,22 @@ export type JiraIssueListItem = {
 	project_key: string | null,
 	priority_name: string | null,
 	labels: string[],
+};
+
+export type JiraIssuePreviewComment = {
+	id: string,
+	upstream_id: string,
+	author_display_name: string | null,
+	body: string | null,
+	created_at_source: string | null,
+	updated_at_source: string | null,
+	ingested_at: string,
+};
+
+export type JiraIssuePreviewContent = {
+	work_item_id: string,
+	body: string | null,
+	comments: JiraIssuePreviewComment[],
 };
 
 export type JiraIssueStatusTransition = {
