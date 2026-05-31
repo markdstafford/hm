@@ -243,6 +243,33 @@ describe("applyColorScheme", () => {
   });
 });
 
+describe("styles.css token contract", () => {
+  it("defines secondary-highlight and sentiment token names", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const { resolve } = await import("node:path");
+    const css = await readFile(resolve(__dirname, "styles.css"), "utf8");
+    for (const token of [
+      "--hm-primary-accent",
+      "--hm-secondary-accent",
+      "--color-secondary",
+      "--color-secondary-highlight-bg",
+      "--color-secondary-highlight-text",
+      "--color-secondary-highlight-border",
+      "--color-sentiment-good-bg",
+      "--color-sentiment-good-text",
+      "--color-sentiment-good-border",
+      "--color-sentiment-ok-bg",
+      "--color-sentiment-ok-text",
+      "--color-sentiment-ok-border",
+      "--color-sentiment-bad-bg",
+      "--color-sentiment-bad-text",
+      "--color-sentiment-bad-border",
+    ]) {
+      expect(css, `expected token ${token}`).toContain(token);
+    }
+  });
+});
+
 describe("LIGHT_THEMES / DARK_THEMES", () => {
   it("all LIGHT_THEMES have brightness light", () => {
     expect(LIGHT_THEMES.every((t) => t.brightness === "light")).toBe(true);
