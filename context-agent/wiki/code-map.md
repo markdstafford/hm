@@ -368,6 +368,12 @@ The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `Pro
 
 ---
 
+## Jira issue preview content (added 2026-05-31, issue #80)
+
+- React/Rust preview content: `src-tauri/src/commands.rs::jira_issue_preview_content` loads Jira issue body plus local `work_item_comments` for one selected `work_item_id` without remote Jira calls; `src/entities/jira-issue/previewContent.ts` maps generated snake_case DTOs to generic preview-region props; `src/views/collection/preview/PreviewDescription.tsx` and `PreviewComments.tsx` render the reusable clamped description and newest-first recent comments regions used by `src/entities/jira-issue/detail.tsx`.
+
+---
+
 ## Gardener producer foundation (added 2026-05-30, issue #69)
 
 - `src-tauri/src/gardener/` owns producer-side hygiene suggestion infrastructure.
