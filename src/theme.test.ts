@@ -2,6 +2,12 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   THEME_CATALOG,
   CATPPUCCIN_ACCENTS,
+  ACCENT_OPTIONS,
+  DEFAULT_PRIMARY_ACCENT,
+  DEFAULT_SECONDARY_ACCENT,
+  isAccentId,
+  resolveThemeAccent,
+  themeSupportsAccent,
   applyColorScheme,
   isLightTheme,
   isDarkTheme,
@@ -61,6 +67,41 @@ describe("CATPPUCCIN_ACCENTS", () => {
     expect(CATPPUCCIN_ACCENTS).toContain("sapphire");
     expect(CATPPUCCIN_ACCENTS).toContain("green");
     expect(CATPPUCCIN_ACCENTS).toContain("lavender");
+  });
+});
+
+describe("ACCENT_OPTIONS", () => {
+  it("contains the fourteen stable Catppuccin-compatible accent ids", () => {
+    expect(ACCENT_OPTIONS).toHaveLength(14);
+    expect(ACCENT_OPTIONS.map((option) => option.value)).toEqual(CATPPUCCIN_ACCENTS);
+    expect(ACCENT_OPTIONS.find((option) => option.value === "sapphire")?.label).toBe("Sapphire");
+    expect(ACCENT_OPTIONS.find((option) => option.value === "teal")?.label).toBe("Teal");
+  });
+
+  it("documents sapphire primary and teal secondary defaults", () => {
+    expect(DEFAULT_PRIMARY_ACCENT).toBe("sapphire");
+    expect(DEFAULT_SECONDARY_ACCENT).toBe("teal");
+  });
+});
+
+describe("accent helpers", () => {
+  it("validates accent ids", () => {
+    expect(isAccentId("lavender")).toBe(true);
+    expect(isAccentId("rainbow")).toBe(false);
+    expect(isAccentId(null)).toBe(false);
+  });
+
+  it("resolves primary and secondary accent variables for every shipped theme", () => {
+    for (const entry of THEME_CATALOG) {
+      expect(themeSupportsAccent(entry.id, "sapphire")).toBe(true);
+      expect(resolveThemeAccent(entry.id, "sapphire", "primary")).toBe("var(--hm-accent-sapphire)");
+      expect(resolveThemeAccent(entry.id, "teal", "secondary")).toBe("var(--hm-accent-teal)");
+    }
+  });
+
+  it("falls back invalid accent ids by role", () => {
+    expect(resolveThemeAccent("github-light", "rainbow", "primary")).toBe("var(--hm-accent-sapphire)");
+    expect(resolveThemeAccent("github-light", "rainbow", "secondary")).toBe("var(--hm-accent-teal)");
   });
 });
 
@@ -127,7 +168,11 @@ describe("applyColorScheme", () => {
     delete root.dataset.theme;
     delete root.dataset.themeMode;
     delete root.dataset.accent;
+    delete root.dataset.primaryAccent;
+    delete root.dataset.secondaryAccent;
     root.style.removeProperty("--hm-accent");
+    root.style.removeProperty("--hm-primary-accent");
+    root.style.removeProperty("--hm-secondary-accent");
   });
 
   it("writes data-theme and data-theme-mode for light theme", () => {
@@ -142,25 +187,50 @@ describe("applyColorScheme", () => {
     expect(root.dataset.themeMode).toBe("dark");
   });
 
-  it("writes data-accent and --hm-accent CSS var when accent is provided", () => {
-    applyColorScheme({ themeId: "catppuccin-mocha", brightness: "dark", accent: "green" });
-    expect(root.dataset.accent).toBe("green");
-    expect(root.style.getPropertyValue("--hm-accent")).toBe("var(--ctp-green)");
+  it("writes primary and secondary accent data attributes and variables", () => {
+    applyColorScheme({
+      themeId: "catppuccin-mocha",
+      brightness: "dark",
+      primaryAccent: "green",
+      secondaryAccent: "lavender",
+    });
+    expect(root.dataset.primaryAccent).toBe("green");
+    expect(root.dataset.secondaryAccent).toBe("lavender");
+    expect(root.style.getPropertyValue("--hm-primary-accent")).toBe("var(--hm-accent-green)");
+    expect(root.style.getPropertyValue("--hm-secondary-accent")).toBe("var(--hm-accent-lavender)");
   });
 
-  it("clears data-accent and --hm-accent when no accent is provided", () => {
-    root.dataset.accent = "green";
-    root.style.setProperty("--hm-accent", "var(--ctp-green)");
+  it("keeps data-accent and --hm-accent as primary compatibility aliases", () => {
+    applyColorScheme({
+      themeId: "catppuccin-mocha",
+      brightness: "dark",
+      primaryAccent: "blue",
+      secondaryAccent: "teal",
+    });
+    expect(root.dataset.accent).toBe("blue");
+    expect(root.style.getPropertyValue("--hm-accent")).toBe("var(--hm-accent-blue)");
+  });
+
+  it("defaults missing primary and secondary accents before applying the DOM state", () => {
     applyColorScheme({ themeId: "github-dark", brightness: "dark" });
-    expect(root.dataset.accent).toBeUndefined();
-    expect(root.style.getPropertyValue("--hm-accent")).toBe("");
+    expect(root.dataset.primaryAccent).toBe("sapphire");
+    expect(root.dataset.secondaryAccent).toBe("teal");
+    expect(root.style.getPropertyValue("--hm-primary-accent")).toBe("var(--hm-accent-sapphire)");
+    expect(root.style.getPropertyValue("--hm-secondary-accent")).toBe("var(--hm-accent-teal)");
   });
 
-  it("applies each Catppuccin accent correctly", () => {
+  it("applies each accent as primary and secondary", () => {
     for (const accent of CATPPUCCIN_ACCENTS) {
-      applyColorScheme({ themeId: "catppuccin-mocha", brightness: "dark", accent });
-      expect(root.dataset.accent).toBe(accent);
-      expect(root.style.getPropertyValue("--hm-accent")).toBe(`var(--ctp-${accent})`);
+      applyColorScheme({
+        themeId: "catppuccin-mocha",
+        brightness: "dark",
+        primaryAccent: accent,
+        secondaryAccent: accent,
+      });
+      expect(root.dataset.primaryAccent).toBe(accent);
+      expect(root.dataset.secondaryAccent).toBe(accent);
+      expect(root.style.getPropertyValue("--hm-primary-accent")).toBe(`var(--hm-accent-${accent})`);
+      expect(root.style.getPropertyValue("--hm-secondary-accent")).toBe(`var(--hm-accent-${accent})`);
     }
   });
 

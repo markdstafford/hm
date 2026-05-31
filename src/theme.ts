@@ -1,5 +1,5 @@
 export type ThemeId = string;
-export type CatppuccinAccent =
+export type AccentId =
   | "rosewater"
   | "flamingo"
   | "pink"
@@ -14,6 +14,9 @@ export type CatppuccinAccent =
   | "sapphire"
   | "blue"
   | "lavender";
+
+/** @deprecated Use AccentId instead */
+export type CatppuccinAccent = AccentId;
 
 export type ThemeCatalogEntry = {
   id: ThemeId;
@@ -82,7 +85,7 @@ export const THEME_CATALOG: ThemeCatalogEntry[] = [
   },
 ];
 
-export const CATPPUCCIN_ACCENTS: CatppuccinAccent[] = [
+export const CATPPUCCIN_ACCENTS: AccentId[] = [
   "rosewater",
   "flamingo",
   "pink",
@@ -98,6 +101,40 @@ export const CATPPUCCIN_ACCENTS: CatppuccinAccent[] = [
   "blue",
   "lavender",
 ];
+
+export const ACCENT_OPTIONS: { value: AccentId; label: string }[] =
+  CATPPUCCIN_ACCENTS.map((id) => ({
+    value: id,
+    label: id.charAt(0).toUpperCase() + id.slice(1),
+  }));
+
+export const DEFAULT_PRIMARY_ACCENT: AccentId = "sapphire";
+export const DEFAULT_SECONDARY_ACCENT: AccentId = "teal";
+
+export function isAccentId(value: unknown): value is AccentId {
+  return typeof value === "string" && (CATPPUCCIN_ACCENTS as string[]).includes(value);
+}
+
+export function themeSupportsAccent(themeId: unknown, accentId: unknown): accentId is AccentId {
+  return (
+    typeof themeId === "string" &&
+    THEME_CATALOG.some((t) => t.id === themeId) &&
+    isAccentId(accentId)
+  );
+}
+
+export function resolveThemeAccent(
+  themeId: ThemeId,
+  accentId: unknown,
+  role: "primary" | "secondary"
+): string {
+  const resolved = isAccentId(accentId)
+    ? accentId
+    : role === "primary"
+      ? DEFAULT_PRIMARY_ACCENT
+      : DEFAULT_SECONDARY_ACCENT;
+  return `var(--hm-accent-${resolved})`;
+}
 
 export const VALID_THEME_IDS = THEME_CATALOG.map((t) => t.id);
 export const LIGHT_THEMES = THEME_CATALOG.filter((t) => t.brightness === "light");
@@ -122,7 +159,10 @@ export function themeSupportsFeature(id: ThemeId, feature: string): boolean {
 export type ResolvedColorScheme = {
   themeId: ThemeId;
   brightness: "light" | "dark";
-  accent?: CatppuccinAccent;
+  primaryAccent?: AccentId;
+  secondaryAccent?: AccentId;
+  /** @deprecated Use primaryAccent instead */
+  accent?: AccentId;
 };
 
 export function applyColorScheme(input: ResolvedColorScheme): void {
@@ -130,13 +170,16 @@ export function applyColorScheme(input: ResolvedColorScheme): void {
   root.dataset.theme = input.themeId;
   root.dataset.themeMode = input.brightness;
 
-  if (input.accent) {
-    root.dataset.accent = input.accent;
-    root.style.setProperty("--hm-accent", `var(--ctp-${input.accent})`);
-  } else {
-    delete root.dataset.accent;
-    root.style.removeProperty("--hm-accent");
-  }
+  const primaryAccent: AccentId = input.primaryAccent ?? input.accent ?? DEFAULT_PRIMARY_ACCENT;
+  const secondaryAccent: AccentId = input.secondaryAccent ?? DEFAULT_SECONDARY_ACCENT;
+
+  root.dataset.primaryAccent = primaryAccent;
+  root.dataset.secondaryAccent = secondaryAccent;
+  root.dataset.accent = primaryAccent;
+
+  root.style.setProperty("--hm-primary-accent", resolveThemeAccent(input.themeId, primaryAccent, "primary"));
+  root.style.setProperty("--hm-secondary-accent", resolveThemeAccent(input.themeId, secondaryAccent, "secondary"));
+  root.style.setProperty("--hm-accent", resolveThemeAccent(input.themeId, primaryAccent, "primary"));
 }
 
 export function getSystemPrefersDark(): boolean {
