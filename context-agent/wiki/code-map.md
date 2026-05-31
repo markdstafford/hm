@@ -384,3 +384,15 @@ The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `Pro
 - `reference.rs` is a no-dependency deterministic reference engine. It emits honest reference output for an existing local Jira work item only; it does not create fake AMP rows.
 - `commands.rs` exposes `hygiene_suggestions_list`, `gardener_run_on_demand`, and `gardener_record_suppression`.
 - `src/features/backlog-hygiene/data.ts` is now command-backed; fixtures remain only for tests.
+
+---
+
+## Collection drill-through navigation
+
+- `src/views/collection/navigation/types.ts` defines the generic read-side edge contract used by collection previews. Same-entity single-target edges focus-drill; set edges re-root the collection; dangling edges stay visible and disabled.
+- `src/views/collection/navigation/focusTrail.ts` owns pure breadcrumb trail operations. Loops are preserved, so paths such as `A › B › A` are valid graph exploration history.
+- `src/views/collection/navigation/rerootStack.ts` owns pure scoped-root push/return behavior for set-edge drill-through.
+- `src/views/collection/preview/PreviewBreadcrumb.tsx` renders preview focus crumbs for side, bottom, and full-page preview hosts.
+- `src/views/collection/preview/PreviewConnections.tsx` renders connection rows using `LINK_KIND_META` and `SecondaryHighlightChip`; entity details pass callbacks through `EntityDetailProps`.
+- `src/features/collection-viewer/useEntityCollectionViewer.tsx` owns focus trail and active root state so entity details stay presentation-focused.
+- `src/entities/jira-issue/connections.ts` is the first entity resolver. It does not invent production Jira relationships; tests may supply explicit fixture edges through a test-only `__hmFixtureEdges` property.
