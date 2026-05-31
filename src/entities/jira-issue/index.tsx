@@ -15,6 +15,10 @@ import {
 import { KeyCell, TitleCell, StatusCell, AssigneeCell, UpdatedCell, PriorityCell, LabelsCell } from "./cells";
 import { JiraIssueDetail } from "./detail";
 import { jiraIssueFilterableProperties } from "./filterable";
+import {
+  JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS,
+  JIRA_ISSUE_PREVIEW_FIELDS,
+} from "./previewFields";
 
 const PROPERTY_DEFINITIONS: PropertyDefinition<JiraIssueListItem, JiraIssueProperty>[] = [
   {
@@ -142,6 +146,8 @@ export const jiraIssueEntity: EntityContract<JiraIssueListItem, JiraIssuePropert
   },
   properties: PROPERTY_DEFINITIONS,
   defaultProperties: DEFAULT_PROPERTIES,
+  previewFields: JIRA_ISSUE_PREVIEW_FIELDS,
+  defaultPreviewFields: JIRA_ISSUE_DEFAULT_PREVIEW_FIELDS,
   defaultSort: defaultJiraSort,
   sortableProperties: [
     { property: "key", compare: compareJiraIssueByKey, isNull: (item) => !item.key?.trim() },
