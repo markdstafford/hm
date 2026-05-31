@@ -3,6 +3,8 @@ import { ArrowUp, ArrowDown, X } from "lucide-react";
 import { IconButton } from "../../ui/buttons/IconButton";
 import type { EntityContract } from "./types";
 import type { PreviewSurface } from "./ViewConfig";
+import { PreviewBreadcrumb } from "./preview/PreviewBreadcrumb";
+import type { CollectionEdge, FocusTrailEntry, SingleTargetEdge, SetTargetEdge } from "./navigation/types";
 import {
   DEFAULT_BOTTOM_PEEK_HEIGHT,
   DEFAULT_SIDE_PEEK_WIDTH,
@@ -40,6 +42,11 @@ type Props<TItem, TProperty extends string> = {
   onMovePrevious: () => void;
   onMoveNext: () => void;
   onResizeCommit: (surface: DetailSurface, size: number) => void;
+  focusTrail?: FocusTrailEntry<TItem>[];
+  onPickFocusCrumb?: (index: number) => void;
+  edges?: CollectionEdge<TItem>[];
+  onOpenSingleEdge?: (edge: SingleTargetEdge<TItem>) => void;
+  onOpenSetEdge?: (edge: SetTargetEdge<TItem>) => void;
 };
 
 export function Detail<TItem, TProperty extends string>({
@@ -56,6 +63,11 @@ export function Detail<TItem, TProperty extends string>({
   onMovePrevious,
   onMoveNext,
   onResizeCommit,
+  focusTrail,
+  onPickFocusCrumb,
+  edges,
+  onOpenSingleEdge,
+  onOpenSetEdge,
 }: Props<TItem, TProperty>) {
   const EntityDetail = entity.Detail;
   const noun = entity.detailLabel ?? entity.id;
@@ -206,7 +218,14 @@ export function Detail<TItem, TProperty extends string>({
           "--preview-height": previewHeight === null ? undefined : `${previewHeight}px`,
         } as CSSProperties}
       >
-        <EntityDetail item={item} preview={previewMetadata} />
+        <PreviewBreadcrumb trail={focusTrail} onPickCrumb={onPickFocusCrumb} />
+        <EntityDetail
+          item={item}
+          preview={previewMetadata}
+          edges={edges}
+          onOpenSingleEdge={onOpenSingleEdge}
+          onOpenSetEdge={onOpenSetEdge}
+        />
       </div>
     </aside>
   );

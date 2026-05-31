@@ -119,4 +119,28 @@ describe("FullPagePreview", () => {
     const { container } = renderFull();
     expect(await axe(container)).toHaveNoViolations();
   });
+
+  it("renders a focus breadcrumb below full-page chrome", () => {
+    renderFull({
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+    });
+    expect(screen.getByRole("navigation", { name: "Preview focus path" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back to list (Esc)" })).toBeInTheDocument();
+  });
+
+  it("calls onPickFocusCrumb from full-page breadcrumbs", () => {
+    const onPickFocusCrumb = vi.fn();
+    renderFull({
+      onPickFocusCrumb,
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Return to AMP-1087" }));
+    expect(onPickFocusCrumb).toHaveBeenCalledWith(0);
+  });
 });

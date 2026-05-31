@@ -240,4 +240,29 @@ describe("Detail", () => {
     expect(aside).toHaveStyle({ height: "232px" });
     expect(onResizeCommit).toHaveBeenLastCalledWith("bottom-peek", 232);
   });
+
+  it("renders a focus breadcrumb between host chrome and side detail content", () => {
+    const onPickFocusCrumb = vi.fn();
+    renderDetail({
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+      onPickFocusCrumb,
+    });
+    expect(screen.getByRole("navigation", { name: "Preview focus path" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Return to AMP-1087" }));
+    expect(onPickFocusCrumb).toHaveBeenCalledWith(0);
+  });
+
+  it("renders a focus breadcrumb in bottom peek previews", () => {
+    renderDetail({
+      surface: "bottom-peek",
+      focusTrail: [
+        { item, label: "AMP-1087" },
+        { item: { id: "2", name: "Beta" }, label: "AMP-1102" },
+      ],
+    });
+    expect(screen.getByRole("navigation", { name: "Preview focus path" })).toBeInTheDocument();
+  });
 });
