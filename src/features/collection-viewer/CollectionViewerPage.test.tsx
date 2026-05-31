@@ -884,6 +884,42 @@ describe("CollectionViewerPage", () => {
     });
   });
 
+  it("bottom peek keyboard resize does not change the selected row", async () => {
+    mockViewCommands([
+      {
+        id: "jira-issue-all-open",
+        entity_kind: "jira-issue",
+        display_name: "All open",
+        position: 0,
+        is_default: true,
+        config: {
+          layout: {
+            type: "table",
+            density: "regular",
+            preview: "bottom-peek",
+            sidePeekWidth: DEFAULT_SIDE_PEEK_WIDTH,
+            bottomPeekHeight: DEFAULT_BOTTOM_PEEK_HEIGHT,
+          },
+        },
+      },
+    ]);
+    vi.mocked(useJiraIssues).mockReturnValue({ issues: mockIssues, loading: false, error: null });
+    render(<CollectionViewerPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /open amp-1: first issue/i }));
+    await screen.findByRole("button", { name: /close issue detail/i });
+    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
+
+    const separator = screen.getByRole("separator", { name: /resize issue detail/i });
+    // Fire ArrowUp and ArrowDown directly on the separator — should resize, not navigate rows
+    fireEvent.keyDown(separator, { key: "ArrowUp" });
+    fireEvent.keyDown(separator, { key: "ArrowDown" });
+
+    // AMP-1 must remain selected
+    expect(screen.getByRole("button", { name: /open amp-1: first issue/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /open amp-2: second issue/i })).not.toHaveAttribute("aria-pressed", "true");
+  });
+
   it("passes active view property visibility to rows so hidden properties disappear", async () => {
     const records = [
       {

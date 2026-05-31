@@ -146,6 +146,7 @@ export function Detail<TItem, TProperty extends string>({
     if (event.key === "End") nextSize = maxSize;
     if (nextSize === null) return;
     event.preventDefault();
+    event.stopPropagation();
     commitSize(nextSize);
   }
 
