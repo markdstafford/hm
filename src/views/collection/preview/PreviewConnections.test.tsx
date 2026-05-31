@@ -119,3 +119,84 @@ describe("PreviewConnections", () => {
     expect(onOpenSet).toHaveBeenCalledWith(edges[2]);
   });
 });
+
+type ShortcutItem = { id: string };
+
+const shortcutEdges: CollectionEdge<ShortcutItem>[] = [
+  {
+    id: "edge-1",
+    kind: "source",
+    shape: "single",
+    relationship: "blocks",
+    targetRef: { entityId: "jira-issue", displayKey: "AMP-1", title: "First" },
+    target: { id: "1" },
+  },
+  {
+    id: "edge-2",
+    kind: "source",
+    shape: "single",
+    relationship: "blocks",
+    targetRef: { entityId: "jira-issue", displayKey: "AMP-2", title: "Missing" },
+    danglingReason: "not-ingested",
+  },
+  {
+    id: "edge-3",
+    kind: "local",
+    shape: "set",
+    relationship: "related",
+    label: "Related issues",
+    count: 2,
+    items: [{ id: "1" }, { id: "2" }],
+  },
+];
+
+describe("PreviewConnections quick-switcher shortcuts", () => {
+  it("renders visible shortcut numbers only for supplied drillable edge ids", () => {
+    render(
+      <PreviewConnections
+        edges={shortcutEdges}
+        shortcutIndexByEdgeId={{ "edge-1": 1, "edge-3": 2 }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Shortcut 1, Open blocks AMP-1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Shortcut 2, Open Related issues, 2 items" }),
+    ).toBeInTheDocument();
+    // Dangling edge gets no shortcut prefix even if edge-2 were in the map
+    const danglingButton = screen.getByRole("button", { name: "blocks AMP-2, Not ingested" });
+    expect(danglingButton).toBeInTheDocument();
+    expect(danglingButton).not.toHaveAccessibleName(/^Shortcut/);
+  });
+
+  it("does not activate dangling edges", () => {
+    const onOpenSingle = vi.fn();
+    render(
+      <PreviewConnections
+        edges={shortcutEdges}
+        onOpenSingle={onOpenSingle}
+        shortcutIndexByEdgeId={{ "edge-1": 1 }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "blocks AMP-2, Not ingested" }));
+    expect(onOpenSingle).not.toHaveBeenCalled();
+  });
+
+  it("renders shortcut badge span with the number when shortcut is present", () => {
+    const { container } = render(
+      <PreviewConnections
+        edges={shortcutEdges}
+        shortcutIndexByEdgeId={{ "edge-1": 1 }}
+      />,
+    );
+    // The button for edge-1 should contain a visible span showing "1"
+    const button = screen.getByRole("button", { name: "Shortcut 1, Open blocks AMP-1" });
+    expect(button).toHaveTextContent("1");
+    // The dangling button's badge span should be aria-hidden and empty
+    const danglingButton = container.querySelector('[aria-label="blocks AMP-2, Not ingested"]');
+    expect(danglingButton).not.toBeNull();
+    const hiddenBadge = danglingButton!.querySelector('[aria-hidden="true"]');
+    expect(hiddenBadge).toBeInTheDocument();
+  });
+});

@@ -108,8 +108,10 @@ export type FilterableProperty<TItem, TProperty extends string> = {
   options?: (context: FilterOptionContext<TItem>) => FilterOption[];
 };
 
+export type EntityPreviewSurface = PreviewSurface | "quick-switcher";
+
 export type EntityPreviewMetadata = {
-  surface: PreviewSurface;
+  surface: EntityPreviewSurface;
   width: number | null;
   height: number | null;
   sizeClass: PreviewSizeClass;
