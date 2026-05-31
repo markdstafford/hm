@@ -31,6 +31,40 @@ export type PropertyConfig<TProperty extends string> = {
   visible: boolean;
 };
 
+export type PreviewFieldTier = 1 | 2 | 3;
+
+export type PreviewFieldConfig<TProperty extends string> = {
+  property: TProperty;
+  tier: PreviewFieldTier;
+  pinned?: boolean;
+};
+
+export type PreviewFieldDefinition<TItem, TProperty extends string> = {
+  property: TProperty;
+  label?: string;
+  renderCell?: CellRenderer<TItem, TProperty>;
+  isEmpty?: (item: TItem) => boolean;
+  pinEligible?: boolean;
+};
+
+export type PreviewFieldSourceConfig<TProperty extends string> = {
+  sourceId: string | null;
+  entityId: string;
+  fields: PreviewFieldConfig<TProperty>[];
+};
+
+export type PreviewFieldsConfig<TProperty extends string> = {
+  version: 1;
+  sources: PreviewFieldSourceConfig<TProperty>[];
+};
+
+export type ResolvedPreviewField<TItem, TProperty extends string> = {
+  definition: PreviewFieldDefinition<TItem, TProperty>;
+  config: PreviewFieldConfig<TProperty>;
+  effectiveTier: PreviewFieldTier;
+  pinned: boolean;
+};
+
 export type PropertyComparator<TItem> = (a: TItem, b: TItem) => number;
 
 export type SortableProperty<TItem, TProperty extends string> = {
@@ -89,6 +123,9 @@ export type EntityContract<TItem, TProperty extends string> = {
   getRowLabel?: (item: TItem) => string;
   properties: PropertyDefinition<TItem, TProperty>[];
   defaultProperties: PropertyConfig<TProperty>[];
+  previewFields?: PreviewFieldDefinition<TItem, TProperty>[];
+  defaultPreviewFields?: PreviewFieldConfig<TProperty>[];
+  resolvePreviewFieldConfig?: (item: TItem) => PreviewFieldConfig<TProperty>[];
   defaultSort: (a: TItem, b: TItem) => number;
   sortableProperties?: SortableProperty<TItem, TProperty>[];
   groupableProperties?: GroupableProperty<TItem, TProperty>[];
