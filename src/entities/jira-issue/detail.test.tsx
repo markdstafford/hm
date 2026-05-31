@@ -48,16 +48,10 @@ const full: JiraIssueListItem = {
 
 describe("JiraIssueDetail", () => {
   beforeEach(() => {
-    vi.mocked(historyModule.loadJiraIssueStatusHistory).mockResolvedValue({
-      status: "ok",
-      transitions: [],
-      partial: false,
-    });
-    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockResolvedValue({
-      status: "ok",
-      body: null,
-      comments: [],
-    });
+    // Use never-resolving promises as defaults so render-only tests avoid act() warnings.
+    // Tests that assert on loaded state override these with their own mock setup.
+    vi.mocked(historyModule.loadJiraIssueStatusHistory).mockReturnValue(new Promise(() => {}));
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockReturnValue(new Promise(() => {}));
   });
 
   it("renders the key and title", async () => {
@@ -228,7 +222,8 @@ describe("JiraIssueDetail", () => {
 
     render(<JiraIssueDetail item={baseItem()} />);
 
-    expect(await screen.findByText("Could not load comments. Try syncing Jira again.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Description" })).toBeInTheDocument();
+    expect(screen.getByText("Could not load comments. Try syncing Jira again.")).toBeInTheDocument();
     await screen.findByRole("list", { name: "Status history" });
   });
 
@@ -252,11 +247,8 @@ describe("JiraIssueDetail", () => {
 describe("JiraIssueDetail — status history", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockResolvedValue({
-      status: "ok",
-      body: null,
-      comments: [],
-    });
+    // Keep previewContent pending so status-history-only tests avoid act() warnings.
+    vi.mocked(previewContentModule.loadJiraIssuePreviewContent).mockReturnValue(new Promise(() => {}));
   });
 
   it("shows loading spinner while history is pending", () => {

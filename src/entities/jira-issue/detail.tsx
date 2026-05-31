@@ -89,11 +89,14 @@ export function JiraIssueDetail({ item, preview }: Props) {
       )}
 
       {previewContent.phase === "error" && (
-        <section aria-label="Preview content" className="flex flex-col gap-2 border-b border-border pb-3">
-          <p role="alert" className="text-sm text-subtext">
-            Could not load comments. Try syncing Jira again.
-          </p>
-        </section>
+        <>
+          <PreviewDescription body={null} resetKey={item.work_item_id} />
+          <section aria-label="Comments error" className="flex flex-col gap-2 border-b border-border pb-3">
+            <p role="alert" className="text-sm text-subtext">
+              Could not load comments. Try syncing Jira again.
+            </p>
+          </section>
+        </>
       )}
 
       {previewContent.phase === "ok" && (
