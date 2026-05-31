@@ -7,6 +7,12 @@ import type {
 } from "./filter/types";
 import type { PreviewSurface } from "./ViewConfig";
 import type { PreviewSizeClass } from "./previewSizing";
+import type {
+  CollectionEdge,
+  ResolveCollectionEdgesArgs,
+  SingleTargetEdge,
+  SetTargetEdge,
+} from "./navigation/types";
 
 export type PropertySide = "left" | "right";
 export type PropertyKind = "text" | "number" | "date" | "categorical" | "tags";
@@ -112,6 +118,9 @@ export type EntityPreviewMetadata = {
 export type EntityDetailProps<TItem> = {
   item: TItem;
   preview?: EntityPreviewMetadata;
+  edges?: CollectionEdge<TItem>[];
+  onOpenSingleEdge?: (edge: SingleTargetEdge<TItem>) => void;
+  onOpenSetEdge?: (edge: SetTargetEdge<TItem>) => void;
 };
 
 export type EntityContract<TItem, TProperty extends string> = {
@@ -130,6 +139,7 @@ export type EntityContract<TItem, TProperty extends string> = {
   sortableProperties?: SortableProperty<TItem, TProperty>[];
   groupableProperties?: GroupableProperty<TItem, TProperty>[];
   filterableProperties?: FilterableProperty<TItem, TProperty>[];
+  resolveEdges?: (args: ResolveCollectionEdgesArgs<TItem>) => CollectionEdge<TItem>[];
   Detail: ComponentType<EntityDetailProps<TItem>>;
   defaultViews: CollectionView[];
 };
