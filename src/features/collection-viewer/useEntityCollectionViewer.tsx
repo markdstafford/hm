@@ -504,6 +504,9 @@ export function useEntityCollectionViewer<TItem, TProperty extends string>({
               onClose={handleClosePreview}
               onMovePrevious={movePrevious}
               onMoveNext={moveNext}
+              sidePeekWidth={activeConfig.layout.sidePeekWidth}
+              bottomPeekHeight={activeConfig.layout.bottomPeekHeight}
+              onResizeCommit={() => {}}
             />
           )}
         </div>

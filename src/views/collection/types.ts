@@ -5,6 +5,8 @@ import type {
   FilterOption,
   FilterOptionContext,
 } from "./filter/types";
+import type { PreviewSurface } from "./ViewConfig";
+import type { PreviewSizeClass } from "./previewSizing";
 
 export type PropertySide = "left" | "right";
 export type PropertyKind = "text" | "number" | "date" | "categorical" | "tags";
@@ -66,6 +68,18 @@ export type FilterableProperty<TItem, TProperty extends string> = {
   options?: (context: FilterOptionContext<TItem>) => FilterOption[];
 };
 
+export type EntityPreviewMetadata = {
+  surface: PreviewSurface;
+  width: number | null;
+  height: number | null;
+  sizeClass: PreviewSizeClass;
+};
+
+export type EntityDetailProps<TItem> = {
+  item: TItem;
+  preview?: EntityPreviewMetadata;
+};
+
 export type EntityContract<TItem, TProperty extends string> = {
   id: string;
   label: string;
@@ -79,6 +93,6 @@ export type EntityContract<TItem, TProperty extends string> = {
   sortableProperties?: SortableProperty<TItem, TProperty>[];
   groupableProperties?: GroupableProperty<TItem, TProperty>[];
   filterableProperties?: FilterableProperty<TItem, TProperty>[];
-  Detail: ComponentType<{ item: TItem }>;
+  Detail: ComponentType<EntityDetailProps<TItem>>;
   defaultViews: CollectionView[];
 };
