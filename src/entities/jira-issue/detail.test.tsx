@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
 import { JiraIssueDetail } from "./detail";
 import type { JiraIssueListItem, JiraIssueStatusTransition } from "../../bindings";
@@ -63,35 +64,74 @@ describe("JiraIssueDetail", () => {
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
-  it("renders assignee name", async () => {
-    render(<JiraIssueDetail item={full} />);
+  it("renders populated tier 1 fields below identity and hides empty fields", async () => {
+    render(<JiraIssueDetail item={{ ...full, priority_name: "P1", project_key: "AMP", assignee_display_name: "Alice Smith" }} />);
+
+    const heading = screen.getByRole("heading", { name: "Fix the widget" });
+    const fieldRegion = screen.getByRole("region", { name: "Issue fields" });
+    const historyHeading = screen.getByRole("heading", { name: "Status history" });
+
+    expect(heading.compareDocumentPosition(fieldRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(fieldRegion.compareDocumentPosition(historyHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("Priority")).toBeInTheDocument();
+    expect(screen.getByText("P1")).toBeInTheDocument();
+    expect(screen.getByText("Project")).toBeInTheDocument();
+    expect(screen.getByText("AMP")).toBeInTheDocument();
+    expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Alice Smith")).toBeInTheDocument();
   });
 
-  it("renders 'Unassigned' when assignee is null", async () => {
-    render(<JiraIssueDetail item={{ ...full, assignee_display_name: null }} />);
-    expect(screen.getByText("Unassigned")).toBeInTheDocument();
+  it("omits empty Jira preview fields instead of rendering Unassigned or placeholders", async () => {
+    render(
+      <JiraIssueDetail
+        item={{
+          ...full,
+          priority_name: null,
+          project_key: null,
+          assignee_display_name: null,
+          labels: [],
+          updated_at_source: null,
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("region", { name: "Issue fields" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Unassigned")).not.toBeInTheDocument();
+    expect(screen.queryByText("Priority")).not.toBeInTheDocument();
+    expect(screen.queryByText("Project")).not.toBeInTheDocument();
+    expect(screen.queryByText("Updated")).not.toBeInTheDocument();
   });
 
-  it("renders project_key when present", async () => {
-    render(<JiraIssueDetail item={full} />);
-    expect(screen.getByTestId("detail-project-key")).toBeInTheDocument();
-    expect(screen.getByTestId("detail-project-key").textContent).toBe("AMP");
+  it("expands and collapses populated secondary Jira fields", async () => {
+    const user = userEvent.setup();
+    render(<JiraIssueDetail item={{ ...full, priority_name: "P1", labels: ["preview", "triage"] }} />);
+
+    const button = screen.getByRole("button", { name: "More fields (2)" });
+    expect(screen.queryByText("Labels")).not.toBeInTheDocument();
+
+    await user.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Labels")).toBeInTheDocument();
+    expect(screen.getByText("preview")).toBeInTheDocument();
+    expect(screen.getByText("triage")).toBeInTheDocument();
+    expect(screen.getByText("Updated")).toBeInTheDocument();
+
+    await user.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Labels")).not.toBeInTheDocument();
   });
 
-  it("omits project_key section when null", async () => {
-    render(<JiraIssueDetail item={{ ...full, project_key: null }} />);
-    expect(screen.queryByTestId("detail-project-key")).not.toBeInTheDocument();
-  });
+  it("uses compact preview metadata for one-column secondary fields", async () => {
+    const user = userEvent.setup();
+    render(
+      <JiraIssueDetail
+        item={{ ...full, priority_name: "P1", labels: ["preview"], updated_at_source: "2024-06-01T10:00:00Z" }}
+        preview={{ surface: "side-peek", width: 360, height: null, sizeClass: "compact" }}
+      />,
+    );
 
-  it("renders updated time when present", async () => {
-    render(<JiraIssueDetail item={full} />);
-    expect(screen.getByTestId("detail-updated")).toBeInTheDocument();
-  });
-
-  it("omits updated section when null", async () => {
-    render(<JiraIssueDetail item={{ ...full, updated_at_source: null }} />);
-    expect(screen.queryByTestId("detail-updated")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "More fields (2)" }));
+    expect(screen.getByTestId("preview-secondary-fields")).toHaveClass("grid-cols-1");
   });
 });
 
