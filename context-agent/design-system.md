@@ -544,6 +544,14 @@ When a view does **not** have a right rail, the footer-right zone shows only AI 
 
 Components respect the user's theme preference. The `data-theme` attribute on `<html>` (`latte` / `macchiato`) determines which Catppuccin variant is active. Always write components against semantic tokens (`--color-text`, `--color-primary`, etc.), never against `--ctp-*` directly.
 
+### Quick switcher overlay
+
+The global quick switcher lives in `src/features/quick-switcher/` and is opened by `⌘K` or the sidebar `ScopeHeader` Search button. It uses the shared `Dialog` primitive with token-only styling: centered overlay, search header, result list, and named `Preview` region. The search input must set `autoComplete="off"`, `autoCorrect="off"`, `autoCapitalize="none"`, and `spellCheck={false}` so browser/WebView assistance does not steal navigation keys.
+
+Search sources register through `QuickSwitcherSource`; entity-specific code adapts data to generic result rows and supplies collection handoff callbacks. The shell owns query state, lexical result ordering, active-index state, input/results focus mode, and close behavior. It must not call providers, embeddings, remote search, or source-system APIs.
+
+The preview pane hosts the entity `Detail` component with `preview.surface = "quick-switcher"` and compact sizing metadata. Persisted view settings remain limited to side peek, bottom peek, and full page; `"quick-switcher"` is a non-persisted host marker only. Numbered connection shortcuts are visible and accessible only for drillable edges; dangling or unsupported edges stay visible but unnumbered.
+
 ### Keyboard shortcuts
 
 Bindings are registered through `useShortcut(binding, handler, options?)` (`src/shell/useShortcut.ts`). Display them with `<KeyboardShortcut binding="…" />`.
