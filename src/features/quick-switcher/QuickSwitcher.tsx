@@ -201,8 +201,8 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(18rem,0.9fr)_minmax(24rem,1.1fr)]">
-          <div className="min-h-[22rem] border-b border-border md:border-b-0 md:border-r">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:overflow-hidden md:grid-cols-[minmax(18rem,0.9fr)_minmax(24rem,1.1fr)]">
+          <div className="border-b border-border md:min-h-[22rem] md:border-b-0 md:border-r">
             <div
               id="quick-switcher-results"
               ref={resultsRef}
@@ -272,7 +272,7 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
           <section
             aria-label="Preview"
             role="region"
-            className="min-h-[22rem] overflow-y-auto bg-background"
+            className="overflow-y-auto bg-background md:min-h-[22rem]"
           >
             {!activeResult && (
               <div className="flex h-full items-center justify-center p-6 text-sm text-subtext">
