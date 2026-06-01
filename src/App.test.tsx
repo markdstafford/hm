@@ -198,6 +198,14 @@ describe("App / quick switcher", () => {
     expect(screen.getByRole("dialog", { name: "Quick switcher" })).toBeInTheDocument();
   });
 
+  it("quick switcher shortcut does not break the showcase shortcut", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "d", metaKey: true, shiftKey: true });
+    expect(screen.getByRole("heading", { name: "Design system showcase" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByRole("dialog", { name: "Quick switcher" })).toBeInTheDocument();
+  });
+
   it("opens a Jira result into the Jira collection surface", async () => {
     render(<App />);
     fireEvent.keyDown(window, { key: "k", metaKey: true });

@@ -153,6 +153,21 @@ describe("QuickSwitcher", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("shows a safe source error without raw error details", () => {
+    const source = makeSource();
+    source.error = "postgres://token:secret@example.invalid raw stack trace";
+    render(<QuickSwitcher open onOpenChange={vi.fn()} sources={[source]} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Some local items could not be loaded.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("secret");
+  });
+
+  it("shows loading status scoped to the result list", () => {
+    const source = makeSource();
+    source.loading = true;
+    render(<QuickSwitcher open onOpenChange={vi.fn()} sources={[source]} />);
+    expect(screen.getByRole("status", { name: "Loading local items" })).toBeInTheDocument();
+  });
+
   it("does not number or activate dangling connections", () => {
     const edge: CollectionEdge<Item> = {
       id: "missing",
