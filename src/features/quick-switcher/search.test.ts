@@ -19,8 +19,8 @@ const items: Item[] = [
   { id: "4", key: "AMP-1001", title: "Deprecated JSCA path", project: "AMP", status: "Done" },
 ];
 
-function source(sourceId = "jira"): QuickSwitcherSource<Item> {
-  return {
+function source(sourceId = "jira"): QuickSwitcherSource {
+  const src = {
     id: sourceId,
     entity: {
       id: "jira-issue",
@@ -33,7 +33,7 @@ function source(sourceId = "jira"): QuickSwitcherSource<Item> {
       defaultViews: [],
     },
     items,
-    toQuickSwitcherItem: (item) => ({
+    toQuickSwitcherItem: (item: Item) => ({
       id: `jira:${item.id}`,
       sourceId,
       entityId: "jira-issue",
@@ -50,6 +50,7 @@ function source(sourceId = "jira"): QuickSwitcherSource<Item> {
     }),
     openItem: vi.fn(),
   };
+  return src as unknown as QuickSwitcherSource;
 }
 
 describe("normalizeQuickSwitcherQuery", () => {

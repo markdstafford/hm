@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import type { EntityContract } from "../../views/collection/types";
-import type { CollectionEdge, SingleTargetEdge, SetTargetEdge } from "../../views/collection/navigation/types";
+import type { EntityDetailProps } from "../../views/collection/types";
+import type { CollectionEdge, SingleTargetEdge, SetTargetEdge, ResolveCollectionEdgesArgs } from "../../views/collection/navigation/types";
+import type { ComponentType } from "react";
 
 export type QuickSwitcherOpenOptions<TItem = unknown> = {
   openPreview?: boolean;
@@ -25,9 +26,15 @@ export type QuickSwitcherItem<TItem = unknown> = {
   };
 };
 
+export type QuickSwitcherEntityContract<TItem> = {
+  id: string;
+  Detail: ComponentType<EntityDetailProps<TItem>>;
+  resolveEdges?: (args: ResolveCollectionEdgesArgs<TItem>) => CollectionEdge<TItem>[];
+};
+
 export type QuickSwitcherSource<TItem = unknown> = {
   id: string;
-  entity: EntityContract<TItem, string>;
+  entity: QuickSwitcherEntityContract<TItem>;
   items: TItem[];
   loading?: boolean;
   error?: string | null;
