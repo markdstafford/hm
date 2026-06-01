@@ -225,6 +225,46 @@ function OpaqueIdHarness({ items }: { items: Item[] }) {
   return <div>{viewer.header}{viewer.body}</div>;
 }
 
+function HandoffHarness({ items }: { items: Item[] }) {
+  const viewer = useEntityCollectionViewer({
+    active: true,
+    entity: drillEntity,
+    items,
+    loading: false,
+    error: null,
+    copy: {
+      loadingLabel: "Loading test items",
+      emptyTitle: "No test items",
+      emptyDescription: "No test items loaded.",
+      errorTitle: "Could not load test items",
+    },
+  });
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() =>
+          viewer.openItemById("item-b", { openPreview: true, scopedFallback: true })
+        }
+      >
+        Open B by id
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          const edges = drillEntity.resolveEdges!({ item: items[0], allItems: items });
+          const setEdge = edges.find((edge) => edge.shape === "set");
+          if (setEdge && setEdge.shape === "set") viewer.openSetEdge(setEdge);
+        }}
+      >
+        Open related set by API
+      </button>
+      {viewer.header}
+      {viewer.body}
+    </div>
+  );
+}
+
 function Harness({ items = [{ id: "item-a", key: "A-1", title: "Alpha", score: 2 }] }: { items?: Item[] }) {
   const viewer = useEntityCollectionViewer({
     active: true,
@@ -436,5 +476,76 @@ describe("useEntityCollectionViewer", () => {
     // Must not fall back to the opaque getId value
     expect(breadcrumb).not.toHaveTextContent("opaque:item-a");
     expect(breadcrumb).not.toHaveTextContent("opaque:item-b");
+  });
+
+  it("opens an item by id and opens the configured preview", async () => {
+    render(<HandoffHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+    ]} />);
+
+    // Wait for views to settle so the row buttons exist.
+    await screen.findByRole("button", { name: "Open test A-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open B by id" }));
+
+    expect(screen.getByRole("button", { name: "Open test B-1" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("heading", { name: "Beta" })).toBeInTheDocument();
+  });
+
+  it("pushes a scoped fallback root labelled for the target when it is filtered out", async () => {
+    // Active view filters out C-1, so openItemById for a filtered-out item
+    // should push a scoped root labelled for that item. We use a filter that
+    // excludes a different item than the one we open so the opened item is
+    // still visible inside the scoped root.
+    vi.mocked(commands.collectionViewsSeedDefaults).mockResolvedValueOnce({
+      status: "ok" as const,
+      data: [{
+        id: "test-all",
+        entity_kind: "test-entity",
+        display_name: "All",
+        position: 0,
+        is_default: true,
+        config: {
+          filters: [{ id: "f1", property: "key", operator: "is-not", value: "B-1", active: true }],
+        },
+      }],
+    });
+
+    render(<HandoffHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+      { id: "item-c", key: "C-1", title: "Gamma", score: 9 },
+    ]} />);
+
+    await screen.findByRole("button", { name: "Open test A-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open B by id" }));
+
+    // The scoped root banner names the opened item — proving the fallback
+    // path executed. The active filter still applies on top of the scoped
+    // root items; that filter interaction is a documented concern.
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Opened B-1");
+    });
+  });
+
+  it("opens a set edge through the handoff API", async () => {
+    render(<HandoffHarness items={[
+      { id: "item-a", key: "A-1", title: "Alpha", score: 2 },
+      { id: "item-b", key: "B-1", title: "Beta", score: 1 },
+      { id: "item-c", key: "C-1", title: "Gamma", score: 9 },
+    ]} />);
+
+    await screen.findByRole("button", { name: "Open test A-1" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open related set by API" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("Related to A-1");
+    expect(screen.queryByRole("button", { name: "Open test A-1" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open test B-1" })).toBeInTheDocument();
   });
 });

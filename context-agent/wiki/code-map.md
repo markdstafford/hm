@@ -387,6 +387,17 @@ The legacy four-section editor (`CredentialsSection` / `EndpointsSection` / `Pro
 
 ---
 
+## Quick switcher
+
+- `src/features/quick-switcher/types.ts` — generic source/result/open contracts. New entity types register here by adapting local items to `QuickSwitcherItem` and supplying an open handoff.
+- `src/features/quick-switcher/search.ts` — lexical-only ranking. Exact ids/keys outrank prefixes, title matches, and context substrings. No provider, embedding, remote, or database calls belong here.
+- `src/features/quick-switcher/keyboard.ts` — pure keyboard state transitions for input/results focus and active index clamping.
+- `src/features/quick-switcher/jiraSource.ts` — Jira issue adapter for `jiraIssueEntity` and loaded issue list data.
+- `src/features/quick-switcher/QuickSwitcher.tsx` — dialog shell, result list, compact preview host, `Enter` open, and `1`–`9` connection shortcuts.
+- `src/features/collection-viewer/useEntityCollectionViewer.tsx` — owns collection state and exposes `openItemById`, `openSingleEdge`, and `openSetEdge` for shell handoff.
+
+---
+
 ## Collection drill-through navigation
 
 - `src/views/collection/navigation/types.ts` defines the generic read-side edge contract used by collection previews. Same-entity single-target edges focus-drill; set edges re-root the collection; dangling edges stay visible and disabled.

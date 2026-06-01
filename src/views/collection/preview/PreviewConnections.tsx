@@ -12,6 +12,7 @@ type Props<TItem> = {
   edges?: CollectionEdge<TItem>[];
   onOpenSingle?: (edge: SingleTargetEdge<TItem>) => void;
   onOpenSet?: (edge: SetTargetEdge<TItem>) => void;
+  shortcutIndexByEdgeId?: Record<string, number>;
 };
 
 const DANGLING_COPY: Record<CollectionEdgeDanglingReason, string> = {
@@ -43,6 +44,10 @@ function setAccessibleName<TItem>(edge: SetTargetEdge<TItem>, disabledReason?: s
   return `Open ${edge.label}, ${count} ${count === 1 ? "item" : "items"}`;
 }
 
+function withShortcut(accessibleName: string, shortcutNumber?: number): string {
+  return shortcutNumber ? `Shortcut ${shortcutNumber}, ${accessibleName}` : accessibleName;
+}
+
 function isSingleDrillable<TItem>(edge: SingleTargetEdge<TItem>): boolean {
   return !!edge.target && !edge.danglingReason;
 }
@@ -53,7 +58,7 @@ function isSetDrillable<TItem>(edge: SetTargetEdge<TItem>): boolean {
   return Array.isArray(edge.items) && edge.items.length > 0 && !edge.danglingReason;
 }
 
-export function PreviewConnections<TItem>({ edges = [], onOpenSingle, onOpenSet }: Props<TItem>) {
+export function PreviewConnections<TItem>({ edges = [], onOpenSingle, onOpenSet, shortcutIndexByEdgeId = {} }: Props<TItem>) {
   if (edges.length === 0) return null;
 
   function activate(edge: CollectionEdge<TItem>) {
@@ -82,9 +87,11 @@ export function PreviewConnections<TItem>({ edges = [], onOpenSingle, onOpenSet 
           const Icon = meta.Icon;
           const danglingCopy = edge.danglingReason ? DANGLING_COPY[edge.danglingReason] : undefined;
           const disabled = edge.shape === "single" ? !isSingleDrillable(edge) : !isSetDrillable(edge);
-          const accessibleName = edge.shape === "single"
+          const baseAccessibleName = edge.shape === "single"
             ? singleAccessibleName(edge, danglingCopy)
             : setAccessibleName(edge, danglingCopy);
+          const shortcutNumber = disabled ? undefined : shortcutIndexByEdgeId[edge.id];
+          const accessibleName = withShortcut(baseAccessibleName, shortcutNumber);
 
           return (
             <button
@@ -95,12 +102,18 @@ export function PreviewConnections<TItem>({ edges = [], onOpenSingle, onOpenSet 
               tabIndex={disabled ? -1 : 0}
               onClick={() => activate(edge)}
               onKeyDown={(event) => handleKeyDown(edge, event)}
-              className={`grid grid-cols-[auto_minmax(5.5rem,auto)_1fr_auto] items-center gap-2 rounded px-2 py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+              className={`grid grid-cols-[auto_auto_minmax(5.5rem,auto)_1fr_auto] items-center gap-2 rounded px-2 py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                 disabled
                   ? "cursor-default text-subtext opacity-60"
                   : "text-text hover:bg-surface"
               }`}
             >
+              <span
+                className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-border bg-surface px-1 font-mono text-xs text-subtext"
+                aria-hidden={shortcutNumber ? undefined : true}
+              >
+                {shortcutNumber ?? ""}
+              </span>
               {!danglingCopy && (
                 <span className="inline-flex items-center gap-1 text-xs text-subtext">
                   <Icon size={14} aria-hidden />

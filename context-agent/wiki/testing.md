@@ -397,6 +397,30 @@ cd src-tauri && cargo test generate_typescript_bindings -- --exact --nocapture
 
 ---
 
+## Quick switcher
+
+Targeted checks while editing quick-switcher code:
+
+```bash
+npm test -- src/features/quick-switcher/search.test.ts
+npm test -- src/features/quick-switcher/keyboard.test.ts
+npm test -- src/features/quick-switcher/QuickSwitcher.test.tsx
+npm test -- src/features/collection-viewer/useEntityCollectionViewer.test.tsx
+npm test -- src/App.test.tsx
+```
+
+Broader checks before handoff:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+Quick switcher component tests use React Testing Library and `jest-axe`. App integration tests mock `useJiraIssues`; update the shared mock return value (`mockUseJiraIssues.mockReturnValue(...)`) rather than adding Tauri command calls for local issue data.
+
+---
+
 ## Gardener producer tests (added 2026-05-30, issue #69)
 
 Targeted Rust:

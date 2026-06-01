@@ -1,8 +1,10 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
-import { beforeAll, vi } from "vitest";
+import { beforeAll, beforeEach, describe, it, expect, vi } from "vitest";
 import App from "./App";
+
+const mockUseJiraIssues = vi.fn().mockReturnValue({ issues: [], loading: false, error: null });
 
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,7 +45,7 @@ vi.mock("./features/backlog-hygiene/data", () => ({
 }));
 
 vi.mock("./features/collection-viewer/data", () => ({
-  useJiraIssues: vi.fn().mockReturnValue({ issues: [], loading: false, error: null }),
+  useJiraIssues: () => mockUseJiraIssues(),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -159,5 +161,71 @@ describe("App / Backlog hygiene navigation", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: /backlog hygiene/i }));
     expect(screen.getByRole("button", { name: /backlog hygiene/i })).toHaveAttribute("aria-current", "page");
+  });
+});
+
+describe("App / quick switcher", () => {
+  const issue = {
+    work_item_id: "wi-1087",
+    key: "AMP-1087",
+    title: "Cardinality mismatch",
+    status_name: "Open",
+    assignee_display_name: "Elena",
+    updated_at_source: null,
+    project_key: "AMP",
+    priority_name: "P3",
+    labels: ["sync"],
+  };
+
+  beforeEach(() => {
+    mockUseJiraIssues.mockReturnValue({ issues: [issue], loading: false, error: null });
+  });
+
+  it("opens the quick switcher with ⌘K and closes it when ⌘K is pressed again", async () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByRole("dialog", { name: "Quick switcher" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Quick switcher" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("opens the quick switcher from the sidebar Search button", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Search items" }));
+    expect(screen.getByRole("dialog", { name: "Quick switcher" })).toBeInTheDocument();
+  });
+
+  it("quick switcher shortcut does not break the showcase shortcut", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "d", metaKey: true, shiftKey: true });
+    expect(screen.getByRole("heading", { name: "Design system showcase" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByRole("dialog", { name: "Quick switcher" })).toBeInTheDocument();
+  });
+
+  it("opens a Jira result into the Jira collection surface", async () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await userEvent.type(
+      screen.getByRole("combobox", { name: "Search items" }),
+      "1087",
+    );
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search items" }), { key: "Enter" });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Quick switcher" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /Jira issues/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("button", { name: /Open AMP-1087/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("heading", { name: "Cardinality mismatch" })).toBeInTheDocument();
   });
 });

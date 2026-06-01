@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Inbox, ListTodo, Settings as SettingsIcon, PanelLeft, Sparkles, MessageSquare, X } from "lucide-react";
 import { commands, type AppStatus } from "./bindings";
 import {
@@ -19,6 +19,9 @@ import { Showcase } from "./_dev/Showcase";
 import { InboxPage } from "./features/inbox/InboxPage";
 import { useCollectionViewer } from "./features/collection-viewer/useCollectionViewer";
 import { BacklogHygienePage } from "./features/backlog-hygiene/BacklogHygienePage";
+import { QuickSwitcher } from "./features/quick-switcher";
+import type { QuickSwitcherSource } from "./features/quick-switcher";
+import { createJiraQuickSwitcherSource } from "./features/quick-switcher/jiraSource";
 import { Breadcrumb } from "./ui/navigation/Breadcrumb";
 import {
   SettingsPage,
@@ -35,6 +38,7 @@ function App() {
   const [showShowcase, setShowShowcase] = useState(false);
   type MainPage = "inbox" | "jira-issues" | "backlog-hygiene";
   const [mainPage, setMainPage] = useState<MainPage>("inbox");
+  const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [prefersDark, setPrefersDark] = useState(getSystemPrefersDark);
   const settingsOpenerRef = useRef<HTMLButtonElement>(null);
 
@@ -110,6 +114,14 @@ function App() {
   }, [prefs]);
 
   useShortcut("⌘+shift+d", () => setShowShowcase((v) => !v), { allowInForm: true });
+  useShortcut(
+    "⌘+k",
+    (event) => {
+      event.preventDefault();
+      setQuickSwitcherOpen((open) => !open);
+    },
+    { allowInForm: true },
+  );
 
   const inSettings = settingsPage !== null;
   const handleCloseSettings = () => {
@@ -123,6 +135,45 @@ function App() {
   const collectionViewer = useCollectionViewer({
     active: !inSettings && !showShowcase && mainPage === "jira-issues",
   });
+
+  const openJiraIssueFromSwitcher = useCallback(
+    (id: string, options?: { openPreview?: boolean; scopedFallback?: boolean }) => {
+      setSettingsPage(null);
+      setShowShowcase(false);
+      setMainPage("jira-issues");
+      return collectionViewer.openItemById(id, options);
+    },
+    [collectionViewer],
+  );
+
+  const quickSwitcherSources = useMemo(() => {
+    const source = createJiraQuickSwitcherSource({
+      issues: collectionViewer.items,
+      loading: collectionViewer.loading,
+      error: collectionViewer.error,
+      openIssue: openJiraIssueFromSwitcher,
+    });
+    source.openSingleEdge = (edge) => {
+      setSettingsPage(null);
+      setShowShowcase(false);
+      setMainPage("jira-issues");
+      return collectionViewer.openSingleEdge(edge);
+    };
+    source.openSetEdge = (edge) => {
+      setSettingsPage(null);
+      setShowShowcase(false);
+      setMainPage("jira-issues");
+      return collectionViewer.openSetEdge(edge);
+    };
+    return [source] as QuickSwitcherSource[];
+  }, [
+    collectionViewer.error,
+    collectionViewer.items,
+    collectionViewer.loading,
+    collectionViewer.openSetEdge,
+    collectionViewer.openSingleEdge,
+    openJiraIssueFromSwitcher,
+  ]);
 
   const backlogHygienePage = BacklogHygienePage({
     active: !inSettings && !showShowcase && mainPage === "backlog-hygiene",
@@ -157,7 +208,11 @@ function App() {
   return (
     <>
       <AppShell
-        sidebarHeader={inSettings ? null : <ScopeHeader name="Personal" />}
+        sidebarHeader={
+          inSettings ? null : (
+            <ScopeHeader name="Personal" onOpenSearch={() => setQuickSwitcherOpen(true)} />
+          )
+        }
         sidebarContent={
           inSettings ? (
             <SettingsSidebar current={settingsPage!} onPick={setSettingsPage} />
@@ -215,6 +270,12 @@ function App() {
             <IconButton label="Chat (coming soon)" disabled><MessageSquare size={12} /></IconButton>
           </>
         }
+      />
+
+      <QuickSwitcher
+        open={quickSwitcherOpen}
+        onOpenChange={setQuickSwitcherOpen}
+        sources={quickSwitcherSources}
       />
 
       {saveError && (
