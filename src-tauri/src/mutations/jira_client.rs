@@ -1,13 +1,33 @@
 use crate::mutations::errors::MutationError;
 use crate::sources::jira_errors::JiraApiError;
-use crate::sources::jira_types::{JiraCreatedComment, JiraCreatedIssueLink, JiraTransitionsResponse};
+use crate::sources::jira_types::{
+    JiraCreatedComment, JiraCreatedIssueLink, JiraTransitionsResponse,
+};
 
 pub trait JiraMutationClient: Send + Sync {
     fn list_transitions(&self, issue_key: &str) -> Result<JiraTransitionsResponse, JiraApiError>;
-    fn transition_issue(&self, issue_key: &str, transition_id: &str, comment: Option<&str>) -> Result<(), JiraApiError>;
-    fn update_issue_fields(&self, issue_key: &str, fields_payload: serde_json::Value) -> Result<(), JiraApiError>;
-    fn create_comment(&self, issue_key: &str, body: &str) -> Result<JiraCreatedComment, JiraApiError>;
-    fn create_issue_link(&self, source_key: &str, target_key: &str, link_type: &str) -> Result<JiraCreatedIssueLink, JiraApiError>;
+    fn transition_issue(
+        &self,
+        issue_key: &str,
+        transition_id: &str,
+        comment: Option<&str>,
+    ) -> Result<(), JiraApiError>;
+    fn update_issue_fields(
+        &self,
+        issue_key: &str,
+        fields_payload: serde_json::Value,
+    ) -> Result<(), JiraApiError>;
+    fn create_comment(
+        &self,
+        issue_key: &str,
+        body: &str,
+    ) -> Result<JiraCreatedComment, JiraApiError>;
+    fn create_issue_link(
+        &self,
+        source_key: &str,
+        target_key: &str,
+        link_type: &str,
+    ) -> Result<JiraCreatedIssueLink, JiraApiError>;
     fn delete_issue_link(&self, link_id: &str) -> Result<(), JiraApiError>;
 }
 
@@ -15,16 +35,34 @@ impl JiraMutationClient for crate::sources::jira_client::JiraApiClient {
     fn list_transitions(&self, issue_key: &str) -> Result<JiraTransitionsResponse, JiraApiError> {
         self.list_transitions(issue_key)
     }
-    fn transition_issue(&self, issue_key: &str, transition_id: &str, comment: Option<&str>) -> Result<(), JiraApiError> {
+    fn transition_issue(
+        &self,
+        issue_key: &str,
+        transition_id: &str,
+        comment: Option<&str>,
+    ) -> Result<(), JiraApiError> {
         self.transition_issue(issue_key, transition_id, comment)
     }
-    fn update_issue_fields(&self, issue_key: &str, fields_payload: serde_json::Value) -> Result<(), JiraApiError> {
+    fn update_issue_fields(
+        &self,
+        issue_key: &str,
+        fields_payload: serde_json::Value,
+    ) -> Result<(), JiraApiError> {
         self.update_issue_fields(issue_key, fields_payload)
     }
-    fn create_comment(&self, issue_key: &str, body: &str) -> Result<JiraCreatedComment, JiraApiError> {
+    fn create_comment(
+        &self,
+        issue_key: &str,
+        body: &str,
+    ) -> Result<JiraCreatedComment, JiraApiError> {
         self.create_comment(issue_key, body)
     }
-    fn create_issue_link(&self, source_key: &str, target_key: &str, link_type: &str) -> Result<JiraCreatedIssueLink, JiraApiError> {
+    fn create_issue_link(
+        &self,
+        source_key: &str,
+        target_key: &str,
+        link_type: &str,
+    ) -> Result<JiraCreatedIssueLink, JiraApiError> {
         self.create_issue_link(source_key, target_key, link_type)
     }
     fn delete_issue_link(&self, link_id: &str) -> Result<(), JiraApiError> {
@@ -38,9 +76,11 @@ pub fn resolve_client_with_store(
     source_id: &str,
     store: &dyn crate::settings::secrets::SecretStore,
 ) -> Result<Box<dyn JiraMutationClient>, MutationError> {
-    use crate::sources::config::{JiraAuthConfig, SourceConfig, load_sources_config};
+    use crate::sources::config::{load_sources_config, JiraAuthConfig, SourceConfig};
     use crate::sources::credentials::load_source_credential_secret;
-    use crate::sources::jira_client::{JiraApiClient, JiraApiClientConfig, RateLimitPolicy, RetryPolicy};
+    use crate::sources::jira_client::{
+        JiraApiClient, JiraApiClientConfig, RateLimitPolicy, RetryPolicy,
+    };
 
     let sources_config = load_sources_config(conn)
         .map_err(|_| MutationError::SourceNotFound(source_id.to_string()))?;
@@ -92,7 +132,7 @@ mod tests {
     use crate::db::open_in_memory;
     use crate::settings::secrets::InMemorySecretStore;
     use crate::sources::config::{
-        JiraAuthConfig, JiraSourceConfig, SourceConfig, SourcesConfig, save_sources_config,
+        save_sources_config, JiraAuthConfig, JiraSourceConfig, SourceConfig, SourcesConfig,
     };
 
     fn make_jira_source(id: &str) -> JiraSourceConfig {

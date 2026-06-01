@@ -368,9 +368,13 @@ pub struct JiraTransitionIssueRequest {
 impl JiraTransitionIssueRequest {
     pub fn new(transition_id: impl Into<String>, comment: Option<String>) -> Self {
         Self {
-            transition: JiraTransitionRef { id: transition_id.into() },
+            transition: JiraTransitionRef {
+                id: transition_id.into(),
+            },
             update: comment.map(|body| JiraTransitionUpdate {
-                comment: vec![JiraCommentUpdateOperation { add: JiraCommentBody { body } }],
+                comment: vec![JiraCommentUpdateOperation {
+                    add: JiraCommentBody { body },
+                }],
             }),
         }
     }
@@ -439,9 +443,15 @@ impl JiraCreateIssueLinkRequest {
         target_key: impl Into<String>,
     ) -> Self {
         Self {
-            type_: JiraIssueLinkTypeName { name: link_type.into() },
-            inward_issue: JiraIssueKeyRef { key: source_key.into() },
-            outward_issue: JiraIssueKeyRef { key: target_key.into() },
+            type_: JiraIssueLinkTypeName {
+                name: link_type.into(),
+            },
+            inward_issue: JiraIssueKeyRef {
+                key: source_key.into(),
+            },
+            outward_issue: JiraIssueKeyRef {
+                key: target_key.into(),
+            },
         }
     }
 }
@@ -487,7 +497,10 @@ mod tests {
         let cl = issue.changelog.as_ref().unwrap();
         assert_eq!(cl.histories.len(), 1);
         assert_eq!(cl.histories[0].items[0].field, "status");
-        assert_eq!(cl.histories[0].items[0].from_string.as_deref(), Some("Open"));
+        assert_eq!(
+            cl.histories[0].items[0].from_string.as_deref(),
+            Some("Open")
+        );
         assert_eq!(
             cl.histories[0].items[0].to_string.as_deref(),
             Some("In Progress")
@@ -504,7 +517,13 @@ mod tests {
         assert_eq!(search.issues.len(), 2);
         assert_eq!(search.issues[0].key, "HM-1");
         assert_eq!(
-            search.issues[0].fields.assignee.as_ref().unwrap().display_name.as_deref(),
+            search.issues[0]
+                .fields
+                .assignee
+                .as_ref()
+                .unwrap()
+                .display_name
+                .as_deref(),
             Some("Elena Example")
         );
 
@@ -512,7 +531,12 @@ mod tests {
             serde_json::from_str(include_str!("fixtures/jira_changelog_page.json")).unwrap();
         assert_eq!(changelog.histories.len(), 2);
         assert_eq!(
-            changelog.histories[0].author.as_ref().unwrap().display_name.as_deref(),
+            changelog.histories[0]
+                .author
+                .as_ref()
+                .unwrap()
+                .display_name
+                .as_deref(),
             Some("Elena Example")
         );
         // Second entry has no author
@@ -530,8 +554,7 @@ mod tests {
     #[test]
     fn user_identity_fields_are_optional() {
         let user: JiraUser =
-            serde_json::from_value(serde_json::json!({ "displayName": "Synthetic User" }))
-                .unwrap();
+            serde_json::from_value(serde_json::json!({ "displayName": "Synthetic User" })).unwrap();
         assert_eq!(user.account_id, None);
         assert_eq!(user.name, None);
         assert_eq!(user.key, None);
@@ -650,15 +673,22 @@ mod tests {
                 "expand": "transitions"
             })).expect("transitions should deserialize");
             assert_eq!(parsed.transitions[0].id, "31");
-            assert_eq!(parsed.transitions[0].to.as_ref().unwrap().name.as_deref(), Some("Done"));
+            assert_eq!(
+                parsed.transitions[0].to.as_ref().unwrap().name.as_deref(),
+                Some("Done")
+            );
         }
 
         #[test]
         fn transition_request_serializes_optional_comment_as_update_block() {
-            let request = JiraTransitionIssueRequest::new("31", Some("Closing as stale".to_string()));
+            let request =
+                JiraTransitionIssueRequest::new("31", Some("Closing as stale".to_string()));
             let value = serde_json::to_value(request).expect("request should serialize");
             assert_eq!(value["transition"]["id"], "31");
-            assert_eq!(value["update"]["comment"][0]["add"]["body"], "Closing as stale");
+            assert_eq!(
+                value["update"]["comment"][0]["add"]["body"],
+                "Closing as stale"
+            );
         }
 
         #[test]
@@ -667,7 +697,8 @@ mod tests {
                 "summary": "New title",
                 "labels": ["triaged", "stale"],
                 "assignee": null
-            })).expect("object fields payload should be accepted");
+            }))
+            .expect("object fields payload should be accepted");
             let value = serde_json::to_value(request).expect("request should serialize");
             assert!(value["fields"]["assignee"].is_null());
         }

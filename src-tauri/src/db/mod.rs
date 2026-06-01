@@ -37,7 +37,10 @@ pub fn open_at(path: &std::path::Path) -> Result<Connection> {
     setup_schema(&conn)?;
     // Production startup: ensure the sqlite-vec virtual table exists.
     // Silently ignored when sqlite-vec is unavailable (e.g. sandboxed CI).
-    if conn.query_row("SELECT vec_version()", [], |_| Ok(())).is_ok() {
+    if conn
+        .query_row("SELECT vec_version()", [], |_| Ok(()))
+        .is_ok()
+    {
         let _ = crate::embeddings::sqlite_vec::setup_vec_table(&conn);
     }
     Ok(conn)
@@ -111,7 +114,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("query should succeed");
-        assert_eq!(count, 1, "shared_settings table must exist after schema setup");
+        assert_eq!(
+            count, 1,
+            "shared_settings table must exist after schema setup"
+        );
     }
 
     #[test]
@@ -124,7 +130,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("query should succeed");
-        assert_eq!(count, 1, "collection_views table must exist after schema setup");
+        assert_eq!(
+            count, 1,
+            "collection_views table must exist after schema setup"
+        );
     }
 
     #[test]
@@ -152,11 +161,13 @@ mod tests {
             ("index", "idx_audit_log_batch_id"),
             ("index", "idx_audit_log_target_ref"),
         ] {
-            let count: i64 = conn.query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type=?1 AND name=?2",
-                [kind, name],
-                |row| row.get(0),
-            ).expect("query should succeed");
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type=?1 AND name=?2",
+                    [kind, name],
+                    |row| row.get(0),
+                )
+                .expect("query should succeed");
             assert_eq!(count, 1, "{kind} {name} must exist after schema setup");
         }
     }
@@ -169,7 +180,10 @@ mod tests {
                 let version: String = conn
                     .query_row("SELECT vec_version()", [], |row| row.get(0))
                     .expect("vec_version() should be callable after load");
-                assert!(!version.is_empty(), "sqlite-vec version should not be empty");
+                assert!(
+                    !version.is_empty(),
+                    "sqlite-vec version should not be empty"
+                );
                 println!("sqlite-vec version: {version}");
             }
             Err(e) => {
@@ -200,7 +214,9 @@ mod tests {
         };
 
         // Check if sqlite-vec was loaded by the production setup path
-        let vec_available = conn.query_row("SELECT vec_version()", [], |_| Ok(())).is_ok();
+        let vec_available = conn
+            .query_row("SELECT vec_version()", [], |_| Ok(()))
+            .is_ok();
         if !vec_available {
             eprintln!("SKIP: sqlite-vec not available in this environment");
             let _ = std::fs::remove_file(&tmp);
@@ -213,15 +229,24 @@ mod tests {
             [],
             |r| r.get(0),
         ).expect("query");
-        assert_eq!(table_count, 1, "vec_document_embeddings must exist after open_at");
+        assert_eq!(
+            table_count, 1,
+            "vec_document_embeddings must exist after open_at"
+        );
 
         // Seed the minimum data needed to write an embedding
-        use crate::embeddings::repository::{seed_source_and_document, claim_documents, write_embedding_batch, ClaimOptions};
         use crate::embeddings::provider::EmbeddingResponse;
+        use crate::embeddings::repository::{
+            claim_documents, seed_source_and_document, write_embedding_batch, ClaimOptions,
+        };
 
         seed_source_and_document(&conn, "doc_prod", "hash_prod");
 
-        let opts = ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 };
+        let opts = ClaimOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: 10,
+        };
         let claimed = claim_documents(&conn, &opts, "2026-01-01T00:00:00Z").expect("claim");
         assert_eq!(claimed.len(), 1);
 
@@ -240,19 +265,24 @@ mod tests {
             .expect("write_embedding_batch must succeed on the production setup path");
 
         // Verify the vector row was actually written
-        let vec_count: i64 = conn.query_row(
-            "SELECT count(*) FROM vec_document_embeddings",
-            [],
-            |r| r.get(0),
-        ).expect("count vec rows");
-        assert_eq!(vec_count, 1, "vector row must be present after write_embedding_batch");
+        let vec_count: i64 = conn
+            .query_row("SELECT count(*) FROM vec_document_embeddings", [], |r| {
+                r.get(0)
+            })
+            .expect("count vec rows");
+        assert_eq!(
+            vec_count, 1,
+            "vector row must be present after write_embedding_batch"
+        );
 
         // Verify the document was marked embedded
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_prod'",
-            [],
-            |r| r.get(0),
-        ).expect("doc status");
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_prod'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("doc status");
         assert_eq!(status, "embedded");
 
         // Verify nearest-neighbor search returns the vector

@@ -1,9 +1,9 @@
-use std::time::Duration;
 use crate::ai::config::{AiEndpointProtocol, AiExecutionMode, AiRunner};
 use crate::ai::errors::AiError;
 use crate::ai::resolver::ResolvedAiProvider;
 use crate::ai::runners::AiRunnerClient;
 use crate::ai::service::{AiMessageRole, AiRequest, AiResponse, AiUsage};
+use std::time::Duration;
 
 pub struct AnthropicMessagesRunner {
     pub timeout: Duration,
@@ -11,12 +11,18 @@ pub struct AnthropicMessagesRunner {
 
 impl Default for AnthropicMessagesRunner {
     fn default() -> Self {
-        Self { timeout: Duration::from_secs(30) }
+        Self {
+            timeout: Duration::from_secs(30),
+        }
     }
 }
 
 impl AiRunnerClient for AnthropicMessagesRunner {
-    fn run(&self, resolved: &ResolvedAiProvider, request: AiRequest) -> Result<AiResponse, AiError> {
+    fn run(
+        &self,
+        resolved: &ResolvedAiProvider,
+        request: AiRequest,
+    ) -> Result<AiResponse, AiError> {
         // Validate: protocol must be AnthropicMessages, runner AnthropicMessages, mode DirectApi
         match (&resolved.endpoint.protocol, &resolved.profile.runner, &resolved.profile.execution_mode) {
             (AiEndpointProtocol::AnthropicMessages, AiRunner::AnthropicMessages, AiExecutionMode::DirectApi) => {}
@@ -31,14 +37,18 @@ impl AiRunnerClient for AnthropicMessagesRunner {
         let api_key = resolved.secret.value.expose_for_runner();
 
         // Build messages (system goes in top-level "system" field)
-        let messages: Vec<serde_json::Value> = request.messages.iter().map(|m| {
-            let role = match m.role {
-                AiMessageRole::User => "user",
-                AiMessageRole::Assistant => "assistant",
-                AiMessageRole::System => "user", // fallback; system is handled separately
-            };
-            serde_json::json!({"role": role, "content": m.content})
-        }).collect();
+        let messages: Vec<serde_json::Value> = request
+            .messages
+            .iter()
+            .map(|m| {
+                let role = match m.role {
+                    AiMessageRole::User => "user",
+                    AiMessageRole::Assistant => "assistant",
+                    AiMessageRole::System => "user", // fallback; system is handled separately
+                };
+                serde_json::json!({"role": role, "content": m.content})
+            })
+            .collect();
 
         let mut body = serde_json::json!({
             "model": resolved.profile.model,
@@ -52,9 +62,7 @@ impl AiRunnerClient for AnthropicMessagesRunner {
             body["temperature"] = serde_json::json!(temp);
         }
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(self.timeout)
-            .build();
+        let agent = ureq::AgentBuilder::new().timeout(self.timeout).build();
 
         let result = agent
             .post(&url)
@@ -89,7 +97,10 @@ impl AiRunnerClient for AnthropicMessagesRunner {
             .ok_or_else(|| AiError::Provider("unexpected response format".into()))?
             .to_string();
 
-        let model = resp_json["model"].as_str().unwrap_or(&resolved.profile.model).to_string();
+        let model = resp_json["model"]
+            .as_str()
+            .unwrap_or(&resolved.profile.model)
+            .to_string();
         let usage = resp_json.get("usage").map(|u| AiUsage {
             input_tokens: u["input_tokens"].as_u64().map(|v| v as u32),
             output_tokens: u["output_tokens"].as_u64().map(|v| v as u32),
@@ -120,7 +131,10 @@ fn safe_error_message(status: u16, _resp: &ureq::Response) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::config::{AiCredentialConfig, AiCredentialKind, AiEndpointConfig, AiEndpointProtocol, AiExecutionMode, AiProfileConfig, AiRunner, CredentialSource};
+    use crate::ai::config::{
+        AiCredentialConfig, AiCredentialKind, AiEndpointConfig, AiEndpointProtocol,
+        AiExecutionMode, AiProfileConfig, AiRunner, CredentialSource,
+    };
     use crate::ai::credentials::LoadedCredentialSecret;
     use crate::commands::JsonValue;
 
@@ -143,7 +157,9 @@ mod tests {
             credential: AiCredentialConfig {
                 name: "key".into(),
                 kind: AiCredentialKind::ApiKey,
-                source: CredentialSource::Keychain { key_ref: "ai.credentials.key".into() },
+                source: CredentialSource::Keychain {
+                    key_ref: "ai.credentials.key".into(),
+                },
             },
             secret: LoadedCredentialSecret::new_for_test("key", "sk-test-secret"),
         }
@@ -158,13 +174,25 @@ mod tests {
             // Verify path
             assert_eq!(req.url(), "/v1/messages");
             // Verify both x-api-key and api-key headers are present (not logging values)
-            let has_x_api_key = req.headers().iter().any(|h| h.field.as_str().to_ascii_lowercase() == "x-api-key");
+            let has_x_api_key = req
+                .headers()
+                .iter()
+                .any(|h| h.field.as_str().to_ascii_lowercase() == "x-api-key");
             assert!(has_x_api_key, "x-api-key header must be present");
-            let has_api_key = req.headers().iter().any(|h| h.field.as_str().to_ascii_lowercase() == "api-key");
-            assert!(has_api_key, "api-key header must be present for Azure APIM compatibility");
+            let has_api_key = req
+                .headers()
+                .iter()
+                .any(|h| h.field.as_str().to_ascii_lowercase() == "api-key");
+            assert!(
+                has_api_key,
+                "api-key header must be present for Azure APIM compatibility"
+            );
             let body = r#"{"model":"claude-test","usage":{"input_tokens":3,"output_tokens":1},"content":[{"type":"text","text":"ok"}]}"#;
-            let resp = tiny_http::Response::from_string(body)
-                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            let resp = tiny_http::Response::from_string(body).with_header(
+                "content-type: application/json"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             req.respond(resp).unwrap();
         });
         let runner = AnthropicMessagesRunner::default();
@@ -184,9 +212,15 @@ mod tests {
         let port = server.server_addr().to_ip().unwrap().port();
         let handle = std::thread::spawn(move || {
             let req = server.recv().unwrap();
-            let resp = tiny_http::Response::from_string(r#"{"error":{"type":"auth_error","message":"invalid api key"}}"#)
-                .with_status_code(401)
-                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            let resp = tiny_http::Response::from_string(
+                r#"{"error":{"type":"auth_error","message":"invalid api key"}}"#,
+            )
+            .with_status_code(401)
+            .with_header(
+                "content-type: application/json"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             req.respond(resp).unwrap();
         });
         let runner = AnthropicMessagesRunner::default();
@@ -195,8 +229,14 @@ mod tests {
         handle.join().unwrap();
         let msg = err.to_string();
         assert!(msg.contains("401"), "error should mention 401");
-        assert!(msg.contains("credential"), "error should suggest checking credential");
-        assert!(!msg.contains("sk-test-secret"), "error must not contain secret");
+        assert!(
+            msg.contains("credential"),
+            "error should suggest checking credential"
+        );
+        assert!(
+            !msg.contains("sk-test-secret"),
+            "error must not contain secret"
+        );
     }
 
     #[test]
@@ -208,9 +248,14 @@ mod tests {
             let _req = server.recv().unwrap();
             std::thread::sleep(Duration::from_secs(60));
         });
-        let runner = AnthropicMessagesRunner { timeout: Duration::from_millis(50) };
+        let runner = AnthropicMessagesRunner {
+            timeout: Duration::from_millis(50),
+        };
         let resolved = make_resolved(&format!("http://127.0.0.1:{port}/v1"));
         let err = runner.run(&resolved, AiRequest::smoke_test()).unwrap_err();
-        assert!(matches!(err, AiError::Timeout), "expected Timeout error, got: {err}");
+        assert!(
+            matches!(err, AiError::Timeout),
+            "expected Timeout error, got: {err}"
+        );
     }
 }

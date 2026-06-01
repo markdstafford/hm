@@ -26,10 +26,12 @@ pub fn setup_vec_table_with_dimension(
         "CREATE VIRTUAL TABLE IF NOT EXISTS vec_document_embeddings
          USING vec0(embedding_id TEXT, embedding FLOAT[{dimension}]);"
     ))
-    .map_err(|_| EmbeddingError::new(
-        EmbeddingErrorCategory::SqliteVecUnavailable,
-        "sqlite-vec is unavailable in this environment.",
-    ))
+    .map_err(|_| {
+        EmbeddingError::new(
+            EmbeddingErrorCategory::SqliteVecUnavailable,
+            "sqlite-vec is unavailable in this environment.",
+        )
+    })
 }
 
 pub fn vector_to_json(vector: &[f32]) -> String {
@@ -84,27 +86,34 @@ pub fn nearest_by_vector(
     let vec_json = vector_to_json(vector);
     let k = limit.max(1) as i64;
 
-    let mut stmt = conn.prepare(
-        "SELECT rowid, distance FROM vec_document_embeddings WHERE embedding MATCH ? AND k = ?"
-    ).map_err(EmbeddingError::from)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT rowid, distance FROM vec_document_embeddings WHERE embedding MATCH ? AND k = ?",
+        )
+        .map_err(EmbeddingError::from)?;
 
-    let rows = stmt.query_map(
-        rusqlite::params![vec_json, k],
-        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f32>(1)?)),
-    ).map_err(EmbeddingError::from)?
-    .collect::<rusqlite::Result<Vec<_>>>()
-    .map_err(EmbeddingError::from)?;
+    let rows = stmt
+        .query_map(rusqlite::params![vec_json, k], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, f32>(1)?))
+        })
+        .map_err(EmbeddingError::from)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(EmbeddingError::from)?;
 
     Ok(rows)
 }
 
 #[cfg(test)]
-pub fn require_sqlite_vec_for_test_without_loading(conn: &rusqlite::Connection) -> Result<(), EmbeddingError> {
+pub fn require_sqlite_vec_for_test_without_loading(
+    conn: &rusqlite::Connection,
+) -> Result<(), EmbeddingError> {
     conn.query_row("SELECT vec_version()", [], |_| Ok(()))
-        .map_err(|_| EmbeddingError::new(
-            EmbeddingErrorCategory::SqliteVecUnavailable,
-            "sqlite-vec is unavailable in this environment.",
-        ))
+        .map_err(|_| {
+            EmbeddingError::new(
+                EmbeddingErrorCategory::SqliteVecUnavailable,
+                "sqlite-vec is unavailable in this environment.",
+            )
+        })
 }
 
 #[cfg(test)]

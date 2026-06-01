@@ -1,5 +1,5 @@
 use crate::gardener::contract::{
-    ApprovalPolicy, EngineCost, EngineContract, GardenerEngineId, GardenerTrigger, GatePolicy,
+    ApprovalPolicy, EngineContract, EngineCost, GardenerEngineId, GardenerTrigger, GatePolicy,
     PipelineStageSpec, RunPolicy, SuggestionCategory, SuppressionKeySpec,
 };
 use crate::gardener::engine::{EmittedSuggestion, EngineRunContext, GardenerEngine, StageOutput};
@@ -85,15 +85,17 @@ mod tests {
     use crate::gardener::contract::GardenerTrigger;
     use crate::gardener::engine::{EngineRunContext, GardenerEngine};
     use crate::gardener::repository::{
-        GardenerTarget, SuppressionInput, SuppressionKey, list_pending_suggestions,
-        record_suppression,
+        list_pending_suggestions, record_suppression, GardenerTarget, SuppressionInput,
+        SuppressionKey,
     };
     use crate::gardener::runner::{
-        GardenerRunStatus, GardenerRuntime, OnDemandRunInput, ScheduledRunInput, run_on_demand,
-        run_scheduled,
+        run_on_demand, run_scheduled, GardenerRunStatus, GardenerRuntime, OnDemandRunInput,
+        ScheduledRunInput,
     };
     use crate::issues::ids::stable_id;
-    use crate::issues::repository::{SourceSystemInput, WorkItemInput, upsert_source_system, upsert_work_item};
+    use crate::issues::repository::{
+        upsert_source_system, upsert_work_item, SourceSystemInput, WorkItemInput,
+    };
     use std::sync::Arc;
 
     // -----------------------------------------------------------------------
@@ -186,8 +188,12 @@ mod tests {
         assert_eq!(contract.id.0, "reference");
         assert_eq!(contract.category, SuggestionCategory::Stale);
         assert!(contract.dependencies.is_empty());
-        assert!(contract.accepted_triggers.contains(&GardenerTrigger::Scheduled));
-        assert!(contract.accepted_triggers.contains(&GardenerTrigger::OnDemand));
+        assert!(contract
+            .accepted_triggers
+            .contains(&GardenerTrigger::Scheduled));
+        assert!(contract
+            .accepted_triggers
+            .contains(&GardenerTrigger::OnDemand));
         crate::gardener::contract::validate_contract(&contract).expect("reference contract valid");
     }
 
@@ -249,7 +255,11 @@ mod tests {
 
         assert_eq!(summary.status, GardenerRunStatus::Complete);
         let pending = list_pending_suggestions(&conn).expect("list");
-        assert_eq!(pending.len(), 1, "reference engine should have created a pending suggestion");
+        assert_eq!(
+            pending.len(),
+            1,
+            "reference engine should have created a pending suggestion"
+        );
         assert!(
             pending[0].rationale.contains("Reference gardener output"),
             "should be the reference engine rationale"

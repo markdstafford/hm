@@ -1,17 +1,19 @@
-use std::path::{Path, PathBuf};
-use serde_json::Value;
 use crate::settings::error::SettingsError;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 pub fn preferences_path() -> Result<PathBuf, SettingsError> {
-    let project_dirs = directories::ProjectDirs::from("", "", "hm")
-        .ok_or_else(|| SettingsError::PathResolution("could not determine config directory".into()))?;
+    let project_dirs = directories::ProjectDirs::from("", "", "hm").ok_or_else(|| {
+        SettingsError::PathResolution("could not determine config directory".into())
+    })?;
     Ok(project_dirs.config_dir().join("preferences.toml"))
 }
 
 /// Returns the production database path: ~/Library/Application Support/hm/hm.db on macOS.
 pub fn db_path() -> Result<PathBuf, SettingsError> {
-    let project_dirs = directories::ProjectDirs::from("", "", "hm")
-        .ok_or_else(|| SettingsError::PathResolution("could not determine data directory".into()))?;
+    let project_dirs = directories::ProjectDirs::from("", "", "hm").ok_or_else(|| {
+        SettingsError::PathResolution("could not determine data directory".into())
+    })?;
     Ok(project_dirs.data_dir().join("hm.db"))
 }
 
@@ -23,8 +25,8 @@ pub fn read_preferences_at(path: &Path) -> Result<Value, SettingsError> {
         }
         Err(e) => return Err(SettingsError::from(e)),
     };
-    let value: Value = toml::from_str(&content)
-        .map_err(|e| SettingsError::Serialization(e.to_string()))?;
+    let value: Value =
+        toml::from_str(&content).map_err(|e| SettingsError::Serialization(e.to_string()))?;
     if !value.is_object() {
         return Err(SettingsError::InvalidPayload(
             "preferences file top-level must be a TOML table".into(),
@@ -39,8 +41,8 @@ pub fn write_preferences_at(path: &Path, prefs: &Value) -> Result<(), SettingsEr
             "preferences value must be an object".into(),
         ));
     }
-    let toml_str = toml::to_string_pretty(prefs)
-        .map_err(|e| SettingsError::Serialization(e.to_string()))?;
+    let toml_str =
+        toml::to_string_pretty(prefs).map_err(|e| SettingsError::Serialization(e.to_string()))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

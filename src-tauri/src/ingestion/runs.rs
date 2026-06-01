@@ -392,8 +392,7 @@ mod tests {
             .expect("read ops")
             .expect("some");
         assert_eq!(
-            ops.cursor_value,
-            r#"{"last_updated":"2026-05-20T00:00:00Z"}"#,
+            ops.cursor_value, r#"{"last_updated":"2026-05-20T00:00:00Z"}"#,
             "OPS cursor must be untouched by AMP update"
         );
 
@@ -401,8 +400,7 @@ mod tests {
             .expect("read hm")
             .expect("some");
         assert_eq!(
-            hm.cursor_value,
-            r#"{"last_updated":"2026-05-15T00:00:00Z"}"#,
+            hm.cursor_value, r#"{"last_updated":"2026-05-15T00:00:00Z"}"#,
             "HM cursor must be untouched by AMP update"
         );
 

@@ -109,8 +109,7 @@ pub fn assert_schema(conn: &Connection) -> rusqlite::Result<()> {
     ];
 
     for (table, columns) in required {
-        let mut stmt =
-            conn.prepare(&format!("PRAGMA table_info({table})"))?;
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
         let actual_columns: Vec<String> = stmt
             .query_map([], |row| row.get::<_, String>(1))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -222,13 +221,23 @@ mod tests {
              VALUES ('x','e','c','invalid_state','a','jira_issue','UP-1','UP-1','{}',50,'t','r','{}','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
             [],
         );
-        assert!(result.is_err(), "invalid state must be rejected by CHECK constraint");
+        assert!(
+            result.is_err(),
+            "invalid state must be rejected by CHECK constraint"
+        );
     }
 
     #[test]
     fn gardener_suggestions_accepts_valid_state() {
         let conn = open_test_db();
-        for state in ["detected", "generating", "pending", "applied", "rejected", "suppressed"] {
+        for state in [
+            "detected",
+            "generating",
+            "pending",
+            "applied",
+            "rejected",
+            "suppressed",
+        ] {
             conn.execute(
                 "INSERT INTO gardener_suggestions
                  (id, engine_id, category, state, action_id, target_source_kind,
@@ -249,7 +258,10 @@ mod tests {
              VALUES ('x','e','bad_kind','{}','r','2026-01-01T00:00:00Z')",
             [],
         );
-        assert!(result.is_err(), "invalid key_kind must be rejected by CHECK constraint");
+        assert!(
+            result.is_err(),
+            "invalid key_kind must be rejected by CHECK constraint"
+        );
     }
 
     #[test]

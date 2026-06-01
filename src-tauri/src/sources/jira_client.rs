@@ -361,9 +361,8 @@ impl JiraApiClient {
             if pages_fetched >= MAX_PAGINATION_PAGES {
                 break;
             }
-            let path = format!(
-                "/rest/api/2/project/search?startAt={start_at}&maxResults={page_size}"
-            );
+            let path =
+                format!("/rest/api/2/project/search?startAt={start_at}&maxResults={page_size}");
             let page: JiraPagedProjects = self.get_json(&path)?;
             let returned = page.values.len() as u32;
             out.extend(page.values);
@@ -520,7 +519,8 @@ impl JiraApiClient {
                 let status = resp.status();
                 let rate_limit = parse_rate_limit_headers(&resp);
                 if rate_limit.near_limit == Some(true) || rate_limit.remaining == Some(0) {
-                    self.sleeper.sleep_ms(self.rate_limit_policy.fallback_delay_ms);
+                    self.sleeper
+                        .sleep_ms(self.rate_limit_policy.fallback_delay_ms);
                 }
                 if status == 204 || status == 205 {
                     return Ok(None);
@@ -562,8 +562,7 @@ impl JiraApiClient {
         comment: Option<&str>,
     ) -> Result<(), JiraApiError> {
         let issue = encode_path_segment(issue_key)?;
-        let request =
-            JiraTransitionIssueRequest::new(transition_id, comment.map(str::to_string));
+        let request = JiraTransitionIssueRequest::new(transition_id, comment.map(str::to_string));
         let _: Option<serde_json::Value> = self.send_json_once(
             "POST",
             &format!("/rest/api/2/issue/{issue}/transitions"),
@@ -579,10 +578,11 @@ impl JiraApiClient {
         fields_payload: serde_json::Value,
     ) -> Result<(), JiraApiError> {
         let issue = encode_path_segment(issue_key)?;
-        let request = JiraIssueFieldsUpdateRequest::new(fields_payload)
-            .map_err(|message| JiraApiError::InvalidRequest {
+        let request = JiraIssueFieldsUpdateRequest::new(fields_payload).map_err(|message| {
+            JiraApiError::InvalidRequest {
                 message: message.into(),
-            })?;
+            }
+        })?;
         let _: Option<serde_json::Value> =
             self.send_json_once("PUT", &format!("/rest/api/2/issue/{issue}"), Some(&request))?;
         Ok(())
@@ -617,9 +617,15 @@ impl JiraApiClient {
         encode_path_segment(target_key)?;
         let request = JiraCreateIssueLinkRequest::new(link_type, source_key, target_key);
         match self.send_json_once("POST", "/rest/api/2/issueLink", Some(&request)) {
-            Ok(opt) => Ok(opt.unwrap_or(JiraCreatedIssueLink { id: None, self_url: None })),
+            Ok(opt) => Ok(opt.unwrap_or(JiraCreatedIssueLink {
+                id: None,
+                self_url: None,
+            })),
             // Jira DC returns 201 with empty body; link was created but no id is available
-            Err(JiraApiError::Decode) => Ok(JiraCreatedIssueLink { id: None, self_url: None }),
+            Err(JiraApiError::Decode) => Ok(JiraCreatedIssueLink {
+                id: None,
+                self_url: None,
+            }),
             Err(e) => Err(e),
         }
     }
@@ -627,31 +633,25 @@ impl JiraApiClient {
     /// Delete a link between two issues by link ID.
     pub fn delete_issue_link(&self, link_id: &str) -> Result<(), JiraApiError> {
         let link = encode_path_segment(link_id)?;
-        let _: Option<serde_json::Value> = self.send_json_once::<
-            serde_json::Value,
-            serde_json::Value,
-        >(
-            "DELETE", &format!("/rest/api/2/issueLink/{link}"), None
-        )?;
+        let _: Option<serde_json::Value> = self
+            .send_json_once::<serde_json::Value, serde_json::Value>(
+                "DELETE",
+                &format!("/rest/api/2/issueLink/{link}"),
+                None,
+            )?;
         Ok(())
     }
 
     /// Delete a comment on an issue by comment ID.
-    pub fn delete_comment(
-        &self,
-        issue_key: &str,
-        comment_id: &str,
-    ) -> Result<(), JiraApiError> {
+    pub fn delete_comment(&self, issue_key: &str, comment_id: &str) -> Result<(), JiraApiError> {
         let issue = encode_path_segment(issue_key)?;
         let comment = encode_path_segment(comment_id)?;
-        let _: Option<serde_json::Value> = self.send_json_once::<
-            serde_json::Value,
-            serde_json::Value,
-        >(
-            "DELETE",
-            &format!("/rest/api/2/issue/{issue}/comment/{comment}"),
-            None,
-        )?;
+        let _: Option<serde_json::Value> = self
+            .send_json_once::<serde_json::Value, serde_json::Value>(
+                "DELETE",
+                &format!("/rest/api/2/issue/{issue}/comment/{comment}"),
+                None,
+            )?;
         Ok(())
     }
 
@@ -1365,14 +1365,15 @@ mod tests {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", server.server_addr());
         thread::spawn(move || {
-            let response = Response::from_string(include_str!("fixtures/jira_projects_paginated.json"))
-                .with_status_code(StatusCode(200))
-                .with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                )
-                .with_header(
-                    Header::from_bytes(&b"X-RateLimit-NearLimit"[..], &b"true"[..]).unwrap(),
-                );
+            let response =
+                Response::from_string(include_str!("fixtures/jira_projects_paginated.json"))
+                    .with_status_code(StatusCode(200))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"X-RateLimit-NearLimit"[..], &b"true"[..]).unwrap(),
+                    );
             server.recv().unwrap().respond(response).unwrap();
         });
         let (sleeper, recorded_sleeps) = RecordingSleeper::new();
@@ -1405,12 +1406,15 @@ mod tests {
         let server = Server::http("127.0.0.1:0").unwrap();
         let base_url = format!("http://{}", server.server_addr());
         thread::spawn(move || {
-            let response = Response::from_string(include_str!("fixtures/jira_projects_paginated.json"))
-                .with_status_code(StatusCode(200))
-                .with_header(
-                    Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                )
-                .with_header(Header::from_bytes(&b"X-RateLimit-Remaining"[..], &b"0"[..]).unwrap());
+            let response =
+                Response::from_string(include_str!("fixtures/jira_projects_paginated.json"))
+                    .with_status_code(StatusCode(200))
+                    .with_header(
+                        Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(&b"X-RateLimit-Remaining"[..], &b"0"[..]).unwrap(),
+                    );
             server.recv().unwrap().respond(response).unwrap();
         });
         let (sleeper, recorded_sleeps) = RecordingSleeper::new();
@@ -1683,10 +1687,7 @@ mod tests {
         use std::io::Read;
         let base_url = spawn_json_server(|mut request| {
             assert_eq!(request.method(), &Method::Post);
-            assert_eq!(
-                request.url(),
-                "/rest/api/2/issue/AMP-1043/transitions"
-            );
+            assert_eq!(request.url(), "/rest/api/2/issue/AMP-1043/transitions");
             let has_content_type = request.headers().iter().any(|h| {
                 h.field.as_str().to_ascii_lowercase() == "content-type"
                     && h.value.as_str() == "application/json"

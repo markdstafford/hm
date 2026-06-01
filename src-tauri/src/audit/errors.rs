@@ -20,7 +20,9 @@ impl fmt::Display for AuditError {
 impl fmt::Debug for AuditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AuditError::InvalidInput(message) => f.debug_tuple("InvalidInput").field(message).finish(),
+            AuditError::InvalidInput(message) => {
+                f.debug_tuple("InvalidInput").field(message).finish()
+            }
             AuditError::Database => f.write_str("Database"),
             AuditError::NotFound => f.write_str("NotFound"),
         }

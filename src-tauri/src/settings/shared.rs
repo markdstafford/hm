@@ -1,8 +1,12 @@
+use crate::settings::{error::SettingsError, keys};
 use rusqlite::Connection;
 use serde_json::Value;
-use crate::settings::{error::SettingsError, keys};
 
-pub fn shared_settings_set(conn: &Connection, key: &str, value: &Value) -> Result<(), SettingsError> {
+pub fn shared_settings_set(
+    conn: &Connection,
+    key: &str,
+    value: &Value,
+) -> Result<(), SettingsError> {
     keys::validate_key(key)?;
     let value_json = value.to_string();
     conn.execute(
@@ -22,9 +26,7 @@ pub fn shared_settings_get(conn: &Connection, key: &str) -> Result<Option<Value>
     let mut stmt = conn
         .prepare("SELECT value_json FROM shared_settings WHERE key = ?1")
         .map_err(|e| SettingsError::Database(e.to_string()))?;
-    let result = stmt.query_row(rusqlite::params![key], |row| {
-        row.get::<_, String>(0)
-    });
+    let result = stmt.query_row(rusqlite::params![key], |row| row.get::<_, String>(0));
     match result {
         Ok(json_str) => {
             let value: Value = serde_json::from_str(&json_str)
@@ -81,7 +83,11 @@ mod tests {
         for (key, val) in &cases {
             shared_settings_set(&conn, key, val).unwrap();
             let result = shared_settings_get(&conn, key).unwrap();
-            assert_eq!(result.as_ref(), Some(val), "type fidelity failed for key {key}");
+            assert_eq!(
+                result.as_ref(),
+                Some(val),
+                "type fidelity failed for key {key}"
+            );
         }
     }
 

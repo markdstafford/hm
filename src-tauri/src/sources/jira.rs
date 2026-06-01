@@ -1,9 +1,9 @@
+use crate::settings::secrets::SecretStore;
+use crate::sources::config::{JiraAuthConfig, JiraSourceConfig};
+use crate::sources::credentials::load_source_credential_secret;
+use crate::sources::errors::SourceError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use crate::sources::config::{JiraSourceConfig, JiraAuthConfig};
-use crate::sources::credentials::{load_source_credential_secret};
-use crate::sources::errors::SourceError;
-use crate::settings::secrets::SecretStore;
 
 // ── Connection test result types ──────────────────────────────────────────────
 
@@ -220,8 +220,7 @@ pub(crate) fn jira_source_test_connection_with_client(
                 return Ok(JiraConnectionTestResult {
                     status: JiraConnectionTestStatus::Error,
                     tested_at: now_utc_string(),
-                    message: "Jira credential is missing. Replace the token and test again."
-                        .into(),
+                    message: "Jira credential is missing. Replace the token and test again.".into(),
                     suggested_fix: Some("Add a PAT for this source and test again.".into()),
                     projects: vec![],
                     category: Some(JiraConnectionErrorCategory::MissingCredential),
@@ -329,13 +328,24 @@ mod tests {
         }
         let store = crate::settings::secrets::InMemorySecretStore::new();
         let source = sample_jira_source("src_pending");
-        let result =
-            jira_source_test_connection_with_client(source, Some("pending-pat".into()), &store, &CapturingClient)
-                .unwrap();
+        let result = jira_source_test_connection_with_client(
+            source,
+            Some("pending-pat".into()),
+            &store,
+            &CapturingClient,
+        )
+        .unwrap();
         assert_eq!(result.status, JiraConnectionTestStatus::Success);
-        assert_eq!(result.message, "Connected to Jira. Select projects to ingest.");
         assert_eq!(
-            result.projects.iter().map(|p| p.key.as_str()).collect::<Vec<_>>(),
+            result.message,
+            "Connected to Jira. Select projects to ingest."
+        );
+        assert_eq!(
+            result
+                .projects
+                .iter()
+                .map(|p| p.key.as_str())
+                .collect::<Vec<_>>(),
             vec!["HM", "ZAP"]
         );
         // PAT must not appear in result debug
@@ -356,7 +366,9 @@ mod tests {
             }
         }
         let store = crate::settings::secrets::InMemorySecretStore::new();
-        store.set("source.jira.src_stored.pat", "stored-pat").unwrap();
+        store
+            .set("source.jira.src_stored.pat", "stored-pat")
+            .unwrap();
         let source = sample_jira_source("src_stored");
         let result =
             jira_source_test_connection_with_client(source, None, &store, &PassingClient).unwrap();
@@ -369,7 +381,11 @@ mod tests {
         let source = sample_jira_source("src_missing_pat");
         let result = jira_source_test_connection_with_store(source, None, &store).unwrap();
         assert_eq!(result.status, JiraConnectionTestStatus::Error);
-        assert!(result.message.contains("credential"), "got: {}", result.message);
+        assert!(
+            result.message.contains("credential"),
+            "got: {}",
+            result.message
+        );
         assert!(!result.message.contains("source.jira.src_missing_pat.pat"));
     }
 
@@ -377,13 +393,22 @@ mod tests {
     fn fake_client_maps_error_categories() {
         let result = map_client_error(JiraClientError::Unauthorized);
         assert_eq!(result.status, JiraConnectionTestStatus::Error);
-        assert_eq!(result.category, Some(JiraConnectionErrorCategory::AuthFailed));
+        assert_eq!(
+            result.category,
+            Some(JiraConnectionErrorCategory::AuthFailed)
+        );
 
         let result2 = map_client_error(JiraClientError::Forbidden);
-        assert_eq!(result2.category, Some(JiraConnectionErrorCategory::Forbidden));
+        assert_eq!(
+            result2.category,
+            Some(JiraConnectionErrorCategory::Forbidden)
+        );
 
         let result3 = map_client_error(JiraClientError::RateLimited);
-        assert_eq!(result3.category, Some(JiraConnectionErrorCategory::RateLimited));
+        assert_eq!(
+            result3.category,
+            Some(JiraConnectionErrorCategory::RateLimited)
+        );
 
         let result4 = map_client_error(JiraClientError::Network);
         assert_eq!(result4.category, Some(JiraConnectionErrorCategory::Network));
@@ -395,7 +420,8 @@ mod tests {
     fn fake_successful_result(projects: Vec<JiraConnectionProject>) -> JiraConnectionTestResult {
         // Deduplicate and sort projects by key
         let mut seen = std::collections::HashSet::new();
-        let mut deduped: Vec<JiraConnectionProject> = projects.into_iter()
+        let mut deduped: Vec<JiraConnectionProject> = projects
+            .into_iter()
             .filter(|p| seen.insert(p.key.clone()))
             .collect();
         deduped.sort_by(|a, b| a.key.cmp(&b.key));
@@ -412,18 +438,41 @@ mod tests {
     #[test]
     fn fake_client_error_categories_map_to_safe_results() {
         let cases = vec![
-            (JiraClientError::Unauthorized, JiraConnectionErrorCategory::AuthFailed),
-            (JiraClientError::Forbidden, JiraConnectionErrorCategory::Forbidden),
-            (JiraClientError::Network, JiraConnectionErrorCategory::Network),
-            (JiraClientError::RateLimited, JiraConnectionErrorCategory::RateLimited),
+            (
+                JiraClientError::Unauthorized,
+                JiraConnectionErrorCategory::AuthFailed,
+            ),
+            (
+                JiraClientError::Forbidden,
+                JiraConnectionErrorCategory::Forbidden,
+            ),
+            (
+                JiraClientError::Network,
+                JiraConnectionErrorCategory::Network,
+            ),
+            (
+                JiraClientError::RateLimited,
+                JiraConnectionErrorCategory::RateLimited,
+            ),
             (JiraClientError::Server, JiraConnectionErrorCategory::Server),
         ];
         for (err, expected_category) in cases {
             let result = map_client_error(err);
-            assert_eq!(result.status, JiraConnectionTestStatus::Error, "expected Error status");
-            assert_eq!(result.category, Some(expected_category.clone()), "wrong category");
+            assert_eq!(
+                result.status,
+                JiraConnectionTestStatus::Error,
+                "expected Error status"
+            );
+            assert_eq!(
+                result.category,
+                Some(expected_category.clone()),
+                "wrong category"
+            );
             // Safe: no raw server details in message
-            assert!(!result.message.to_ascii_lowercase().contains("stack trace"), "raw stack trace exposed");
+            assert!(
+                !result.message.to_ascii_lowercase().contains("stack trace"),
+                "raw stack trace exposed"
+            );
         }
     }
 
@@ -438,14 +487,30 @@ mod tests {
     #[test]
     fn fake_client_success_with_projects_deduplicates_and_sorts() {
         let projects = vec![
-            JiraConnectionProject { key: "ZAP".into(), name: Some("Zap".into()), id: None },
-            JiraConnectionProject { key: "HM".into(), name: Some("HM".into()), id: None },
-            JiraConnectionProject { key: "HM".into(), name: Some("HM duplicate".into()), id: None },
+            JiraConnectionProject {
+                key: "ZAP".into(),
+                name: Some("Zap".into()),
+                id: None,
+            },
+            JiraConnectionProject {
+                key: "HM".into(),
+                name: Some("HM".into()),
+                id: None,
+            },
+            JiraConnectionProject {
+                key: "HM".into(),
+                name: Some("HM duplicate".into()),
+                id: None,
+            },
         ];
         let result = fake_successful_result(projects);
         assert_eq!(result.status, JiraConnectionTestStatus::Success);
         let keys: Vec<_> = result.projects.iter().map(|p| p.key.as_str()).collect();
-        assert_eq!(keys, vec!["HM", "ZAP"], "projects should be deduplicated and sorted");
+        assert_eq!(
+            keys,
+            vec!["HM", "ZAP"],
+            "projects should be deduplicated and sorted"
+        );
     }
 
     #[test]
@@ -458,11 +523,9 @@ mod tests {
             map_client_error(JiraClientError::Decode).category,
             Some(JiraConnectionErrorCategory::Unsupported)
         );
-        assert!(
-            !map_client_error(JiraClientError::Decode)
-                .message
-                .to_ascii_lowercase()
-                .contains("response body")
-        );
+        assert!(!map_client_error(JiraClientError::Decode)
+            .message
+            .to_ascii_lowercase()
+            .contains("response body"));
     }
 }

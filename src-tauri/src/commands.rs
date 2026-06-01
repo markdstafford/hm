@@ -123,18 +123,19 @@ pub fn shared_settings_set(
 }
 
 use crate::ai::config::{load_ai_provider_config, save_ai_provider_config, AiProviderConfig};
+use crate::ai::credentials::{delete_keychain_credential_secret, set_keychain_credential_secret};
+use crate::ai::service::{smoke_test_profile_with_config, SmokeTestResult};
 use crate::sources::config::{
     load_sources_config, save_sources_config, ConnectionTestStatus, ConnectionTestSummary,
     JiraAuthConfig, JiraProjectFilter, JiraSourceConfig, SourceConfig, SourcesConfig,
 };
-use crate::ai::credentials::{delete_keychain_credential_secret, set_keychain_credential_secret};
 use crate::sources::credentials::{
-    set_source_credential_secret, delete_source_credential, remove_source_config_and_credentials, SourceCredentialKind,
+    delete_source_credential, remove_source_config_and_credentials, set_source_credential_secret,
+    SourceCredentialKind,
 };
-use crate::ai::service::{smoke_test_profile_with_config, SmokeTestResult};
 use crate::sources::jira::{
-    jira_source_test_connection_with_store, JiraConnectionTestResult,
-    JiraConnectionTestStatus, JiraConnectionErrorCategory, JiraConnectionProject,
+    jira_source_test_connection_with_store, JiraConnectionErrorCategory, JiraConnectionProject,
+    JiraConnectionTestResult, JiraConnectionTestStatus,
 };
 
 #[tauri::command]
@@ -173,8 +174,7 @@ pub fn ai_credential_secret_delete(
     credential_name: String,
     store: tauri::State<'_, ManagedSecretStore>,
 ) -> Result<(), String> {
-    delete_keychain_credential_secret(&credential_name, store.0.as_ref())
-        .map_err(|e| e.to_string())
+    delete_keychain_credential_secret(&credential_name, store.0.as_ref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -189,19 +189,28 @@ pub fn ai_profile_smoke_test(
         let conn = db.lock().unwrap();
         load_ai_provider_config(&conn).map_err(|e| e.to_string())?
     };
-    Ok(smoke_test_profile_with_config(config, store.0.as_ref(), &profile_name))
+    Ok(smoke_test_profile_with_config(
+        config,
+        store.0.as_ref(),
+        &profile_name,
+    ))
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn source_config_get(db: tauri::State<'_, Mutex<rusqlite::Connection>>) -> Result<SourcesConfig, String> {
+pub fn source_config_get(
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<SourcesConfig, String> {
     let conn = db.lock().unwrap();
     load_sources_config(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn source_config_save(config: SourcesConfig, db: tauri::State<'_, Mutex<rusqlite::Connection>>) -> Result<(), String> {
+pub fn source_config_save(
+    config: SourcesConfig,
+    db: tauri::State<'_, Mutex<rusqlite::Connection>>,
+) -> Result<(), String> {
     let conn = db.lock().unwrap();
     save_sources_config(&conn, &config).map_err(|e| e.to_string())
 }
@@ -224,8 +233,7 @@ pub fn source_credential_delete(
     credential_ref: String,
     store: tauri::State<'_, ManagedSecretStore>,
 ) -> Result<(), String> {
-    delete_source_credential(&credential_ref, store.0.as_ref())
-        .map_err(|e| e.to_string())
+    delete_source_credential(&credential_ref, store.0.as_ref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -288,9 +296,7 @@ use crate::sources::jira_ingestion::{
 /// multi-thousand-issue projects. Cooperative cancel is effective between
 /// page fetches inside `ingest_project`.
 #[derive(Default)]
-pub struct ActiveIngestionRuns(
-    pub Mutex<std::collections::HashMap<String, Arc<CancellationFlag>>>,
-);
+pub struct ActiveIngestionRuns(pub Mutex<std::collections::HashMap<String, Arc<CancellationFlag>>>);
 
 /// Opt-in toggles for `jira_issue_ingestion_run`. Currently only
 /// `fetch_remote_links` is wired through; the watcher/vote placeholders in
@@ -491,14 +497,16 @@ pub fn jira_issue_ingestion_run(
             // a per-project error the run row is already marked partial /
             // failed in the database. We log via eprintln for dev visibility
             // and continue with the next project.
-            let ingestion_ok = service.ingest_project(
-                &db_access,
-                &source_system_id_for_worker,
-                project_key,
-                project_name,
-                &now,
-                &cancellation_for_worker,
-            ).is_ok();
+            let ingestion_ok = service
+                .ingest_project(
+                    &db_access,
+                    &source_system_id_for_worker,
+                    project_key,
+                    project_name,
+                    &now,
+                    &cancellation_for_worker,
+                )
+                .is_ok();
 
             if !ingestion_ok {
                 eprintln!("ingestion worker: project {project_key} failed");
@@ -523,10 +531,13 @@ pub fn jira_issue_ingestion_run(
                 // Phase 0: resolve provider + derive limits (brief lock, before claiming).
                 let resolved_and_limits = db.lock().ok().and_then(|conn| {
                     let resolved = crate::ai::resolver::resolve_for_task(
-                        &conn, store_for_embed.0.as_ref(),
+                        &conn,
+                        store_for_embed.0.as_ref(),
                         crate::embeddings::EMBEDDING_DEFAULT_ROUTE,
-                    ).ok()?;
-                    let limits = crate::embeddings::limits::limits_from_settings(&resolved.profile.settings);
+                    )
+                    .ok()?;
+                    let limits =
+                        crate::embeddings::limits::limits_from_settings(&resolved.profile.settings);
                     Some((resolved, limits))
                 }); // ← DB mutex released here
 
@@ -534,8 +545,12 @@ pub fn jira_issue_ingestion_run(
                     // Phase 1: claim docs + split into batches (brief lock).
                     let batch = db.lock().ok().and_then(|conn| {
                         crate::embeddings::service::prepare_refresh_batch(
-                            &conn, &embed_opts, &limits, &embed_now,
-                        ).ok()?
+                            &conn,
+                            &embed_opts,
+                            &limits,
+                            &embed_now,
+                        )
+                        .ok()?
                     }); // ← DB mutex released here
 
                     if let Some(batch) = batch {
@@ -578,8 +593,8 @@ pub fn jira_issue_ingestion_run(
                 // Best-effort gardener scheduled run. A gardener failure must
                 // not roll back ingestion success — status is logged only.
                 let gardener_now = now_utc_rfc3339();
-                let gardener_runtime = app_for_worker
-                    .state::<crate::gardener::runner::GardenerRuntime>();
+                let gardener_runtime =
+                    app_for_worker.state::<crate::gardener::runner::GardenerRuntime>();
                 if let Ok(conn) = db.lock() {
                     let summary = crate::gardener::run_gardener_after_successful_project_ingestion(
                         &conn,
@@ -670,8 +685,8 @@ pub(crate) fn read_progress_from_conn(
     source_id: &str,
 ) -> Result<Option<JiraIssueIngestionProgress>, String> {
     let source_system_id = source_system_id_for(source_id);
-    let latest = latest_run(conn, &source_system_id, JIRA_ISSUE_CONNECTOR)
-        .map_err(|e| e.to_string())?;
+    let latest =
+        latest_run(conn, &source_system_id, JIRA_ISSUE_CONNECTOR).map_err(|e| e.to_string())?;
     let Some(row) = latest else {
         return Ok(None);
     };
@@ -987,7 +1002,9 @@ pub fn collection_views_list(
     entity_kind: String,
     db: tauri::State<'_, Mutex<rusqlite::Connection>>,
 ) -> Result<Vec<CollectionViewRecord>, String> {
-    let conn = db.lock().map_err(|_| "Could not access database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not access database".to_string())?;
     list_collection_views(&conn, &entity_kind).map_err(|e| e.to_string())
 }
 
@@ -997,7 +1014,9 @@ pub fn collection_view_save(
     view: CollectionViewSaveInput,
     db: tauri::State<'_, Mutex<rusqlite::Connection>>,
 ) -> Result<CollectionViewRecord, String> {
-    let conn = db.lock().map_err(|_| "Could not access database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not access database".to_string())?;
     save_collection_view(&conn, &view).map_err(|e| e.to_string())
 }
 
@@ -1007,7 +1026,9 @@ pub fn collection_view_delete(
     id: String,
     db: tauri::State<'_, Mutex<rusqlite::Connection>>,
 ) -> Result<(), String> {
-    let conn = db.lock().map_err(|_| "Could not access database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not access database".to_string())?;
     delete_collection_view(&conn, &id).map_err(|e| e.to_string())
 }
 
@@ -1017,7 +1038,9 @@ pub fn collection_views_seed_defaults(
     input: CollectionViewSeedInput,
     db: tauri::State<'_, Mutex<rusqlite::Connection>>,
 ) -> Result<Vec<CollectionViewRecord>, String> {
-    let conn = db.lock().map_err(|_| "Could not access database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not access database".to_string())?;
     seed_default_collection_views(&conn, &input.entity_kind, &input.defaults)
         .map(|result| result.views)
         .map_err(|e| e.to_string())
@@ -1050,11 +1073,12 @@ pub(crate) fn jira_issue_status_timeline_from_conn(
     conn: &Connection,
     issue_id: &str,
 ) -> Result<Vec<JiraIssueStatusTransition>, String> {
-    let rows = crate::issues::history::list_issue_events_by_type(conn, issue_id, "status_changed", 500)
-        .map_err(|e| {
-            use crate::issues::history::IssueHistoryError;
-            IssueHistoryError::Storage(e).to_string()
-        })?;
+    let rows =
+        crate::issues::history::list_issue_events_by_type(conn, issue_id, "status_changed", 500)
+            .map_err(|e| {
+                use crate::issues::history::IssueHistoryError;
+                IssueHistoryError::Storage(e).to_string()
+            })?;
     let mut transitions: Vec<JiraIssueStatusTransition> = rows
         .into_iter()
         .map(|row| JiraIssueStatusTransition {
@@ -1134,7 +1158,10 @@ pub(crate) trait EmbeddingRunnerForCommand {
         &self,
         resolved: &crate::ai::resolver::ResolvedAiProvider,
         request: crate::embeddings::provider::EmbeddingRequest,
-    ) -> Result<crate::embeddings::provider::EmbeddingResponse, crate::embeddings::errors::EmbeddingError>;
+    ) -> Result<
+        crate::embeddings::provider::EmbeddingResponse,
+        crate::embeddings::errors::EmbeddingError,
+    >;
 }
 
 impl EmbeddingRunnerForCommand for crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner {
@@ -1142,7 +1169,10 @@ impl EmbeddingRunnerForCommand for crate::ai::runners::openai_embeddings::OpenAi
         &self,
         resolved: &crate::ai::resolver::ResolvedAiProvider,
         request: crate::embeddings::provider::EmbeddingRequest,
-    ) -> Result<crate::embeddings::provider::EmbeddingResponse, crate::embeddings::errors::EmbeddingError> {
+    ) -> Result<
+        crate::embeddings::provider::EmbeddingResponse,
+        crate::embeddings::errors::EmbeddingError,
+    > {
         crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::run(self, resolved, request)
     }
 }
@@ -1153,8 +1183,8 @@ impl EmbeddingRunnerForCommand for crate::ai::runners::openai_embeddings::OpenAi
 ///
 /// Accepts a `&Mutex<Connection>` so it can lock briefly for Phase 3 writes
 /// while keeping the lock released during the provider HTTP call (Phase 2).
-/// Callers pass `&*db` when `db` is a `tauri::State<Mutex<Connection>>`, or
-/// wrap a raw connection in a `Mutex` for tests.
+/// Callers pass `&db` when `db` is a `tauri::State<Mutex<Connection>>` (auto-deref
+/// handles the indirection), or wrap a raw connection in a `Mutex` for tests.
 ///
 /// `limits.rate_limit_backoff_seconds` is applied as a floor for rate-limit
 /// retry_after_utc so the profile-configured minimum is honoured even when the
@@ -1168,10 +1198,12 @@ pub(crate) fn run_embedding_refresh_loop(
     limits: &crate::embeddings::limits::EmbeddingBatchLimits,
     max_http_calls: usize,
 ) -> (crate::embeddings::service::EmbeddingRunSummary, usize) {
-    use crate::embeddings::service::{complete_text_batch, EmbeddingRunStatus, EmbeddingRunSummary};
-    use crate::embeddings::repository::record_embedding_failure;
-    use crate::embeddings::provider::EmbeddingRequest;
     use crate::embeddings::errors::EmbeddingErrorCategory;
+    use crate::embeddings::provider::EmbeddingRequest;
+    use crate::embeddings::repository::record_embedding_failure;
+    use crate::embeddings::service::{
+        complete_text_batch, EmbeddingRunStatus, EmbeddingRunSummary,
+    };
 
     let mut embedded: u32 = 0;
     let mut failed: u32 = 0;
@@ -1189,7 +1221,9 @@ pub(crate) fn run_embedding_refresh_loop(
             break;
         }
         http_calls_made += 1;
-        let request = EmbeddingRequest { input: text_batch.texts.clone() };
+        let request = EmbeddingRequest {
+            input: text_batch.texts.clone(),
+        };
 
         // Phase 2: HTTP call — no DB lock held.
         let response = match runner.run(resolved, request) {
@@ -1197,20 +1231,26 @@ pub(crate) fn run_embedding_refresh_loop(
             Err(e) => {
                 // Apply configured rate-limit backoff floor so the profile setting
                 // is honoured even when the provider header returns a shorter delay.
-                let err_to_record = if matches!(e.category, EmbeddingErrorCategory::ProviderRateLimited) {
-                    let floor = limits.rate_limit_backoff_seconds;
-                    let mut floored = e.clone();
-                    floored.retry_after_seconds = Some(
-                        floored.retry_after_seconds.unwrap_or(floor).max(floor),
-                    );
-                    floored
-                } else {
-                    e.clone()
-                };
+                let err_to_record =
+                    if matches!(e.category, EmbeddingErrorCategory::ProviderRateLimited) {
+                        let floor = limits.rate_limit_backoff_seconds;
+                        let mut floored = e.clone();
+                        floored.retry_after_seconds =
+                            Some(floored.retry_after_seconds.unwrap_or(floor).max(floor));
+                        floored
+                    } else {
+                        e.clone()
+                    };
                 // Phase 3 (failure path): record failures (brief lock).
                 if let Ok(conn) = db.lock() {
                     for doc in &text_batch.docs {
-                        let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &err_to_record, now);
+                        let _ = record_embedding_failure(
+                            &conn,
+                            &doc.id,
+                            &doc.source_system_id,
+                            &err_to_record,
+                            now,
+                        );
                     }
                 }
                 failed += text_batch.docs.len() as u32;
@@ -1239,7 +1279,13 @@ pub(crate) fn run_embedding_refresh_loop(
                 }
                 Err(e) => {
                     for doc in &text_batch.docs {
-                        let _ = record_embedding_failure(&conn, &doc.id, &doc.source_system_id, &e, now);
+                        let _ = record_embedding_failure(
+                            &conn,
+                            &doc.id,
+                            &doc.source_system_id,
+                            &e,
+                            now,
+                        );
                     }
                     failed += text_batch.docs.len() as u32;
                     paused = true;
@@ -1261,21 +1307,28 @@ pub(crate) fn run_embedding_refresh_loop(
     }
 
     let status = if paused {
-        if embedded > 0 { EmbeddingRunStatus::Partial } else { EmbeddingRunStatus::Paused }
+        if embedded > 0 {
+            EmbeddingRunStatus::Partial
+        } else {
+            EmbeddingRunStatus::Paused
+        }
     } else {
         EmbeddingRunStatus::Complete
     };
 
-    (EmbeddingRunSummary {
-        status,
-        scanned: batch.scanned,
-        embedded,
-        skipped: batch.scanned.saturating_sub(embedded + failed),
-        failed,
-        model_id,
-        dimension,
-        safe_error,
-    }, http_calls_made)
+    (
+        EmbeddingRunSummary {
+            status,
+            scanned: batch.scanned,
+            embedded,
+            skipped: batch.scanned.saturating_sub(embedded + failed),
+            failed,
+            model_id,
+            dimension,
+            safe_error,
+        },
+        http_calls_made,
+    )
 }
 
 /// Trigger a batch embedding refresh. Processes pending documents using the
@@ -1305,7 +1358,9 @@ pub fn embedding_refresh_run(
     use crate::ai::resolver::resolve_for_task;
     use crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner;
     use crate::embeddings::limits::limits_from_settings;
-    use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunOptions, EmbeddingRunStatus, EmbeddingRunSummary};
+    use crate::embeddings::service::{
+        prepare_refresh_batch, EmbeddingRunOptions, EmbeddingRunStatus, EmbeddingRunSummary,
+    };
     use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
 
     let now = now_utc_rfc3339();
@@ -1343,14 +1398,16 @@ pub fn embedding_refresh_run(
         // Phase 1: claim one batch (brief DB lock).
         let batch = {
             let conn = db.lock().map_err(|e| e.to_string())?;
-            let batch = prepare_refresh_batch(&conn, &first_iter_options, &limits, &now)
-                .map_err(|e| e.to_string())?;
-            batch
+            prepare_refresh_batch(&conn, &first_iter_options, &limits, &now)
+                .map_err(|e| e.to_string())?
         }; // ← DB mutex released here
 
         // Disable force_rebuild after the first iteration so subsequent iterations
         // only pick up genuinely pending/stale documents.
-        first_iter_options = EmbeddingRunOptions { force_rebuild: false, ..first_iter_options };
+        first_iter_options = EmbeddingRunOptions {
+            force_rebuild: false,
+            ..first_iter_options
+        };
 
         let Some(batch) = batch else {
             fully_drained = true;
@@ -1365,7 +1422,7 @@ pub fn embedding_refresh_run(
         // claim-iteration level.
         let remaining_budget = limits.max_batches_per_run.saturating_sub(batches_run);
         let (iter_summary, http_calls_made) = run_embedding_refresh_loop(
-            &*db,
+            &db,
             &resolved,
             &batch,
             &OpenAiEmbeddingsRunner::default(),
@@ -1385,14 +1442,21 @@ pub fn embedding_refresh_run(
             safe_error = iter_summary.safe_error;
         }
 
-        if matches!(iter_summary.status, EmbeddingRunStatus::Paused | EmbeddingRunStatus::Partial) {
+        if matches!(
+            iter_summary.status,
+            EmbeddingRunStatus::Paused | EmbeddingRunStatus::Partial
+        ) {
             rate_limited = true;
             break;
         }
     }
 
     let status = if rate_limited {
-        if total_embedded > 0 { EmbeddingRunStatus::Partial } else { EmbeddingRunStatus::Paused }
+        if total_embedded > 0 {
+            EmbeddingRunStatus::Partial
+        } else {
+            EmbeddingRunStatus::Paused
+        }
     } else if fully_drained {
         EmbeddingRunStatus::Complete
     } else {
@@ -1442,19 +1506,20 @@ pub fn embedding_nearest_neighbors(
 ) -> Result<Vec<crate::embeddings::service::EmbeddingCandidate>, String> {
     use crate::ai::resolver::resolve_for_task;
     use crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner;
-    use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
+    use crate::embeddings::errors::EmbeddingError;
     use crate::embeddings::service::{
         embed_query_text_unlocked, nearest_neighbors_by_document_id,
         nearest_neighbors_by_precomputed_vector,
     };
-    use crate::embeddings::errors::EmbeddingError;
+    use crate::embeddings::EMBEDDING_DEFAULT_ROUTE;
 
     match (&query.document_id, &query.query_text) {
         (None, None) | (Some(_), Some(_)) => {
             return Err(EmbeddingError::new(
                 crate::embeddings::errors::EmbeddingErrorCategory::InvalidQuery,
                 "Exactly one of document_id or query_text must be provided.",
-            ).to_string());
+            )
+            .to_string());
         }
         _ => {}
     }
@@ -1500,7 +1565,8 @@ pub fn embedding_nearest_neighbors(
         &resolved.profile.name,
         &resolved.profile.model,
         &query,
-    ).map_err(|e| e.to_string())
+    )
+    .map_err(|e| e.to_string())
 }
 
 // Ensure specta sees all source config types for TypeScript binding generation.
@@ -1548,14 +1614,11 @@ const _: () = {
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-    use crate::ingestion::runs::{
-        finish_run, start_run, update_progress, upsert_cursor,
-    };
+    use crate::ingestion::runs::{finish_run, start_run, update_progress, upsert_cursor};
     use crate::issues::repository::{
-        upsert_source_system, upsert_work_item, upsert_work_item_comment, upsert_work_item_term,
-        upsert_work_item_relationship,
-        SourceSystemInput, WorkItemCommentInput, WorkItemInput, WorkItemTermInput,
-        WorkItemRelationshipInput,
+        upsert_source_system, upsert_work_item, upsert_work_item_comment,
+        upsert_work_item_relationship, upsert_work_item_term, SourceSystemInput,
+        WorkItemCommentInput, WorkItemInput, WorkItemRelationshipInput, WorkItemTermInput,
     };
 
     const NOW: &str = "2026-05-25T17:00:00Z";
@@ -1586,15 +1649,7 @@ mod tests {
         progress_json: &str,
         error_summary: Option<&str>,
     ) {
-        start_run(
-            conn,
-            run_id,
-            ssid,
-            JIRA_ISSUE_CONNECTOR,
-            NOW,
-            "[\"AMP\"]",
-        )
-        .expect("start_run");
+        start_run(conn, run_id, ssid, JIRA_ISSUE_CONNECTOR, NOW, "[\"AMP\"]").expect("start_run");
         update_progress(conn, run_id, progress_json, "{}").expect("update_progress");
         if status != "running" {
             finish_run(conn, run_id, NOW, status, "{}", error_summary).expect("finish_run");
@@ -1758,8 +1813,22 @@ mod tests {
         // Different source to verify the source_id filter.
         let other_ssid = seed_source_system(&conn, "src_other");
 
-        seed_work_item(&conn, &ssid, "10001", "AMP-1", "AMP", "2026-05-20T00:00:00Z");
-        seed_work_item(&conn, &ssid, "10002", "OPS-1", "OPS", "2026-05-22T00:00:00Z");
+        seed_work_item(
+            &conn,
+            &ssid,
+            "10001",
+            "AMP-1",
+            "AMP",
+            "2026-05-20T00:00:00Z",
+        );
+        seed_work_item(
+            &conn,
+            &ssid,
+            "10002",
+            "OPS-1",
+            "OPS",
+            "2026-05-22T00:00:00Z",
+        );
         seed_work_item(
             &conn,
             &other_ssid,
@@ -1977,7 +2046,13 @@ mod tests {
     fn jira_issue_preview_content_loads_body_and_empty_comments() {
         let conn = open_in_memory().expect("db");
         let ssid = seed_source_system(&conn, "src_jira");
-        seed_preview_work_item(&conn, &ssid, "wi_amp_1043", "jira_issue", Some("Issue body"));
+        seed_preview_work_item(
+            &conn,
+            &ssid,
+            "wi_amp_1043",
+            "jira_issue",
+            Some("Issue body"),
+        );
 
         let content = jira_issue_preview_content_from_conn(&conn, "wi_amp_1043").expect("content");
 
@@ -1990,39 +2065,110 @@ mod tests {
     fn jira_issue_preview_content_returns_comments_newest_first_with_author_names() {
         let conn = open_in_memory().expect("db");
         let ssid = seed_source_system(&conn, "src_jira");
-        seed_preview_work_item(&conn, &ssid, "wi_amp_1043", "jira_issue", Some("Issue body"));
-        seed_source_identity(&conn, "ident_person", &ssid, Some("Source Priya"), Some("priya"), Some("priya@example.com"), Some("Priya Person"));
-        seed_source_identity(&conn, "ident_source", &ssid, Some("Tarek Source"), Some("tarek"), Some("tarek@example.com"), None);
-        seed_source_identity(&conn, "ident_user", &ssid, None, Some("elena"), Some("elena@example.com"), None);
+        seed_preview_work_item(
+            &conn,
+            &ssid,
+            "wi_amp_1043",
+            "jira_issue",
+            Some("Issue body"),
+        );
+        seed_source_identity(
+            &conn,
+            "ident_person",
+            &ssid,
+            Some("Source Priya"),
+            Some("priya"),
+            Some("priya@example.com"),
+            Some("Priya Person"),
+        );
+        seed_source_identity(
+            &conn,
+            "ident_source",
+            &ssid,
+            Some("Tarek Source"),
+            Some("tarek"),
+            Some("tarek@example.com"),
+            None,
+        );
+        seed_source_identity(
+            &conn,
+            "ident_user",
+            &ssid,
+            None,
+            Some("elena"),
+            Some("elena@example.com"),
+            None,
+        );
 
         seed_preview_comment(
-            &conn, &ssid, "wi_amp_1043", "c_old_created",
-            Some("ident_user"), Some("Old by created"),
-            Some("2026-05-28T10:00:00Z"), None, "2026-05-28T10:01:00Z",
+            &conn,
+            &ssid,
+            "wi_amp_1043",
+            "c_old_created",
+            Some("ident_user"),
+            Some("Old by created"),
+            Some("2026-05-28T10:00:00Z"),
+            None,
+            "2026-05-28T10:01:00Z",
         );
         seed_preview_comment(
-            &conn, &ssid, "wi_amp_1043", "c_new_updated",
-            Some("ident_person"), Some("Newest by updated"),
-            Some("2026-05-27T10:00:00Z"), Some("2026-05-31T10:00:00Z"), "2026-05-31T10:01:00Z",
+            &conn,
+            &ssid,
+            "wi_amp_1043",
+            "c_new_updated",
+            Some("ident_person"),
+            Some("Newest by updated"),
+            Some("2026-05-27T10:00:00Z"),
+            Some("2026-05-31T10:00:00Z"),
+            "2026-05-31T10:01:00Z",
         );
         seed_preview_comment(
-            &conn, &ssid, "wi_amp_1043", "c_middle_source",
-            Some("ident_source"), Some("Middle by source display"),
-            Some("2026-05-30T10:00:00Z"), None, "2026-05-30T10:01:00Z",
+            &conn,
+            &ssid,
+            "wi_amp_1043",
+            "c_middle_source",
+            Some("ident_source"),
+            Some("Middle by source display"),
+            Some("2026-05-30T10:00:00Z"),
+            None,
+            "2026-05-30T10:01:00Z",
         );
         seed_preview_comment(
-            &conn, &ssid, "wi_amp_1043", "c_ingested_fallback",
-            None, Some("Fallback by ingested"),
-            None, None, "2026-05-29T10:01:00Z",
+            &conn,
+            &ssid,
+            "wi_amp_1043",
+            "c_ingested_fallback",
+            None,
+            Some("Fallback by ingested"),
+            None,
+            None,
+            "2026-05-29T10:01:00Z",
         );
 
         let content = jira_issue_preview_content_from_conn(&conn, "wi_amp_1043").expect("content");
         let ids: Vec<&str> = content.comments.iter().map(|c| c.id.as_str()).collect();
 
-        assert_eq!(ids, vec!["c_new_updated", "c_middle_source", "c_ingested_fallback", "c_old_created"]);
-        assert_eq!(content.comments[0].author_display_name.as_deref(), Some("Priya Person"));
-        assert_eq!(content.comments[1].author_display_name.as_deref(), Some("Tarek Source"));
-        assert_eq!(content.comments[3].author_display_name.as_deref(), Some("elena"));
+        assert_eq!(
+            ids,
+            vec![
+                "c_new_updated",
+                "c_middle_source",
+                "c_ingested_fallback",
+                "c_old_created"
+            ]
+        );
+        assert_eq!(
+            content.comments[0].author_display_name.as_deref(),
+            Some("Priya Person")
+        );
+        assert_eq!(
+            content.comments[1].author_display_name.as_deref(),
+            Some("Tarek Source")
+        );
+        assert_eq!(
+            content.comments[3].author_display_name.as_deref(),
+            Some("elena")
+        );
     }
 
     #[test]
@@ -2032,10 +2178,16 @@ mod tests {
         seed_preview_work_item(&conn, &ssid, "wi_note_1", "github_issue", Some("Not Jira"));
 
         let missing = jira_issue_preview_content_from_conn(&conn, "missing").unwrap_err();
-        assert_eq!(missing, "Jira issue preview content not found for work item missing");
+        assert_eq!(
+            missing,
+            "Jira issue preview content not found for work item missing"
+        );
 
         let non_jira = jira_issue_preview_content_from_conn(&conn, "wi_note_1").unwrap_err();
-        assert_eq!(non_jira, "Jira issue preview content not found for work item wi_note_1");
+        assert_eq!(
+            non_jira,
+            "Jira issue preview content not found for work item wi_note_1"
+        );
     }
 
     #[test]
@@ -2397,9 +2549,16 @@ mod tests {
             &self,
             _resolved: &crate::ai::resolver::ResolvedAiProvider,
             request: crate::embeddings::provider::EmbeddingRequest,
-        ) -> Result<crate::embeddings::provider::EmbeddingResponse, crate::embeddings::errors::EmbeddingError> {
+        ) -> Result<
+            crate::embeddings::provider::EmbeddingResponse,
+            crate::embeddings::errors::EmbeddingError,
+        > {
             Ok(crate::embeddings::provider::EmbeddingResponse {
-                vectors: request.input.iter().map(|_| vec![0.1f32, 0.2, 0.3]).collect(),
+                vectors: request
+                    .input
+                    .iter()
+                    .map(|_| vec![0.1f32, 0.2, 0.3])
+                    .collect(),
                 model: "embed-v-4-0".into(),
                 profile: "grove-embed-v4".into(),
                 dimension: 3,
@@ -2434,7 +2593,9 @@ mod tests {
             credential: AiCredentialConfig {
                 name: "grove-key".into(),
                 kind: AiCredentialKind::ApiKey,
-                source: CredentialSource::Env { var_name: "TEST_API_KEY".into() },
+                source: CredentialSource::Env {
+                    var_name: "TEST_API_KEY".into(),
+                },
             },
             secret: LoadedCredentialSecret::new_for_test("grove-key", "sk-test-fake"),
         }
@@ -2443,7 +2604,7 @@ mod tests {
     #[test]
     fn post_ingestion_embedding_loop_embeds_before_gardener_step() {
         use crate::embeddings::limits::EmbeddingBatchLimits;
-        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
+        use crate::embeddings::repository::{seed_source_and_document, setup_schema};
         use crate::embeddings::service::prepare_refresh_batch;
 
         let conn = open_in_memory().expect("db");
@@ -2492,13 +2653,21 @@ mod tests {
         // in 'failed' state. In either case the loop must have run and produced a
         // non-'embedding' status (not stuck).
         let conn = db.lock().expect("final check lock");
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
-        assert_ne!(status, "embedding", "document must not be stuck in 'embedding' after the loop");
-        assert_ne!(status, "pending", "document must have been processed by the loop");
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_ne!(
+            status, "embedding",
+            "document must not be stuck in 'embedding' after the loop"
+        );
+        assert_ne!(
+            status, "pending",
+            "document must have been processed by the loop"
+        );
 
         // When sqlite-vec is available, assert full success.
         if crate::db::load_sqlite_vec(&conn).is_ok() {
@@ -2515,7 +2684,7 @@ mod tests {
     #[test]
     fn resolution_failure_before_claim_leaves_no_documents_stuck() {
         use crate::embeddings::limits::EmbeddingBatchLimits;
-        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
+        use crate::embeddings::repository::{seed_source_and_document, setup_schema};
         use crate::embeddings::service::prepare_refresh_batch;
 
         let conn = open_in_memory().expect("db");
@@ -2531,16 +2700,24 @@ mod tests {
             crate::embeddings::EMBEDDING_DEFAULT_ROUTE,
         );
         // Resolution must fail (no route configured).
-        assert!(resolved_result.is_err(), "resolution should fail with no route configured");
+        assert!(
+            resolved_result.is_err(),
+            "resolution should fail with no route configured"
+        );
 
         // Because resolution failed, we never called prepare_refresh_batch.
         // The document must still be 'pending', not 'embedding'.
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
-        assert_eq!(status, "pending", "document must remain 'pending' when resolution fails before claiming");
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            status, "pending",
+            "document must remain 'pending' when resolution fails before claiming"
+        );
     }
 
     /// Regression test: non-default profile settings must affect request splitting.
@@ -2549,12 +2726,12 @@ mod tests {
     /// limits_from_settings is applied and not overridden by EmbeddingBatchLimits::default().
     #[test]
     fn non_default_profile_settings_affect_request_splitting() {
-        use std::sync::{Arc, Mutex as StdMutex};
-        use crate::embeddings::limits::{EmbeddingBatchLimits, limits_from_settings};
-        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
-        use crate::embeddings::service::prepare_refresh_batch;
-        use crate::embeddings::provider::{EmbeddingProvider, EmbeddingRequest, EmbeddingResponse};
         use crate::embeddings::errors::EmbeddingError;
+        use crate::embeddings::limits::{limits_from_settings, EmbeddingBatchLimits};
+        use crate::embeddings::provider::{EmbeddingProvider, EmbeddingRequest, EmbeddingResponse};
+        use crate::embeddings::repository::{seed_source_and_document, setup_schema};
+        use crate::embeddings::service::prepare_refresh_batch;
+        use std::sync::{Arc, Mutex as StdMutex};
 
         let conn = open_in_memory().expect("db");
         setup_schema(&conn).expect("embedding schema");
@@ -2598,7 +2775,10 @@ mod tests {
             .expect("prepare batch")
             .expect("should have pending docs");
         let claimed_count: usize = batch.text_batches.iter().map(|b| b.docs.len()).sum();
-        assert_eq!(claimed_count, 5, "non-default max_inputs_per_request=5 must limit claim to 5 docs");
+        assert_eq!(
+            claimed_count, 5,
+            "non-default max_inputs_per_request=5 must limit claim to 5 docs"
+        );
     }
 
     /// Regression test: max_batches_per_run limits the number of provider HTTP calls
@@ -2610,8 +2790,10 @@ mod tests {
     #[test]
     fn outer_loop_respects_max_batches_per_run() {
         use crate::embeddings::limits::EmbeddingBatchLimits;
-        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
-        use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunOptions, EmbeddingRunStatus};
+        use crate::embeddings::repository::{seed_source_and_document, setup_schema};
+        use crate::embeddings::service::{
+            prepare_refresh_batch, EmbeddingRunOptions, EmbeddingRunStatus,
+        };
         use std::sync::Mutex as StdMutex;
 
         let conn = open_in_memory().expect("db");
@@ -2662,28 +2844,45 @@ mod tests {
             }
             let batch = {
                 let conn = db.lock().expect("lock");
-                prepare_refresh_batch(&conn, &first_iter_opts, &limits, now)
-                    .expect("prepare batch")
+                prepare_refresh_batch(&conn, &first_iter_opts, &limits, now).expect("prepare batch")
             };
-            first_iter_opts = EmbeddingRunOptions { force_rebuild: false, ..first_iter_opts };
+            first_iter_opts = EmbeddingRunOptions {
+                force_rebuild: false,
+                ..first_iter_opts
+            };
             let Some(batch) = batch else {
                 fully_drained = true;
                 break;
             };
             let remaining_budget = limits.max_batches_per_run.saturating_sub(batches_run);
             let (iter_summary, http_calls_made) = run_embedding_refresh_loop(
-                &db, &resolved, &batch, &FakeCommandEmbeddingRunner, now, &limits, remaining_budget,
+                &db,
+                &resolved,
+                &batch,
+                &FakeCommandEmbeddingRunner,
+                now,
+                &limits,
+                remaining_budget,
             );
             batches_run += http_calls_made;
-            if matches!(iter_summary.status, EmbeddingRunStatus::Paused | EmbeddingRunStatus::Partial) {
+            if matches!(
+                iter_summary.status,
+                EmbeddingRunStatus::Paused | EmbeddingRunStatus::Partial
+            ) {
                 break;
             }
         }
 
-        assert!(!fully_drained, "20 docs with 2 batches of 5 should not fully drain");
+        assert!(
+            !fully_drained,
+            "20 docs with 2 batches of 5 should not fully drain"
+        );
         // Each claim of 5 docs produces 1 text_batch (within the 8000-token limit),
         // so batches_run == HTTP calls made == max_batches_per_run.
-        assert_eq!(batches_run, 2, "exactly max_batches_per_run=2 HTTP calls should have been made");
+        assert_eq!(
+            batches_run, 2,
+            "exactly max_batches_per_run=2 HTTP calls should have been made"
+        );
 
         let pending_count: i64 = {
             let conn = db.lock().unwrap();
@@ -2691,9 +2890,13 @@ mod tests {
                 "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'pending'",
                 [],
                 |r| r.get(0),
-            ).unwrap()
+            )
+            .unwrap()
         };
-        assert_eq!(pending_count, 10, "10 docs should remain pending after 2 batches of 5");
+        assert_eq!(
+            pending_count, 10,
+            "10 docs should remain pending after 2 batches of 5"
+        );
     }
 
     /// Regression test: when a single claim produces multiple token-split text_batches,
@@ -2705,12 +2908,12 @@ mod tests {
     /// level, not just at the claim-iteration level.
     #[test]
     fn token_split_within_claim_respects_max_http_calls() {
-        use std::sync::{Arc, Mutex as StdMutex};
-        use crate::embeddings::limits::EmbeddingBatchLimits;
-        use crate::embeddings::repository::{setup_schema, seed_source_and_document};
-        use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunOptions};
-        use crate::embeddings::provider::{EmbeddingRequest, EmbeddingResponse};
         use crate::embeddings::errors::EmbeddingError;
+        use crate::embeddings::limits::EmbeddingBatchLimits;
+        use crate::embeddings::provider::{EmbeddingRequest, EmbeddingResponse};
+        use crate::embeddings::repository::{seed_source_and_document, setup_schema};
+        use crate::embeddings::service::{prepare_refresh_batch, EmbeddingRunOptions};
+        use std::sync::{Arc, Mutex as StdMutex};
 
         let conn = open_in_memory().expect("db");
         setup_schema(&conn).expect("embedding schema");
@@ -2752,13 +2955,19 @@ mod tests {
                 .expect("prepare batch")
                 .expect("should have pending docs")
         };
-        assert_eq!(batch.text_batches.len(), 3, "3 docs at ~10 tokens each with a 15-token cap should produce 3 text_batches");
+        assert_eq!(
+            batch.text_batches.len(),
+            3,
+            "3 docs at ~10 tokens each with a 15-token cap should produce 3 text_batches"
+        );
 
         // Count HTTP calls via a capturing runner.
         let http_call_count: Arc<StdMutex<usize>> = Arc::new(StdMutex::new(0));
         let http_call_count_clone = http_call_count.clone();
 
-        struct CountingRunner { count: Arc<StdMutex<usize>> }
+        struct CountingRunner {
+            count: Arc<StdMutex<usize>>,
+        }
         impl EmbeddingRunnerForCommand for CountingRunner {
             fn run(
                 &self,
@@ -2776,16 +2985,24 @@ mod tests {
             }
         }
 
-        let runner = CountingRunner { count: http_call_count_clone };
+        let runner = CountingRunner {
+            count: http_call_count_clone,
+        };
         let resolved = fake_resolved_provider();
 
         // With max_http_calls=1, only the first text_batch should be processed.
-        let (_summary, http_calls_made) = run_embedding_refresh_loop(
-            &db, &resolved, &batch, &runner, now, &limits, 1,
-        );
+        let (_summary, http_calls_made) =
+            run_embedding_refresh_loop(&db, &resolved, &batch, &runner, now, &limits, 1);
 
-        assert_eq!(*http_call_count.lock().unwrap(), 1, "exactly 1 HTTP call should be made with max_http_calls=1");
-        assert_eq!(http_calls_made, 1, "run_embedding_refresh_loop should report 1 HTTP call made");
+        assert_eq!(
+            *http_call_count.lock().unwrap(),
+            1,
+            "exactly 1 HTTP call should be made with max_http_calls=1"
+        );
+        assert_eq!(
+            http_calls_made, 1,
+            "run_embedding_refresh_loop should report 1 HTTP call made"
+        );
 
         // The other 2 docs are still in 'embedding' state (stuck), to be recovered
         // by the stuck-claim recovery at the start of the next prepare_refresh_batch call.
@@ -2795,9 +3012,13 @@ mod tests {
                 "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'embedding'",
                 [],
                 |r| r.get(0),
-            ).unwrap()
+            )
+            .unwrap()
         };
-        assert_eq!(embedding_count, 2, "2 docs from unprocessed text_batches should remain in 'embedding' state");
+        assert_eq!(
+            embedding_count, 2,
+            "2 docs from unprocessed text_batches should remain in 'embedding' state"
+        );
     }
 
     // ── Relationship source-system scoping regression test ────────────────────
@@ -2892,23 +3113,23 @@ mod tests {
         .expect("upsert relationship");
 
         // Querying via source A's work item returns the relationship.
-        let rows_a = jira_issue_relationships_from_conn(
-            &conn,
-            &format!("wi_{}_AMP-1", ssid_a),
-        )
-        .expect("relationships for ssid_a");
+        let rows_a = jira_issue_relationships_from_conn(&conn, &format!("wi_{}_AMP-1", ssid_a))
+            .expect("relationships for ssid_a");
         assert_eq!(rows_a.len(), 1, "ssid_a should have 1 relationship");
         assert_eq!(rows_a[0].relationship_type, "duplicates");
         assert_eq!(rows_a[0].other_key, "AMP-2");
         // Target work item is in the same source, so it should be resolved.
-        assert!(rows_a[0].target_work_item_id.is_some(), "target should be resolved for ssid_a");
+        assert!(
+            rows_a[0].target_work_item_id.is_some(),
+            "target should be resolved for ssid_a"
+        );
 
         // Querying via source B's work item (same key, different source) returns nothing.
-        let rows_b = jira_issue_relationships_from_conn(
-            &conn,
-            &format!("wi_{}_AMP-1", ssid_b),
-        )
-        .expect("relationships for ssid_b");
-        assert!(rows_b.is_empty(), "ssid_b must not return ssid_a's relationships");
+        let rows_b = jira_issue_relationships_from_conn(&conn, &format!("wi_{}_AMP-1", ssid_b))
+            .expect("relationships for ssid_b");
+        assert!(
+            rows_b.is_empty(),
+            "ssid_b must not return ssid_a's relationships"
+        );
     }
 }

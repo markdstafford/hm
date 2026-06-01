@@ -78,7 +78,8 @@ fn validate_position(position: i32) -> Result<()> {
 
 fn row_to_record(row: &rusqlite::Row<'_>) -> Result<CollectionViewRecord> {
     let config_json: String = row.get(5)?;
-    let parsed = serde_json::from_str(&config_json).map_err(|_| safe_error("config_json must be valid JSON"))?;
+    let parsed = serde_json::from_str(&config_json)
+        .map_err(|_| safe_error("config_json must be valid JSON"))?;
     let is_default_int: i64 = row.get(4)?;
     Ok(CollectionViewRecord {
         id: row.get(0)?,
@@ -90,7 +91,10 @@ fn row_to_record(row: &rusqlite::Row<'_>) -> Result<CollectionViewRecord> {
     })
 }
 
-pub fn list_collection_views(conn: &Connection, entity_kind: &str) -> Result<Vec<CollectionViewRecord>> {
+pub fn list_collection_views(
+    conn: &Connection,
+    entity_kind: &str,
+) -> Result<Vec<CollectionViewRecord>> {
     validate_non_empty(entity_kind, "entity_kind is required")?;
     let mut stmt = conn.prepare(
         "SELECT id, entity_kind, display_name, position, is_default, config_json
@@ -102,12 +106,16 @@ pub fn list_collection_views(conn: &Connection, entity_kind: &str) -> Result<Vec
     rows.collect()
 }
 
-pub fn save_collection_view(conn: &Connection, input: &CollectionViewSaveInput) -> Result<CollectionViewRecord> {
+pub fn save_collection_view(
+    conn: &Connection,
+    input: &CollectionViewSaveInput,
+) -> Result<CollectionViewRecord> {
     validate_non_empty(&input.id, "id is required")?;
     validate_non_empty(&input.entity_kind, "entity_kind is required")?;
     validate_non_empty(&input.display_name, "display_name is required")?;
     validate_position(input.position)?;
-    let config_json = serde_json::to_string(&input.config.0).map_err(|_| safe_error("config must be valid JSON"))?;
+    let config_json = serde_json::to_string(&input.config.0)
+        .map_err(|_| safe_error("config must be valid JSON"))?;
 
     conn.execute(
         "INSERT INTO collection_views (
@@ -199,7 +207,12 @@ mod tests {
     use super::*;
     use crate::db::open_in_memory;
 
-    fn input(id: &str, entity_kind: &str, display_name: &str, position: i32) -> CollectionViewSaveInput {
+    fn input(
+        id: &str,
+        entity_kind: &str,
+        display_name: &str,
+        position: i32,
+    ) -> CollectionViewSaveInput {
         CollectionViewSaveInput {
             id: id.to_string(),
             entity_kind: entity_kind.to_string(),
@@ -218,15 +231,22 @@ mod tests {
 
         let rows = list_collection_views(&conn, "jira-issue").expect("list should succeed");
 
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["v1", "v2"]);
-        assert_eq!(rows[0].config.0, serde_json::json!({ "density": "compact" }));
+        assert_eq!(
+            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["v1", "v2"]
+        );
+        assert_eq!(
+            rows[0].config.0,
+            serde_json::json!({ "density": "compact" })
+        );
     }
 
     #[test]
     fn listing_is_scoped_by_entity_kind() {
         let conn = open_in_memory().expect("db should open");
         save_collection_view(&conn, &input("jira", "jira-issue", "Jira", 0)).expect("save jira");
-        save_collection_view(&conn, &input("github", "github-issue", "GitHub", 0)).expect("save github");
+        save_collection_view(&conn, &input("github", "github-issue", "GitHub", 0))
+            .expect("save github");
 
         let rows = list_collection_views(&conn, "jira-issue").expect("list should succeed");
 
@@ -237,7 +257,8 @@ mod tests {
     #[test]
     fn saving_existing_id_updates_mutable_fields() {
         let conn = open_in_memory().expect("db should open");
-        save_collection_view(&conn, &input("v1", "jira-issue", "Original", 0)).expect("save original");
+        save_collection_view(&conn, &input("v1", "jira-issue", "Original", 0))
+            .expect("save original");
         let mut updated = input("v1", "jira-issue", "Renamed", 4);
         updated.is_default = true;
         updated.config = crate::commands::JsonValue(serde_json::json!({ "x": 1 }));
@@ -283,14 +304,19 @@ mod tests {
             input("jira-issue-mine", "jira-issue", "Mine", 1),
         ];
 
-        let first = seed_default_collection_views(&conn, "jira-issue", &defaults).expect("first seed");
+        let first =
+            seed_default_collection_views(&conn, "jira-issue", &defaults).expect("first seed");
         assert!(first.seeded);
         delete_collection_view(&conn, "jira-issue-mine").expect("delete default");
-        let second = seed_default_collection_views(&conn, "jira-issue", &defaults).expect("second seed");
+        let second =
+            seed_default_collection_views(&conn, "jira-issue", &defaults).expect("second seed");
 
         assert!(!second.seeded);
         let rows = list_collection_views(&conn, "jira-issue").expect("list should succeed");
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["jira-issue-all-open"]);
+        assert_eq!(
+            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["jira-issue-all-open"]
+        );
     }
 
     #[test]

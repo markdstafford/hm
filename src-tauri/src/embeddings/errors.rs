@@ -26,25 +26,47 @@ pub struct EmbeddingError {
 
 impl EmbeddingError {
     pub fn new(category: EmbeddingErrorCategory, safe_summary: impl Into<String>) -> Self {
-        Self { category, safe_summary: safe_summary.into(), retry_after_seconds: None }
+        Self {
+            category,
+            safe_summary: safe_summary.into(),
+            retry_after_seconds: None,
+        }
     }
     pub fn provider_rejected() -> Self {
-        Self::new(EmbeddingErrorCategory::ProviderRejected, "Embedding provider rejected the request: Check the selected credential and model.")
+        Self::new(
+            EmbeddingErrorCategory::ProviderRejected,
+            "Embedding provider rejected the request: Check the selected credential and model.",
+        )
     }
     pub fn unsupported_profile() -> Self {
-        Self::new(EmbeddingErrorCategory::UnsupportedProfile, "Unsupported embedding profile: The selected profile cannot create embeddings.")
+        Self::new(
+            EmbeddingErrorCategory::UnsupportedProfile,
+            "Unsupported embedding profile: The selected profile cannot create embeddings.",
+        )
     }
     pub fn missing_route() -> Self {
-        Self::new(EmbeddingErrorCategory::MissingRoute, "No embedding route configured: Add a route for embedding.default.")
+        Self::new(
+            EmbeddingErrorCategory::MissingRoute,
+            "No embedding route configured: Add a route for embedding.default.",
+        )
     }
     pub fn dimension_mismatch() -> Self {
-        Self::new(EmbeddingErrorCategory::DimensionMismatch, "Embedding dimension changed: Rebuild embeddings for this model before searching.")
+        Self::new(
+            EmbeddingErrorCategory::DimensionMismatch,
+            "Embedding dimension changed: Rebuild embeddings for this model before searching.",
+        )
     }
     pub fn provider_unavailable() -> Self {
-        Self::new(EmbeddingErrorCategory::ProviderUnavailable, "Embedding provider unavailable: Retry to continue.")
+        Self::new(
+            EmbeddingErrorCategory::ProviderUnavailable,
+            "Embedding provider unavailable: Retry to continue.",
+        )
     }
     pub fn invalid_response() -> Self {
-        Self::new(EmbeddingErrorCategory::InvalidResponse, "Embedding provider returned an invalid response.")
+        Self::new(
+            EmbeddingErrorCategory::InvalidResponse,
+            "Embedding provider returned an invalid response.",
+        )
     }
     pub fn provider_rate_limited(retry_after_seconds: Option<u64>) -> Self {
         let seconds = retry_after_seconds.unwrap_or(60).max(60);
@@ -77,7 +99,10 @@ impl From<crate::ai::errors::AiError> for EmbeddingError {
             crate::ai::errors::AiError::MissingRoute { .. } => Self::missing_route(),
             crate::ai::errors::AiError::UnsupportedRunner(_) => Self::unsupported_profile(),
             crate::ai::errors::AiError::Timeout => Self::provider_unavailable(),
-            _ => Self::new(EmbeddingErrorCategory::ProviderRejected, "Embedding provider rejected the request: Check the selected credential and model."),
+            _ => Self::new(
+                EmbeddingErrorCategory::ProviderRejected,
+                "Embedding provider rejected the request: Check the selected credential and model.",
+            ),
         }
     }
 }

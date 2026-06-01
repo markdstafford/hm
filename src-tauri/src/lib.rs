@@ -1,15 +1,15 @@
 pub mod ai;
 pub mod audit;
 pub mod collections;
-pub mod embeddings;
-pub mod mutations;
 pub mod commands;
 pub mod db;
+pub mod embeddings;
+pub mod gardener;
 pub mod ingestion;
 pub mod issues;
+pub mod mutations;
 pub mod settings;
 pub mod sources;
-pub mod gardener;
 
 /// Run `replay_missing_snapshots` for every configured Jira project at startup.
 ///

@@ -99,9 +99,7 @@ pub fn execute_jira_link_as_duplicate_reverse<C: JiraMutationClient + ?Sized>(
         .value()
         .get("link_id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            MutationError::ReverseUnsupported("duplicate link id is missing".into())
-        })?
+        .ok_or_else(|| MutationError::ReverseUnsupported("duplicate link id is missing".into()))?
         .to_string();
 
     let issue_key = original
@@ -171,8 +169,8 @@ pub fn jira_link_as_duplicate(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_link_as_duplicate(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
@@ -185,8 +183,8 @@ pub fn jira_link_as_duplicate_reverse(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_link_as_duplicate_reverse(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
@@ -197,7 +195,10 @@ mod tests {
     use crate::mutations::inputs::MutationCommonInput;
     use crate::mutations::tests::RecordingJiraClient;
 
-    fn make_input(close_transition_id: Option<&str>, inverse_transition_id: Option<&str>) -> JiraLinkAsDuplicateInput {
+    fn make_input(
+        close_transition_id: Option<&str>,
+        inverse_transition_id: Option<&str>,
+    ) -> JiraLinkAsDuplicateInput {
         JiraLinkAsDuplicateInput {
             common: MutationCommonInput {
                 source_id: "src_1".to_string(),
@@ -242,15 +243,22 @@ mod tests {
     fn reverse_deletes_link_and_optionally_transitions_back() {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
-        let original = execute_jira_link_as_duplicate(&conn, &client, make_input(Some("31"), Some("11"))).unwrap();
-        execute_jira_link_as_duplicate_reverse(&conn, &client, crate::mutations::inputs::JiraReverseMutationInput {
-            common: crate::mutations::inputs::ReverseCommonInput {
-                source_id: "src_1".to_string(),
-                audit_entry_id: original.id.clone(),
-                source_feature: Some("test".to_string()),
-                batch_id: None,
+        let original =
+            execute_jira_link_as_duplicate(&conn, &client, make_input(Some("31"), Some("11")))
+                .unwrap();
+        execute_jira_link_as_duplicate_reverse(
+            &conn,
+            &client,
+            crate::mutations::inputs::JiraReverseMutationInput {
+                common: crate::mutations::inputs::ReverseCommonInput {
+                    source_id: "src_1".to_string(),
+                    audit_entry_id: original.id.clone(),
+                    source_feature: Some("test".to_string()),
+                    batch_id: None,
+                },
             },
-        }).unwrap();
+        )
+        .unwrap();
         let calls = client.calls.lock().unwrap().clone();
         // Forward: [0] list_transitions, [1] link, [2] transition; reverse: [3] delete_link, [4] transition back
         assert_eq!(calls[3], "delete_link:link_1");
@@ -263,21 +271,26 @@ mod tests {
     fn unavailable_close_transition_returns_invalid_input_before_any_remote_write() {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default(); // available transitions: "31" and "11"
-        // Request transition "999" which is not in the mock's available list
-        let err = execute_jira_link_as_duplicate(
-            &conn,
-            &client,
-            make_input(Some("999"), Some("11")),
-        )
-        .unwrap_err();
+                                                     // Request transition "999" which is not in the mock's available list
+        let err =
+            execute_jira_link_as_duplicate(&conn, &client, make_input(Some("999"), Some("11")))
+                .unwrap_err();
         assert!(
             matches!(err, MutationError::InvalidInput(_)),
             "expected InvalidInput, got: {err:?}"
         );
         let calls = client.calls.lock().unwrap().clone();
         // Only list_transitions should have been called; no link or transition calls
-        assert_eq!(calls.len(), 1, "expected exactly one call (list_transitions), got: {calls:?}");
-        assert!(calls[0].starts_with("list_transitions:"), "expected list_transitions call, got: {}", calls[0]);
+        assert_eq!(
+            calls.len(),
+            1,
+            "expected exactly one call (list_transitions), got: {calls:?}"
+        );
+        assert!(
+            calls[0].starts_with("list_transitions:"),
+            "expected list_transitions call, got: {}",
+            calls[0]
+        );
     }
 
     #[test]
@@ -287,8 +300,14 @@ mod tests {
         client.null_link_id = true;
         // link-only (no close transition) with a provider that returns no link id
         let entry = execute_jira_link_as_duplicate(&conn, &client, make_input(None, None)).unwrap();
-        assert!(!entry.reversible, "expected reversible=false when link_id is None");
-        assert!(entry.after_state.value()["link_id"].is_null(), "link_id should be null in after_state");
+        assert!(
+            !entry.reversible,
+            "expected reversible=false when link_id is None"
+        );
+        assert!(
+            entry.after_state.value()["link_id"].is_null(),
+            "link_id should be null in after_state"
+        );
     }
 
     #[test]
@@ -296,25 +315,41 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
         // Manually insert an audit entry with no link_id in after_state
-        let entry = crate::audit::repository::append_entry(&conn, crate::audit::entry::AuditLogAppendInput {
-            id: Some("audit_no_link".to_string()),
-            batch_id: "batch_x".to_string(),
-            action_id: JIRA_LINK_AS_DUPLICATE.to_string(),
-            target_ref: "jira:AMP-1043".to_string(),
-            before_state: crate::mutations::inputs::audit_state(serde_json::json!({"status": "Open"})),
-            after_state: crate::mutations::inputs::audit_state(serde_json::json!({"target_issue_key": "AMP-997"})),
-            reversible: true,
-            created_at: None,
-            source_feature: "test".to_string(),
-        }).unwrap();
-        let err = execute_jira_link_as_duplicate_reverse(&conn, &client, crate::mutations::inputs::JiraReverseMutationInput {
-            common: crate::mutations::inputs::ReverseCommonInput {
-                source_id: "src_1".to_string(),
-                audit_entry_id: entry.id,
-                source_feature: Some("test".to_string()),
-                batch_id: None,
+        let entry = crate::audit::repository::append_entry(
+            &conn,
+            crate::audit::entry::AuditLogAppendInput {
+                id: Some("audit_no_link".to_string()),
+                batch_id: "batch_x".to_string(),
+                action_id: JIRA_LINK_AS_DUPLICATE.to_string(),
+                target_ref: "jira:AMP-1043".to_string(),
+                before_state: crate::mutations::inputs::audit_state(
+                    serde_json::json!({"status": "Open"}),
+                ),
+                after_state: crate::mutations::inputs::audit_state(
+                    serde_json::json!({"target_issue_key": "AMP-997"}),
+                ),
+                reversible: true,
+                created_at: None,
+                source_feature: "test".to_string(),
             },
-        }).unwrap_err();
-        assert_eq!(format!("{err}"), "reverse mutation is unsupported: duplicate link id is missing");
+        )
+        .unwrap();
+        let err = execute_jira_link_as_duplicate_reverse(
+            &conn,
+            &client,
+            crate::mutations::inputs::JiraReverseMutationInput {
+                common: crate::mutations::inputs::ReverseCommonInput {
+                    source_id: "src_1".to_string(),
+                    audit_entry_id: entry.id,
+                    source_feature: Some("test".to_string()),
+                    batch_id: None,
+                },
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{err}"),
+            "reverse mutation is unsupported: duplicate link id is missing"
+        );
     }
 }

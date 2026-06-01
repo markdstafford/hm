@@ -16,7 +16,9 @@ impl fmt::Display for MutationError {
         match self {
             MutationError::InvalidInput(msg) => write!(f, "invalid mutation input: {msg}"),
             MutationError::SourceNotFound(id) => write!(f, "source not found: {id}"),
-            MutationError::CredentialMissing(id) => write!(f, "credential missing for source: {id}"),
+            MutationError::CredentialMissing(id) => {
+                write!(f, "credential missing for source: {id}")
+            }
             MutationError::Jira(_) => f.write_str("Jira mutation failed"),
             MutationError::AuditWriteFailedAfterRemoteMutation => {
                 f.write_str("Jira mutation may have succeeded, but local audit persistence failed")
@@ -34,7 +36,9 @@ impl fmt::Debug for MutationError {
         match self {
             MutationError::InvalidInput(msg) => f.debug_tuple("InvalidInput").field(msg).finish(),
             MutationError::SourceNotFound(id) => f.debug_tuple("SourceNotFound").field(id).finish(),
-            MutationError::CredentialMissing(id) => f.debug_tuple("CredentialMissing").field(id).finish(),
+            MutationError::CredentialMissing(id) => {
+                f.debug_tuple("CredentialMissing").field(id).finish()
+            }
             MutationError::Jira(_) => write!(f, "Jira([redacted])"),
             MutationError::AuditWriteFailedAfterRemoteMutation => {
                 write!(f, "AuditWriteFailedAfterRemoteMutation")

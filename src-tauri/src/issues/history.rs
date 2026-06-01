@@ -151,9 +151,16 @@ pub enum IssueHistoryError {
 impl std::fmt::Display for IssueHistoryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IssueHistoryError::Storage(_) => write!(f, "Could not read issue history. Try syncing Jira again."),
-            IssueHistoryError::Projection(_) => write!(f, "Issue history could not be updated. Try syncing Jira again."),
-            IssueHistoryError::InvalidConfig(_) => write!(f, "Issue history retention settings are invalid."),
+            IssueHistoryError::Storage(_) => {
+                write!(f, "Could not read issue history. Try syncing Jira again.")
+            }
+            IssueHistoryError::Projection(_) => write!(
+                f,
+                "Issue history could not be updated. Try syncing Jira again."
+            ),
+            IssueHistoryError::InvalidConfig(_) => {
+                write!(f, "Issue history retention settings are invalid.")
+            }
         }
     }
 }
@@ -305,7 +312,10 @@ pub fn query_issue_events_for_issue(
 }
 
 /// INSERT OR REPLACE — replaces all fields on conflict.
-pub fn upsert_issue_snapshot(conn: &Connection, input: &IssueSnapshotInput) -> rusqlite::Result<()> {
+pub fn upsert_issue_snapshot(
+    conn: &Connection,
+    input: &IssueSnapshotInput,
+) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO issue_snapshots (
             issue_id, snapshot_date, source_system_id, source_kind,
@@ -404,7 +414,7 @@ pub fn query_issue_snapshots(
         (like, $field:expr, $value:expr) => {
             if let Some(v) = $value {
                 sql.push_str(&format!(" AND {} LIKE ?{}", $field, param_idx));
-                extra_params.push(Box::new(format!("%\"{}\"%" , v)));
+                extra_params.push(Box::new(format!("%\"{}\"%", v)));
                 param_idx += 1;
             }
         };
@@ -508,15 +518,15 @@ pub fn finish_snapshot_job(
 }
 
 /// Load retention config from shared_settings. Returns the default if no value is stored.
-pub fn load_retention_config(conn: &Connection) -> Result<IssueHistoryRetentionConfig, IssueHistoryError> {
+pub fn load_retention_config(
+    conn: &Connection,
+) -> Result<IssueHistoryRetentionConfig, IssueHistoryError> {
     match crate::settings::shared::shared_settings_get(conn, ISSUE_HISTORY_RETENTION_KEY) {
-        Ok(Some(value)) => {
-            serde_json::from_value(value).map_err(|e| {
-                IssueHistoryError::Storage(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
-                )))
-            })
-        }
+        Ok(Some(value)) => serde_json::from_value(value).map_err(|e| {
+            IssueHistoryError::Storage(rusqlite::Error::ToSqlConversionFailure(Box::new(
+                std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+            )))
+        }),
         Ok(None) => Ok(IssueHistoryRetentionConfig::default()),
         Err(e) => {
             eprintln!("[history] load_retention_config error (using defaults): {e}");
@@ -537,14 +547,14 @@ pub fn save_retention_config(
         ));
     }
     if config.weekly_anchor != "monday" {
-        return Err(IssueHistoryError::InvalidConfig(
-            format!("weekly_anchor '{}' is not supported; use 'monday'", config.weekly_anchor),
-        ));
+        return Err(IssueHistoryError::InvalidConfig(format!(
+            "weekly_anchor '{}' is not supported; use 'monday'",
+            config.weekly_anchor
+        )));
     }
 
-    let value = serde_json::to_value(config).map_err(|e| {
-        IssueHistoryError::InvalidConfig(e.to_string())
-    })?;
+    let value = serde_json::to_value(config)
+        .map_err(|e| IssueHistoryError::InvalidConfig(e.to_string()))?;
 
     crate::settings::shared::shared_settings_set(conn, ISSUE_HISTORY_RETENTION_KEY, &value)
         .map_err(|e| IssueHistoryError::InvalidConfig(e.to_string()))
@@ -713,9 +723,8 @@ mod tests {
 
     #[test]
     fn history_error_display_redacts_token_shaped_values() {
-        let err = IssueHistoryError::Projection(
-            "Bearer abcdefghijklmnopqrstuvwxyz123456".to_string(),
-        );
+        let err =
+            IssueHistoryError::Projection("Bearer abcdefghijklmnopqrstuvwxyz123456".to_string());
         let rendered = err.to_string();
         assert!(!rendered.contains("Bearer"));
         assert!(!rendered.contains("abcdefghijklmnopqrstuvwxyz"));

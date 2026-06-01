@@ -3,12 +3,12 @@
 
 use std::sync::Mutex;
 
+use crate::mutations::jira_client::JiraMutationClient;
 use crate::sources::jira_errors::JiraApiError;
 use crate::sources::jira_types::{
     JiraCreatedComment, JiraCreatedIssueLink, JiraNamedValue, JiraTransition,
     JiraTransitionsResponse,
 };
-use crate::mutations::jira_client::JiraMutationClient;
 
 pub struct RecordingJiraClient {
     pub calls: Mutex<Vec<String>>,
@@ -107,15 +107,16 @@ impl JiraMutationClient for RecordingJiraClient {
         target_key: &str,
         link_type: &str,
     ) -> Result<JiraCreatedIssueLink, JiraApiError> {
-        self.calls.lock().unwrap().push(format!(
-            "link:{}:{}:{}",
-            source_key, target_key, link_type
-        ));
-        let id = if self.null_link_id { None } else { Some(self.link_id.clone()) };
-        Ok(JiraCreatedIssueLink {
-            id,
-            self_url: None,
-        })
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("link:{}:{}:{}", source_key, target_key, link_type));
+        let id = if self.null_link_id {
+            None
+        } else {
+            Some(self.link_id.clone())
+        };
+        Ok(JiraCreatedIssueLink { id, self_url: None })
     }
 
     fn delete_issue_link(&self, link_id: &str) -> Result<(), JiraApiError> {
@@ -133,7 +134,7 @@ mod cross_cutting_tests {
     use crate::audit::repository::list_entries;
     use crate::db::open_in_memory;
     use crate::mutations::errors::MutationError;
-    use crate::mutations::inputs::{MutationCommonInput, JiraUpdateTitleInput};
+    use crate::mutations::inputs::{JiraUpdateTitleInput, MutationCommonInput};
     use crate::mutations::jira_update_title::execute_jira_update_title;
 
     use super::RecordingJiraClient;
@@ -155,15 +156,12 @@ mod cross_cutting_tests {
     fn audit_write_failure_after_jira_success_returns_specific_error() {
         // Open with schema then DROP the table to simulate audit persistence failure
         let conn = open_in_memory().unwrap();
-        conn.execute_batch("DROP TABLE IF EXISTS audit_log").unwrap();
+        conn.execute_batch("DROP TABLE IF EXISTS audit_log")
+            .unwrap();
 
         let client = RecordingJiraClient::default();
-        let err = execute_jira_update_title(
-            &conn,
-            &client,
-            make_title_input("AMP-1043", None),
-        )
-        .unwrap_err();
+        let err = execute_jira_update_title(&conn, &client, make_title_input("AMP-1043", None))
+            .unwrap_err();
 
         // Jira was called (one update call)
         assert_eq!(client.calls.lock().unwrap().len(), 1);
@@ -180,7 +178,10 @@ mod cross_cutting_tests {
 
         // Debug output must not contain a token-shaped title value
         let debug = format!("{err:?}");
-        assert!(!debug.contains("secret-token-shaped-value"), "Debug leaked value: {debug}");
+        assert!(
+            !debug.contains("secret-token-shaped-value"),
+            "Debug leaked value: {debug}"
+        );
     }
 
     #[test]
@@ -188,11 +189,26 @@ mod cross_cutting_tests {
         let err = MutationError::Jira("Authorization: Bearer secret-token raw body".into());
         let display = format!("{err}");
         let debug = format!("{err:?}");
-        assert_eq!(display, "Jira mutation failed", "Display must be fixed safe string");
-        assert!(!debug.contains("secret-token"), "Debug must not leak secret-token: {debug}");
-        assert!(!debug.to_ascii_lowercase().contains("authorization"), "Debug must not leak Authorization: {debug}");
-        assert!(!debug.contains("raw body"), "Debug must not leak raw body: {debug}");
-        assert!(debug.contains("[redacted]"), "Debug must show [redacted]: {debug}");
+        assert_eq!(
+            display, "Jira mutation failed",
+            "Display must be fixed safe string"
+        );
+        assert!(
+            !debug.contains("secret-token"),
+            "Debug must not leak secret-token: {debug}"
+        );
+        assert!(
+            !debug.to_ascii_lowercase().contains("authorization"),
+            "Debug must not leak Authorization: {debug}"
+        );
+        assert!(
+            !debug.contains("raw body"),
+            "Debug must not leak raw body: {debug}"
+        );
+        assert!(
+            debug.contains("[redacted]"),
+            "Debug must show [redacted]: {debug}"
+        );
     }
 
     #[test]
@@ -201,14 +217,21 @@ mod cross_cutting_tests {
         let client = RecordingJiraClient::default();
         let batch_id = "batch_shared";
 
-        execute_jira_update_title(&conn, &client, make_title_input("AMP-1", Some(batch_id))).unwrap();
-        execute_jira_update_title(&conn, &client, make_title_input("AMP-2", Some(batch_id))).unwrap();
-        execute_jira_update_title(&conn, &client, make_title_input("AMP-3", Some(batch_id))).unwrap();
+        execute_jira_update_title(&conn, &client, make_title_input("AMP-1", Some(batch_id)))
+            .unwrap();
+        execute_jira_update_title(&conn, &client, make_title_input("AMP-2", Some(batch_id)))
+            .unwrap();
+        execute_jira_update_title(&conn, &client, make_title_input("AMP-3", Some(batch_id)))
+            .unwrap();
 
-        let entries = list_entries(&conn, AuditLogListFilter {
-            batch_id: Some(batch_id.to_string()),
-            ..Default::default()
-        }).unwrap();
+        let entries = list_entries(
+            &conn,
+            AuditLogListFilter {
+                batch_id: Some(batch_id.to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         assert_eq!(entries.len(), 3, "expected 3 entries for shared batch_id");
         assert!(entries.iter().all(|e| e.batch_id == batch_id));
@@ -219,10 +242,15 @@ mod cross_cutting_tests {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
 
-        let entry1 = execute_jira_update_title(&conn, &client, make_title_input("AMP-10", None)).unwrap();
-        let entry2 = execute_jira_update_title(&conn, &client, make_title_input("AMP-11", None)).unwrap();
+        let entry1 =
+            execute_jira_update_title(&conn, &client, make_title_input("AMP-10", None)).unwrap();
+        let entry2 =
+            execute_jira_update_title(&conn, &client, make_title_input("AMP-11", None)).unwrap();
 
-        assert_ne!(entry1.batch_id, entry2.batch_id, "separate calls without batch_id should produce unique batch ids");
+        assert_ne!(
+            entry1.batch_id, entry2.batch_id,
+            "separate calls without batch_id should produce unique batch ids"
+        );
     }
 
     #[test]
@@ -243,24 +271,38 @@ mod cross_cutting_tests {
         let client = RecordingJiraClient::default();
 
         // Input contains no token-shaped strings — verify audit row doesn't invent any
-        let entry = execute_jira_update_title(&conn, &client, JiraUpdateTitleInput {
-            common: MutationCommonInput {
-                source_id: "src_clean".to_string(),
-                issue_key: "AMP-1043".to_string(),
-                source_feature: Some("test".to_string()),
-                batch_id: None,
+        let entry = execute_jira_update_title(
+            &conn,
+            &client,
+            JiraUpdateTitleInput {
+                common: MutationCommonInput {
+                    source_id: "src_clean".to_string(),
+                    issue_key: "AMP-1043".to_string(),
+                    source_feature: Some("test".to_string()),
+                    batch_id: None,
+                },
+                before_title: "Clean before".to_string(),
+                after_title: "Clean after".to_string(),
             },
-            before_title: "Clean before".to_string(),
-            after_title: "Clean after".to_string(),
-        }).unwrap();
+        )
+        .unwrap();
 
         let before_json = serde_json::to_string(entry.before_state.value()).unwrap();
         let after_json = serde_json::to_string(entry.after_state.value()).unwrap();
 
         for json in [&before_json, &after_json] {
-            assert!(!json.to_ascii_lowercase().contains("authorization"), "audit state contains Authorization: {json}");
-            assert!(!json.contains("Bearer "), "audit state contains Bearer token: {json}");
-            assert!(!json.contains("credential_ref"), "audit state contains credential_ref: {json}");
+            assert!(
+                !json.to_ascii_lowercase().contains("authorization"),
+                "audit state contains Authorization: {json}"
+            );
+            assert!(
+                !json.contains("Bearer "),
+                "audit state contains Bearer token: {json}"
+            );
+            assert!(
+                !json.contains("credential_ref"),
+                "audit state contains credential_ref: {json}"
+            );
         }
     }
 }

@@ -27,10 +27,9 @@ use crate::issues::ids::{content_hash, stable_id};
 use crate::issues::people::{upsert_source_identity, SourceIdentityInput, UpsertedIdentity};
 use crate::issues::repository::{
     delete_work_item_terms_by_kind, upsert_indexable_document, upsert_jira_remote_link,
-    upsert_jira_worklog, upsert_work_item, upsert_work_item_comment,
-    upsert_work_item_relationship, upsert_work_item_term, IndexableDocumentInput,
-    JiraRemoteLinkInput, JiraWorklogInput, WorkItemCommentInput, WorkItemInput,
-    WorkItemRelationshipInput, WorkItemTermInput,
+    upsert_jira_worklog, upsert_work_item, upsert_work_item_comment, upsert_work_item_relationship,
+    upsert_work_item_term, IndexableDocumentInput, JiraRemoteLinkInput, JiraWorklogInput,
+    WorkItemCommentInput, WorkItemInput, WorkItemRelationshipInput, WorkItemTermInput,
 };
 use crate::sources::jira_types::{JiraComment, JiraIssue, JiraRemoteLink, JiraWorklog};
 
@@ -284,7 +283,9 @@ fn parse_sprint_names(v: &Value) -> Vec<String> {
 /// Extract the `value` fields from an array of `{value: "..."}` objects.
 /// Returns an empty Vec if the shape doesn't match.
 fn array_of_values(v: &Value) -> Vec<String> {
-    let Some(arr) = v.as_array() else { return Vec::new() };
+    let Some(arr) = v.as_array() else {
+        return Vec::new();
+    };
     arr.iter()
         .filter_map(|item| {
             item.as_object()
@@ -317,15 +318,21 @@ fn upsert_jira_user_identity(
     source_system_id: &str,
     user_value: Option<&Value>,
 ) -> Result<Option<UpsertedIdentity>, ProjectionError> {
-    let Some(user) = user_value else { return Ok(None) };
+    let Some(user) = user_value else {
+        return Ok(None);
+    };
     if user.is_null() {
         return Ok(None);
     }
     let obj = user.as_object();
-    let account_id = obj.and_then(|o| o.get("accountId")).and_then(|v| v.as_str());
+    let account_id = obj
+        .and_then(|o| o.get("accountId"))
+        .and_then(|v| v.as_str());
     let name = obj.and_then(|o| o.get("name")).and_then(|v| v.as_str());
     let key = obj.and_then(|o| o.get("key")).and_then(|v| v.as_str());
-    let display_name = obj.and_then(|o| o.get("displayName")).and_then(|v| v.as_str());
+    let display_name = obj
+        .and_then(|o| o.get("displayName"))
+        .and_then(|v| v.as_str());
     let email = obj
         .and_then(|o| o.get("emailAddress"))
         .and_then(|v| v.as_str());
@@ -619,10 +626,7 @@ fn persist_jira_remote_link(
     if url.is_empty() {
         return Ok(false);
     }
-    let id = stable_id(
-        "rl",
-        &[ctx.source_system_id, "jira", issue_key, &url],
-    );
+    let id = stable_id("rl", &[ctx.source_system_id, "jira", issue_key, &url]);
     let upstream_id_string = link.id.map(|n| n.to_string());
     let title = link.object.as_ref().and_then(|o| o.title.clone());
     let raw_json = serde_json::to_string(link).unwrap_or_default();
@@ -891,14 +895,11 @@ pub fn project_jira_issue(
             }
             // Lookup mapping by field_id.
             let mapping = mappings.iter().find(|m| m.field_id == field_id);
-            let (canonical_name, value_kind, field_name): (
-                Option<&str>,
-                &str,
-                Option<&str>,
-            ) = match mapping {
-                Some(m) => (Some(m.canonical_name), m.value_kind, Some(m.field_name)),
-                None => (None, "json", None),
-            };
+            let (canonical_name, value_kind, field_name): (Option<&str>, &str, Option<&str>) =
+                match mapping {
+                    Some(m) => (Some(m.canonical_name), m.value_kind, Some(m.field_name)),
+                    None => (None, "json", None),
+                };
             upsert_field_value(
                 conn,
                 &FieldValueInput {
@@ -1033,10 +1034,7 @@ pub fn project_jira_issue(
     }
 
     if let Some(epic) = epic_link.as_deref() {
-        let rel_id = stable_id(
-            "rel",
-            &[ctx.source_system_id, "epic", &issue.key, epic],
-        );
+        let rel_id = stable_id("rel", &[ctx.source_system_id, "epic", &issue.key, epic]);
         upsert_work_item_relationship(
             conn,
             ctx.ingested_at,
@@ -1056,10 +1054,7 @@ pub fn project_jira_issue(
     }
 
     if let Some(parent) = parent_link.as_deref() {
-        let rel_id = stable_id(
-            "rel",
-            &[ctx.source_system_id, "parent", &issue.key, parent],
-        );
+        let rel_id = stable_id("rel", &[ctx.source_system_id, "parent", &issue.key, parent]);
         upsert_work_item_relationship(
             conn,
             ctx.ingested_at,
@@ -1201,9 +1196,7 @@ pub fn project_jira_issue(
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::ingestion::errors::{IngestionError, IngestionErrorCategory};
-use crate::ingestion::runs::{
-    finish_run, read_cursor, start_run, update_progress, upsert_cursor,
-};
+use crate::ingestion::runs::{finish_run, read_cursor, start_run, update_progress, upsert_cursor};
 
 /// Process-static counter mixed into `run_id` so two runs for the same
 /// `(source_system_id, project_key)` started within the same wall-clock
@@ -1214,7 +1207,9 @@ use crate::ingestion::runs::{
 static RUN_ID_SEQ: AtomicU64 = AtomicU64::new(0);
 use crate::sources::jira_client::{JiraApiClient, JiraSearchRequest};
 use crate::sources::jira_errors::JiraApiError;
-use crate::sources::jira_types::{JiraChangelogPage, JiraPagedComments, JiraPagedWorklogs, JiraSearchPage};
+use crate::sources::jira_types::{
+    JiraChangelogPage, JiraPagedComments, JiraPagedWorklogs, JiraSearchPage,
+};
 
 /// Trait seam that abstracts over `JiraApiClient::search_issues_page` so
 /// `JiraIssueIngestionService` can be exercised against an in-memory stub.
@@ -1420,12 +1415,8 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
     ) -> Result<JiraIssueIngestionSummary, IngestionError> {
         let seq = RUN_ID_SEQ.fetch_add(1, Ordering::Relaxed);
         let seq_str = seq.to_string();
-        let run_id = stable_id(
-            "run",
-            &[source_system_id, project_key, now_utc, &seq_str],
-        );
-        let requested_projects_json =
-            serde_json::json!([project_key]).to_string();
+        let run_id = stable_id("run", &[source_system_id, project_key, now_utc, &seq_str]);
+        let requested_projects_json = serde_json::json!([project_key]).to_string();
 
         // ── Setup: start run + seed mappings + read cursor in ONE locked block.
         let cursor_last_updated: Option<String> = db.with_conn(|conn| {
@@ -1452,8 +1443,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 return Err(ie);
             }
             let cursor_key = format!("project:{}:issues", project_key);
-            let cursor =
-                read_cursor(conn, source_system_id, JIRA_ISSUE_CONNECTOR, &cursor_key)?;
+            let cursor = read_cursor(conn, source_system_id, JIRA_ISSUE_CONNECTOR, &cursor_key)?;
             let last_updated: Option<String> = cursor.as_ref().and_then(|row| {
                 serde_json::from_str::<serde_json::Value>(&row.cursor_value)
                     .ok()
@@ -1569,9 +1559,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                 if let Some(updated) = page_max_updated {
                     match max_updated_seen.as_deref() {
                         None => max_updated_seen = Some(updated),
-                        Some(prev) if updated.as_str() > prev => {
-                            max_updated_seen = Some(updated)
-                        }
+                        Some(prev) if updated.as_str() > prev => max_updated_seen = Some(updated),
                         _ => {}
                     }
                 }
@@ -1592,10 +1580,8 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                     if cancellation.is_cancelled() {
                         break;
                     }
-                    let work_item_id_for_tail = stable_id(
-                        "wi",
-                        &[source_system_id, JIRA_WORK_ITEM_KIND, &issue.id],
-                    );
+                    let work_item_id_for_tail =
+                        stable_id("wi", &[source_system_id, JIRA_WORK_ITEM_KIND, &issue.id]);
 
                     // Comments tail.
                     if let Some(comment) = issue.fields.comment.as_ref() {
@@ -1616,8 +1602,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                     Ok(p) => p,
                                     Err(err) => {
                                         let ie: IngestionError = err.into();
-                                        tail_errors
-                                            .push(format!("comments {}: {}", issue.key, ie));
+                                        tail_errors.push(format!("comments {}: {}", issue.key, ie));
                                         break;
                                     }
                                 };
@@ -1672,8 +1657,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                     Ok(p) => p,
                                     Err(err) => {
                                         let ie: IngestionError = err.into();
-                                        tail_errors
-                                            .push(format!("worklogs {}: {}", issue.key, ie));
+                                        tail_errors.push(format!("worklogs {}: {}", issue.key, ie));
                                         break;
                                     }
                                 };
@@ -1682,13 +1666,8 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                 // upserts so retry after partial flush is safe.
                                 db.with_conn(|conn| {
                                     for w in &page_tail.worklogs {
-                                        persist_jira_worklog(
-                                            conn,
-                                            &ctx,
-                                            &work_item_id_for_tail,
-                                            w,
-                                        )
-                                        .map_err(IngestionError::from)?;
+                                        persist_jira_worklog(conn, &ctx, &work_item_id_for_tail, w)
+                                            .map_err(IngestionError::from)?;
                                     }
                                     Ok(())
                                 })?;
@@ -1801,10 +1780,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                                         IngestionErrorCategory::Decode,
                                         e.to_string(),
                                     );
-                                    tail_errors.push(format!(
-                                        "changelog {}: {}",
-                                        issue.key, ie
-                                    ));
+                                    tail_errors.push(format!("changelog {}: {}", issue.key, ie));
                                     continue;
                                 }
                             };
@@ -1942,8 +1918,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
             // scan that returned zero links is still a completed sync, so the
             // next run should not redo the scan from scratch.
             if fetch_remote_links && !remote_links_had_error {
-                let remote_links_cursor_key =
-                    format!("project:{}:remotelinks", project_key_owned);
+                let remote_links_cursor_key = format!("project:{}:remotelinks", project_key_owned);
                 let value = serde_json::json!({ "last_synced": now_utc }).to_string();
                 upsert_cursor(
                     conn,
@@ -1991,7 +1966,9 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
                     );
                 }
                 Err(e) => {
-                    eprintln!("[snapshots] replay_missing_snapshots failed for {project_key_owned}: {e}");
+                    eprintln!(
+                        "[snapshots] replay_missing_snapshots failed for {project_key_owned}: {e}"
+                    );
                     tail_errors.push(format!("snapshot_replay: {e}"));
                 }
             }
@@ -2000,8 +1977,7 @@ impl<'a, C: JiraIssueClient> JiraIssueIngestionService<'a, C> {
 
         // ── Retention compaction ────────────────────────────────────────
         db.with_conn(|conn| {
-            let config = crate::issues::history::load_retention_config(conn)
-                .unwrap_or_default();
+            let config = crate::issues::history::load_retention_config(conn).unwrap_or_default();
             match crate::issues::snapshots::compact_snapshot_retention(
                 conn,
                 &source_system_id_owned,
@@ -2034,12 +2010,7 @@ fn div_ceil_u32(numerator: u32, denominator: u32) -> u32 {
     numerator.div_ceil(denominator)
 }
 
-fn should_stop_paginate(
-    start_at: u32,
-    requested: u32,
-    returned: u32,
-    total: Option<u32>,
-) -> bool {
+fn should_stop_paginate(start_at: u32, requested: u32, returned: u32, total: Option<u32>) -> bool {
     if returned == 0 {
         return true;
     }
@@ -2256,14 +2227,11 @@ mod tests {
     }
 
     fn load_amp_fixture() -> (Value, JiraSearchPage) {
-        let raw: Value = serde_json::from_str(include_str!(
-            "fixtures/jira_amp_search_page.json"
-        ))
-        .expect("parse raw");
-        let parsed: JiraSearchPage = serde_json::from_str(include_str!(
-            "fixtures/jira_amp_search_page.json"
-        ))
-        .expect("parse typed");
+        let raw: Value = serde_json::from_str(include_str!("fixtures/jira_amp_search_page.json"))
+            .expect("parse raw");
+        let parsed: JiraSearchPage =
+            serde_json::from_str(include_str!("fixtures/jira_amp_search_page.json"))
+                .expect("parse typed");
         (raw, parsed)
     }
 
@@ -2332,9 +2300,7 @@ mod tests {
         // work_item_terms
         let mut term_kinds: HashSet<(String, String)> = HashSet::new();
         let mut stmt = conn
-            .prepare(
-                "SELECT term_kind, term_key FROM work_item_terms WHERE work_item_id = ?1",
-            )
+            .prepare("SELECT term_kind, term_key FROM work_item_terms WHERE work_item_id = ?1")
             .expect("prep");
         let rows = stmt
             .query_map([&projected.work_item_id], |r| {
@@ -2697,10 +2663,11 @@ mod tests {
             start_at: u32,
             max_results: u32,
         ) -> Result<JiraPagedComments, JiraApiError> {
-            self.comments_calls
-                .lock()
-                .unwrap()
-                .push((issue_id_or_key.to_string(), start_at, max_results));
+            self.comments_calls.lock().unwrap().push((
+                issue_id_or_key.to_string(),
+                start_at,
+                max_results,
+            ));
             if let Some(err) = self.next_comments_error.lock().unwrap().take() {
                 return Err(err);
             }
@@ -2724,10 +2691,11 @@ mod tests {
             start_at: u32,
             max_results: u32,
         ) -> Result<JiraPagedWorklogs, JiraApiError> {
-            self.worklogs_calls
-                .lock()
-                .unwrap()
-                .push((issue_id_or_key.to_string(), start_at, max_results));
+            self.worklogs_calls.lock().unwrap().push((
+                issue_id_or_key.to_string(),
+                start_at,
+                max_results,
+            ));
             if let Some(err) = self.next_worklogs_error.lock().unwrap().take() {
                 return Err(err);
             }
@@ -2831,7 +2799,14 @@ mod tests {
         let flag = CancellationFlag::new();
 
         let summary = service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
 
         assert_eq!(summary.status, "succeeded");
@@ -2905,7 +2880,14 @@ mod tests {
             let service = JiraIssueIngestionService::new(&client);
             let flag = CancellationFlag::new();
             let summary = service
-                .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), now_utc, &flag)
+                .ingest_project(
+                    &BorrowedConnDbAccess(&conn),
+                    "srcsys_1",
+                    "AMP",
+                    Some("AMP Project"),
+                    now_utc,
+                    &flag,
+                )
                 .expect("ingest");
             assert_eq!(summary.status, "succeeded");
         }
@@ -2954,7 +2936,14 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
 
         let calls = client.calls();
@@ -3008,7 +2997,14 @@ mod tests {
 
         let flag = CancellationFlag::new();
         let err = service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect_err("expected partial failure");
         assert_eq!(err.category(), IngestionErrorCategory::Server);
         assert_eq!(format!("{err}"), "Jira server error");
@@ -3079,7 +3075,14 @@ mod tests {
             options: JiraIngestionOptions::default(),
         };
         let summary = service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
         assert_eq!(summary.status, "cancelled");
         // Exactly one upstream call should have been made.
@@ -3127,7 +3130,14 @@ mod tests {
             let service = JiraIssueIngestionService::new(&client);
             let flag = CancellationFlag::new();
             let summary = service
-                .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), now_utc, &flag)
+                .ingest_project(
+                    &BorrowedConnDbAccess(&conn),
+                    "srcsys_1",
+                    "AMP",
+                    Some("AMP Project"),
+                    now_utc,
+                    &flag,
+                )
                 .expect("ingest");
             assert_eq!(summary.status, "succeeded");
         }
@@ -3156,9 +3166,18 @@ mod tests {
             )
             .expect("count rels");
 
-        assert_eq!(comment_count, 2, "two inline comments persisted exactly once");
-        assert_eq!(worklog_count, 1, "one inline worklog persisted exactly once");
-        assert_eq!(rel_count, 1, "one issue-link relationship persisted exactly once");
+        assert_eq!(
+            comment_count, 2,
+            "two inline comments persisted exactly once"
+        );
+        assert_eq!(
+            worklog_count, 1,
+            "one inline worklog persisted exactly once"
+        );
+        assert_eq!(
+            rel_count, 1,
+            "one issue-link relationship persisted exactly once"
+        );
     }
 
     #[test]
@@ -3192,7 +3211,14 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         let summary = service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
         assert_eq!(summary.status, "succeeded");
 
@@ -3210,10 +3236,17 @@ mod tests {
         let calls = client.comments_calls();
         let amp1_calls: Vec<_> = calls.iter().filter(|(k, _, _)| k == "AMP-1").collect();
         let amp2_calls: Vec<_> = calls.iter().filter(|(k, _, _)| k == "AMP-2").collect();
-        assert_eq!(amp1_calls.len(), 1, "expected exactly one tail call for AMP-1: {calls:?}");
+        assert_eq!(
+            amp1_calls.len(),
+            1,
+            "expected exactly one tail call for AMP-1: {calls:?}"
+        );
         assert_eq!(amp1_calls[0].1, 2, "tail startAt should be 2");
         assert_eq!(amp1_calls[0].2, service.page_size);
-        assert!(amp2_calls.is_empty(), "AMP-2 has comment.total=0 → no tail call");
+        assert!(
+            amp2_calls.is_empty(),
+            "AMP-2 has comment.total=0 → no tail call"
+        );
     }
 
     #[test]
@@ -3251,7 +3284,14 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         let summary = service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
         assert_eq!(summary.status, "succeeded");
 
@@ -3268,9 +3308,16 @@ mod tests {
         let calls = client.worklogs_calls();
         let amp1_calls: Vec<_> = calls.iter().filter(|(k, _, _)| k == "AMP-1").collect();
         let amp2_calls: Vec<_> = calls.iter().filter(|(k, _, _)| k == "AMP-2").collect();
-        assert_eq!(amp1_calls.len(), 1, "expected exactly one worklog tail call for AMP-1: {calls:?}");
+        assert_eq!(
+            amp1_calls.len(),
+            1,
+            "expected exactly one worklog tail call for AMP-1: {calls:?}"
+        );
         assert_eq!(amp1_calls[0].1, 1, "tail startAt should be 1");
-        assert!(amp2_calls.is_empty(), "AMP-2 has worklog.total=0 → no tail call");
+        assert!(
+            amp2_calls.is_empty(),
+            "AMP-2 has worklog.total=0 → no tail call"
+        );
     }
 
     #[test]
@@ -3288,7 +3335,14 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         let summary = service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
 
         assert_eq!(summary.status, "partial");
@@ -3347,7 +3401,14 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
 
         assert!(
@@ -3394,12 +3455,25 @@ mod tests {
         );
         let flag = CancellationFlag::new();
         service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
 
         let calls = client.remote_link_calls();
-        assert!(calls.contains(&"AMP-1".to_string()), "expected AMP-1 call: {calls:?}");
-        assert!(calls.contains(&"AMP-2".to_string()), "expected AMP-2 call: {calls:?}");
+        assert!(
+            calls.contains(&"AMP-1".to_string()),
+            "expected AMP-1 call: {calls:?}"
+        );
+        assert!(
+            calls.contains(&"AMP-2".to_string()),
+            "expected AMP-2 call: {calls:?}"
+        );
 
         let rl_count: i64 = conn
             .query_row("SELECT count(*) FROM jira_remote_links", [], |r| r.get(0))
@@ -3584,7 +3658,14 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let cancellation = CancellationFlag::new();
         let summary = service
-            .ingest_project(&db, "srcsys_1", "AMP", Some("AMP Project"), NOW, &cancellation)
+            .ingest_project(
+                &db,
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &cancellation,
+            )
             .expect("ingest");
         assert_eq!(summary.status, "succeeded");
 
@@ -3665,7 +3746,14 @@ mod tests {
         let service = JiraIssueIngestionService::new(&client);
         let flag = CancellationFlag::new();
         service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect("ingest");
 
         // Scan every TEXT column in every ingestion_runs row.
@@ -3698,13 +3786,13 @@ mod tests {
             run_row_count += 1;
             for (idx, col) in cols.iter().enumerate() {
                 let val: String = row.get(idx).expect("get col");
-                assert_no_secrets_in_text(
-                    &val,
-                    &format!("ingestion_runs.{col}"),
-                );
+                assert_no_secrets_in_text(&val, &format!("ingestion_runs.{col}"));
             }
         }
-        assert!(run_row_count >= 1, "expected at least one ingestion_runs row");
+        assert!(
+            run_row_count >= 1,
+            "expected at least one ingestion_runs row"
+        );
 
         // Same for ingestion_cursors.
         let mut stmt = conn
@@ -3728,10 +3816,7 @@ mod tests {
             cursor_row_count += 1;
             for (idx, col) in ccols.iter().enumerate() {
                 let val: String = row.get(idx).expect("get col");
-                assert_no_secrets_in_text(
-                    &val,
-                    &format!("ingestion_cursors.{col}"),
-                );
+                assert_no_secrets_in_text(&val, &format!("ingestion_cursors.{col}"));
             }
         }
         assert!(
@@ -3795,13 +3880,7 @@ mod tests {
             .join("sources")
             .join("fixtures");
         let entries = std::fs::read_dir(&fixtures_dir).expect("read fixtures dir");
-        let forbidden: [&str; 5] = [
-            "Authorization:",
-            "Bearer ",
-            "pat-",
-            "secret-",
-            "eyJ",
-        ];
+        let forbidden: [&str; 5] = ["Authorization:", "Bearer ", "pat-", "secret-", "eyJ"];
         let mut json_files_checked = 0;
         for entry in entries {
             let entry = entry.expect("entry");
@@ -3809,8 +3888,7 @@ mod tests {
             if path.extension().and_then(|s| s.to_str()) != Some("json") {
                 continue;
             }
-            let content =
-                std::fs::read_to_string(&path).expect("read fixture file");
+            let content = std::fs::read_to_string(&path).expect("read fixture file");
             for needle in forbidden {
                 assert!(
                     !content.contains(needle),
@@ -3975,14 +4053,7 @@ mod tests {
             let db = MutexDbAccess(&mutex_worker);
             let flag = CancellationFlag::new();
             service
-                .ingest_project(
-                    &db,
-                    "srcsys_test_1",
-                    "AMP",
-                    Some("AMP"),
-                    NOW,
-                    &flag,
-                )
+                .ingest_project(&db, "srcsys_test_1", "AMP", Some("AMP"), NOW, &flag)
                 .expect("ingest");
         });
 
@@ -3996,12 +4067,13 @@ mod tests {
         // The main thread takes the DB lock and reads progress. If the
         // service still held the mutex across the HTTP call, this would
         // deadlock; we'd hit the timeout below.
-        let (got_tx, got_rx) = mpsc::channel::<Option<crate::commands::JiraIssueIngestionProgress>>();
+        let (got_tx, got_rx) =
+            mpsc::channel::<Option<crate::commands::JiraIssueIngestionProgress>>();
         let mutex_reader = Arc::clone(&mutex);
         let reader = std::thread::spawn(move || {
             let conn = mutex_reader.lock().expect("lock");
-            let progress = crate::commands::read_progress_from_conn(&conn, "test_1")
-                .expect("read_progress");
+            let progress =
+                crate::commands::read_progress_from_conn(&conn, "test_1").expect("read_progress");
             let _ = got_tx.send(progress);
         });
         let progress = got_rx
@@ -4051,10 +4123,7 @@ mod tests {
                 self.calls.set(next);
                 if next == self.fail_after && !self.failed_once.get() {
                     self.failed_once.set(true);
-                    return Err(IngestionError::new(
-                        IngestionErrorCategory::Storage,
-                        "",
-                    ));
+                    return Err(IngestionError::new(IngestionErrorCategory::Storage, ""));
                 }
                 f(self.inner)
             }
@@ -4108,11 +4177,7 @@ mod tests {
         assert_eq!(rows.len(), 1, "expected exactly one ingestion_runs row");
         assert_eq!(rows[0].0, "partial");
         assert!(
-            rows[0]
-                .1
-                .as_deref()
-                .map(|s| !s.is_empty())
-                .unwrap_or(false),
+            rows[0].1.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
             "expected non-empty error_summary, got {:?}",
             rows[0].1
         );
@@ -4162,7 +4227,14 @@ mod tests {
 
         let flag = CancellationFlag::new();
         let err = service
-            .ingest_project(&BorrowedConnDbAccess(&conn), "srcsys_1", "AMP", Some("AMP Project"), NOW, &flag)
+            .ingest_project(
+                &BorrowedConnDbAccess(&conn),
+                "srcsys_1",
+                "AMP",
+                Some("AMP Project"),
+                NOW,
+                &flag,
+            )
             .expect_err("expected projection error to roll back the page");
         // Invalid issue maps to Schema (see IngestionError::From<ProjectionError>).
         assert_eq!(err.category(), IngestionErrorCategory::Schema);
