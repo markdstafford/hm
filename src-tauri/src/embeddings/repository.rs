@@ -481,7 +481,7 @@ pub struct FreshDocumentEmbedding {
 }
 
 /// Get fresh embedding vector and metadata for a document.
-/// Returns (embedding_id, model_id, dimension, vector) only when embedding is fresh.
+/// Returns a `FreshDocumentEmbedding` only when the document has a fresh embedding.
 pub fn fresh_embedding_for_document(
     conn: &Connection,
     document_id: &str,

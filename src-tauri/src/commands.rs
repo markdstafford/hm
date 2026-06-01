@@ -1183,8 +1183,8 @@ impl EmbeddingRunnerForCommand for crate::ai::runners::openai_embeddings::OpenAi
 ///
 /// Accepts a `&Mutex<Connection>` so it can lock briefly for Phase 3 writes
 /// while keeping the lock released during the provider HTTP call (Phase 2).
-/// Callers pass `&*db` when `db` is a `tauri::State<Mutex<Connection>>`, or
-/// wrap a raw connection in a `Mutex` for tests.
+/// Callers pass `&db` when `db` is a `tauri::State<Mutex<Connection>>` (auto-deref
+/// handles the indirection), or wrap a raw connection in a `Mutex` for tests.
 ///
 /// `limits.rate_limit_backoff_seconds` is applied as a floor for rate-limit
 /// retry_after_utc so the profile-configured minimum is honoured even when the
