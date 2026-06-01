@@ -124,6 +124,8 @@ export type EntityDetailProps<TItem> = {
   onOpenSingleEdge?: (edge: SingleTargetEdge<TItem>) => void;
   onOpenSetEdge?: (edge: SetTargetEdge<TItem>) => void;
   connectionShortcutIndexByEdgeId?: Record<string, number>;
+  /** Called when the detail has resolved the edges it is actually rendering, so callers can align shortcut numbering with displayed connections. */
+  onEdgesResolved?: (edges: CollectionEdge<TItem>[]) => void;
 };
 
 export type EntityContract<TItem, TProperty extends string> = {

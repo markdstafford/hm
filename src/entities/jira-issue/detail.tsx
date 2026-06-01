@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "../../ui/data/Badge";
 import type { EntityDetailProps } from "../../views/collection/types";
 import type { JiraIssueListItem, JiraIssueStatusTransition } from "../../bindings";
@@ -36,7 +36,7 @@ type RelationshipsState =
   | { phase: "error" }
   | { phase: "ok"; edges: CollectionEdge<JiraIssueListItem>[] };
 
-export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpenSetEdge, connectionShortcutIndexByEdgeId }: Props) {
+export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpenSetEdge, connectionShortcutIndexByEdgeId, onEdgesResolved }: Props) {
   const [history, setHistory] = useState<HistoryState>({ phase: "loading" });
   const [previewContent, setPreviewContent] = useState<PreviewContentState>({ phase: "loading" });
   const [relationships, setRelationships] = useState<RelationshipsState>({ phase: "loading" });
@@ -90,10 +90,17 @@ export function JiraIssueDetail({ item, preview, edges, onOpenSingleEdge, onOpen
   }, [item.work_item_id]);
 
   // Use DB-fetched edges when available; fall back to prop edges (test fixtures).
-  const activeEdges: CollectionEdge<JiraIssueListItem>[] =
-    relationships.phase === "ok" && relationships.edges.length > 0
-      ? relationships.edges
-      : (edges ?? []);
+  const activeEdges = useMemo<CollectionEdge<JiraIssueListItem>[]>(
+    () =>
+      relationships.phase === "ok" && relationships.edges.length > 0
+        ? relationships.edges
+        : (edges ?? []),
+    [relationships, edges],
+  );
+
+  useEffect(() => {
+    onEdgesResolved?.(activeEdges);
+  }, [activeEdges, onEdgesResolved]);
 
   return (
     <div className="p-4 flex flex-col gap-3">

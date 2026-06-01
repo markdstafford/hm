@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { axe } from "jest-axe";
+import { useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { EntityContract, EntityDetailProps } from "../../views/collection/types";
 import type { CollectionEdge } from "../../views/collection/navigation/types";
@@ -166,6 +167,72 @@ describe("QuickSwitcher", () => {
     source.loading = true;
     render(<QuickSwitcher open onOpenChange={vi.fn()} sources={[source]} />);
     expect(screen.getByRole("status", { name: "Loading local items" })).toBeInTheDocument();
+  });
+
+  it("activates DB-loaded edges reported via onEdgesResolved when resolveEdges returns empty", async () => {
+    const target: Item = { id: "b", key: "AMP-1014", title: "Create LSP shim", project: "AMP", status: "Backlog" };
+    const dbEdge: CollectionEdge<Item> = {
+      id: "db-edge-1",
+      kind: "source",
+      shape: "single",
+      relationship: "blocks",
+      targetRef: { entityId: "test-entity", displayKey: "AMP-1014", title: "Create LSP shim" },
+      target,
+    };
+
+    // Detail that simulates async DB relationship loading via onEdgesResolved.
+    // resolveEdges on the entity returns [] (like real Jira items without fixture edges).
+    function AsyncDetail({ item: detailItem, onEdgesResolved: reportEdges }: EntityDetailProps<Item>) {
+      useEffect(() => {
+        if (detailItem.id === "a") {
+          // Simulate async DB load
+          Promise.resolve().then(() => reportEdges?.([dbEdge]));
+        } else {
+          reportEdges?.([]);
+        }
+      }, [detailItem.id, reportEdges]);
+      return <div data-testid="async-detail">{detailItem.key}</div>;
+    }
+
+    const asyncEntity: EntityContract<Item, Prop> = {
+      ...entity,
+      resolveEdges: () => [],
+      Detail: AsyncDetail,
+    };
+
+    const openSingleEdge = vi.fn().mockReturnValue(true);
+    const onOpenChange = vi.fn();
+    const asyncSource: QuickSwitcherSource<Item> = {
+      id: "async-source",
+      entity: asyncEntity,
+      items,
+      toQuickSwitcherItem: (i) => ({
+        id: i.id,
+        sourceId: "async-source",
+        entityId: "test-entity",
+        kindLabel: "Jira",
+        primaryLabel: i.key,
+        title: i.title,
+        item: i,
+        searchableText: [i.key, i.title],
+        rankBoosts: { exact: [i.key] },
+      }),
+      openItem: vi.fn().mockReturnValue(true),
+      openSingleEdge,
+    };
+
+    render(<QuickSwitcher open onOpenChange={onOpenChange} sources={[asyncSource as unknown as QuickSwitcherSource]} />);
+
+    // Navigate to result region so digit keys act as shortcuts
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Search items" }), { key: "ArrowDown" });
+
+    // Wait for the async onEdgesResolved call to propagate
+    await waitFor(() => {
+      fireEvent.keyDown(screen.getByRole("listbox", { name: "Quick switcher results" }), { key: "1" });
+      expect(openSingleEdge).toHaveBeenCalledWith(dbEdge);
+    });
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("does not number or activate dangling connections", () => {

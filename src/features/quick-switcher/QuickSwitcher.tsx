@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { Search } from "lucide-react";
 import { Dialog } from "../../ui/overlays/Dialog";
 import { KeyboardShortcut } from "../../ui/navigation/KeyboardShortcut";
@@ -66,7 +66,20 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
   const activeResult = activeIndex >= 0 ? results[activeIndex] : null;
   const loading = sources.some((source) => source.loading);
   const sourceError = sources.find((source) => source.error)?.error ?? null;
-  const previewEdges = useMemo(() => (activeResult ? resolveAllEdges(activeResult) : []), [activeResult]);
+  // Edges resolved by the entity detail (may include async DB-loaded relationships).
+  // null means "not yet reported"; reset when the active result changes.
+  const [reportedEdges, setReportedEdges] = useState<CollectionEdge<unknown>[] | null>(null);
+  const handleEdgesResolved = useCallback((edges: CollectionEdge<unknown>[]) => {
+    setReportedEdges(edges);
+  }, []);
+  // Reset when active result changes so stale edges from the previous item don't persist.
+  useEffect(() => {
+    setReportedEdges(null);
+  }, [activeResult]);
+  // Initial prop edges derived from resolveEdges (works for fixture items; empty for real Jira items).
+  const propEdges = useMemo(() => (activeResult ? resolveAllEdges(activeResult) : []), [activeResult]);
+  // Use detail-reported edges when available; otherwise fall back to prop edges.
+  const previewEdges = reportedEdges ?? propEdges;
   const numberedEdges = useMemo(() => numberedEdgesFor(previewEdges), [previewEdges]);
 
   useEffect(() => {
@@ -276,7 +289,7 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
                 <EntityDetail
                   item={activeResult.item.item}
                   preview={previewMetadata}
-                  edges={previewEdges}
+                  edges={propEdges}
                   onOpenSingleEdge={(edge) => {
                     const opened = activeResult.source.openSingleEdge?.(edge) ?? false;
                     if (opened) close();
@@ -286,6 +299,7 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
                     if (opened) close();
                   }}
                   connectionShortcutIndexByEdgeId={shortcutMap(numberedEdges)}
+                  onEdgesResolved={handleEdgesResolved}
                 />
               </div>
             )}
