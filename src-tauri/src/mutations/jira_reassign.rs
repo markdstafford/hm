@@ -101,9 +101,7 @@ pub fn execute_jira_reassign_reverse<C: JiraMutationClient + ?Sized>(
             before_state: audit_state(
                 serde_json::json!({"assignee_account_id": after_assignee_snapshot}),
             ),
-            after_state: audit_state(
-                serde_json::json!({"assignee_account_id": before_assignee}),
-            ),
+            after_state: audit_state(serde_json::json!({"assignee_account_id": before_assignee})),
             reversible: false,
             created_at: None,
             source_feature: source_feature_or_manual(input.common.source_feature),
@@ -133,8 +131,8 @@ pub fn jira_reassign(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_reassign(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
@@ -147,8 +145,8 @@ pub fn jira_reassign_reverse(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_reassign_reverse(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
@@ -179,7 +177,10 @@ mod tests {
             "expected new user in call, got: {}",
             calls[0]
         );
-        assert_eq!(entry.before_state.value()["assignee_account_id"], "user_old");
+        assert_eq!(
+            entry.before_state.value()["assignee_account_id"],
+            "user_old"
+        );
         assert_eq!(entry.after_state.value()["assignee_account_id"], "user_new");
         assert!(entry.reversible);
     }

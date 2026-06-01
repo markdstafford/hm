@@ -4,8 +4,8 @@ use std::sync::Mutex;
 
 use crate::gardener::errors::GardenerError;
 use crate::gardener::repository::{list_pending_suggestions, GardenerSuggestionRecord};
-use crate::gardener::runner::{GardenerRunSummary, OnDemandRunInput};
 use crate::gardener::repository::{record_suppression, SuppressionInput, SuppressionKey};
+use crate::gardener::runner::{GardenerRunSummary, OnDemandRunInput};
 
 // DTO types (no serde_json::Value in specta types!)
 
@@ -73,8 +73,8 @@ pub fn list_hygiene_suggestions_from_conn(
 
 fn map_record_to_dto(r: GardenerSuggestionRecord) -> Result<HygieneSuggestionDto, GardenerError> {
     // Parse payload_json to extract category-specific fields
-    let payload: serde_json::Value = serde_json::from_str(&r.payload_json)
-        .unwrap_or(serde_json::Value::Null);
+    let payload: serde_json::Value =
+        serde_json::from_str(&r.payload_json).unwrap_or(serde_json::Value::Null);
 
     let last_activity_at = payload
         .get("lastActivityAt")
@@ -183,19 +183,21 @@ pub fn gardener_record_suppression(
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
+    use crate::gardener::engine::GardenerEngine;
+    use crate::gardener::reference::ReferenceEngine;
     use crate::gardener::repository::{
-        insert_or_supersede_pending, GardenerTarget, SuppressionKey, SuggestionInsert,
-        SuppressionInput, record_suppression, suppress_pending_for_changed_target,
-        read_watermark,
+        insert_or_supersede_pending, read_watermark, record_suppression,
+        suppress_pending_for_changed_target, GardenerTarget, SuggestionInsert, SuppressionInput,
+        SuppressionKey,
     };
     use crate::gardener::runner::{
-        GardenerRuntime, GardenerRunStatus, ScheduledRunInput, OnDemandRunInput,
-        run_scheduled, run_on_demand,
+        run_on_demand, run_scheduled, GardenerRunStatus, GardenerRuntime, OnDemandRunInput,
+        ScheduledRunInput,
     };
-    use crate::gardener::reference::ReferenceEngine;
-    use crate::gardener::engine::GardenerEngine;
-    use crate::issues::repository::{upsert_source_system, SourceSystemInput, upsert_work_item, WorkItemInput};
     use crate::issues::ids::stable_id;
+    use crate::issues::repository::{
+        upsert_source_system, upsert_work_item, SourceSystemInput, WorkItemInput,
+    };
     use std::sync::Arc;
 
     fn seed_source_and_work_item(conn: &rusqlite::Connection) {
@@ -295,11 +297,25 @@ mod tests {
         seed_source_and_work_item(&conn);
         let runtime = GardenerRuntime::default();
 
-        run_scheduled(&conn, &runtime, &reference_engines(), make_scheduled_input("srcsys_1"));
-        run_scheduled(&conn, &runtime, &reference_engines(), make_scheduled_input("srcsys_1"));
+        run_scheduled(
+            &conn,
+            &runtime,
+            &reference_engines(),
+            make_scheduled_input("srcsys_1"),
+        );
+        run_scheduled(
+            &conn,
+            &runtime,
+            &reference_engines(),
+            make_scheduled_input("srcsys_1"),
+        );
 
         let dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list");
-        assert_eq!(dtos.len(), 1, "second run must supersede, not add a duplicate");
+        assert_eq!(
+            dtos.len(),
+            1,
+            "second run must supersede, not add a duplicate"
+        );
     }
 
     /// Suppression hides suggestions from scheduled runs but on-demand bypasses suppression.
@@ -328,9 +344,18 @@ mod tests {
         let runtime = GardenerRuntime::default();
 
         // Scheduled run: suppressed → zero visible
-        run_scheduled(&conn, &runtime, &reference_engines(), make_scheduled_input("srcsys_1"));
-        let scheduled_dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list after scheduled");
-        assert!(scheduled_dtos.is_empty(), "suppression must hide the scheduled suggestion");
+        run_scheduled(
+            &conn,
+            &runtime,
+            &reference_engines(),
+            make_scheduled_input("srcsys_1"),
+        );
+        let scheduled_dtos =
+            list_hygiene_suggestions_from_conn(&conn, None).expect("list after scheduled");
+        assert!(
+            scheduled_dtos.is_empty(),
+            "suppression must hide the scheduled suggestion"
+        );
 
         // On-demand run: bypasses suppression → one visible
         let on_demand_input = OnDemandRunInput {
@@ -346,8 +371,13 @@ mod tests {
             on_demand_input,
         );
         assert_eq!(on_demand_summary.status, GardenerRunStatus::Complete);
-        let on_demand_dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list after on-demand");
-        assert_eq!(on_demand_dtos.len(), 1, "on-demand must bypass suppression and surface the suggestion");
+        let on_demand_dtos =
+            list_hygiene_suggestions_from_conn(&conn, None).expect("list after on-demand");
+        assert_eq!(
+            on_demand_dtos.len(),
+            1,
+            "on-demand must bypass suppression and surface the suggestion"
+        );
     }
 
     /// Writing gardener.policy.v1 with reference.enabled=false causes zero suggestions.
@@ -384,7 +414,10 @@ mod tests {
         );
 
         let dtos = list_hygiene_suggestions_from_conn(&conn, None).expect("list");
-        assert!(dtos.is_empty(), "disabled engine must produce zero suggestions");
+        assert!(
+            dtos.is_empty(),
+            "disabled engine must produce zero suggestions"
+        );
     }
 
     /// After a successful scheduled run, the watermark reference/source/timestamp is set.
@@ -402,7 +435,8 @@ mod tests {
         );
         assert_eq!(summary.status, GardenerRunStatus::Complete);
 
-        let wm = read_watermark(&conn, "reference", "srcsys_1", "updated_at").expect("read watermark");
+        let wm =
+            read_watermark(&conn, "reference", "srcsys_1", "updated_at").expect("read watermark");
         assert_eq!(
             wm.as_deref(),
             Some("2026-01-01T00:00:00Z"),
@@ -438,7 +472,10 @@ mod tests {
         .expect("suppress pending for changed target");
 
         let after = list_hygiene_suggestions_from_conn(&conn, None).expect("list after");
-        assert!(after.is_empty(), "pending suggestion must be suppressed after target change");
+        assert!(
+            after.is_empty(),
+            "pending suggestion must be suppressed after target change"
+        );
     }
 
     fn make_pending_row(conn: &rusqlite::Connection, id: &str, key_json_seed: &str) {
@@ -488,7 +525,10 @@ mod tests {
         assert_eq!(dto.category, "stale");
         assert_eq!(dto.action, "close-as-resolved");
         assert_eq!(dto.target.key, "TEST-10001");
-        assert_eq!(dto.last_activity_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(
+            dto.last_activity_at.as_deref(),
+            Some("2026-01-01T00:00:00Z")
+        );
     }
 
     #[test]
@@ -509,7 +549,11 @@ mod tests {
         .expect("transition");
 
         let result = list_hygiene_suggestions_from_conn(&conn, None).expect("list");
-        assert_eq!(result.len(), 1, "only pending visible row should be returned");
+        assert_eq!(
+            result.len(),
+            1,
+            "only pending visible row should be returned"
+        );
         assert_eq!(result[0].id, "sug-visible-1");
     }
 

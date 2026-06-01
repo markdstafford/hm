@@ -1,5 +1,5 @@
-use rusqlite::{params, Connection, OptionalExtension};
 use crate::gardener::errors::GardenerError;
+use rusqlite::{params, Connection, OptionalExtension};
 
 // ---------------------------------------------------------------------------
 // State enum
@@ -41,7 +41,10 @@ impl SuggestionState {
     }
 
     fn is_terminal(&self) -> bool {
-        matches!(self, SuggestionState::Applied | SuggestionState::Rejected | SuggestionState::Suppressed)
+        matches!(
+            self,
+            SuggestionState::Applied | SuggestionState::Rejected | SuggestionState::Suppressed
+        )
     }
 
     pub fn can_transition_to(&self, next: &Self) -> bool {
@@ -65,7 +68,9 @@ impl SuggestionState {
 // SuppressionKey & SourceIdentityKey
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, specta::Type,
+)]
 pub struct SourceIdentityKey {
     pub source_id: String,
     pub source_kind: String,
@@ -100,18 +105,20 @@ impl SuppressionKey {
 /// (A, B) and (B, A) produce the same key.
 pub fn canonical_suppression_key_json(key: &SuppressionKey) -> Result<String, GardenerError> {
     match key {
-        SuppressionKey::Issue { source_id, source_kind, upstream_id } => {
-            serde_json::to_string(&serde_json::json!({
-                "kind": "issue",
-                "source_id": source_id,
-                "source_kind": source_kind,
-                "upstream_id": upstream_id,
-            }))
-            .map_err(|_| GardenerError {
-                category: crate::gardener::errors::GardenerErrorCategory::SuppressionKeyInvalid,
-                message: "Failed to serialize suppression key.".into(),
-            })
-        }
+        SuppressionKey::Issue {
+            source_id,
+            source_kind,
+            upstream_id,
+        } => serde_json::to_string(&serde_json::json!({
+            "kind": "issue",
+            "source_id": source_id,
+            "source_kind": source_kind,
+            "upstream_id": upstream_id,
+        }))
+        .map_err(|_| GardenerError {
+            category: crate::gardener::errors::GardenerErrorCategory::SuppressionKeyInvalid,
+            message: "Failed to serialize suppression key.".into(),
+        }),
         SuppressionKey::Pair { left, right } => {
             // Sort so (A, B) == (B, A)
             let (a, b) = if left <= right {
@@ -214,12 +221,15 @@ pub fn insert_or_supersede_pending(
     now: &str,
 ) -> Result<String, GardenerError> {
     let key_json = canonical_suppression_key_json(&input.suppression_key)?;
-    let payload_str = serde_json::to_string(&input.payload_json).map_err(|_| GardenerError::database())?;
+    let payload_str =
+        serde_json::to_string(&input.payload_json).map_err(|_| GardenerError::database())?;
 
     // Begin an explicit transaction so the suppression UPDATE and the INSERT
     // are atomic. unchecked_transaction() does not borrow conn mutably, which
     // is safe here because we own the connection for the duration of the call.
-    let tx = conn.unchecked_transaction().map_err(|_| GardenerError::database())?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|_| GardenerError::database())?;
 
     // Find any existing *pending* row for this (engine_id, key_json).
     // Terminal rows (applied, rejected, suppressed) are intentionally excluded
@@ -377,7 +387,10 @@ pub fn transition_suggestion(
     let current = SuggestionState::from_db(&current_str).ok_or_else(GardenerError::database)?;
 
     if !current.can_transition_to(&next) {
-        return Err(GardenerError::invalid_transition(current.as_db(), next.as_db()));
+        return Err(GardenerError::invalid_transition(
+            current.as_db(),
+            next.as_db(),
+        ));
     }
 
     let terminal_at: Option<&str> = if next.is_terminal() { Some(now) } else { None };
@@ -406,7 +419,14 @@ pub fn record_suppression(
         "INSERT OR REPLACE INTO gardener_suppressions
          (id, engine_id, key_kind, key_json, reason, recorded_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![input.id, input.engine_id, key_kind, key_json, input.reason, now],
+        params![
+            input.id,
+            input.engine_id,
+            key_kind,
+            key_json,
+            input.reason,
+            now
+        ],
     )
     .map_err(|_| GardenerError::database())?;
 
@@ -610,10 +630,18 @@ mod tests {
 
         // Old row should now be suppressed+superseded
         let old_state: String = conn
-            .query_row("SELECT state FROM gardener_suggestions WHERE id='sug-1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT state FROM gardener_suggestions WHERE id='sug-1'",
+                [],
+                |r| r.get(0),
+            )
             .expect("query old");
         let old_superseded_by: String = conn
-            .query_row("SELECT superseded_by FROM gardener_suggestions WHERE id='sug-1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT superseded_by FROM gardener_suggestions WHERE id='sug-1'",
+                [],
+                |r| r.get(0),
+            )
             .expect("query superseded_by");
         assert_eq!(old_state, "suppressed");
         assert_eq!(old_superseded_by, "sug-2");
@@ -628,17 +656,29 @@ mod tests {
         // Re-emit with the SAME id (stable id derived from key) and same key
         let mut second = make_insert("sug-stable-1", "eng-1", 85);
         second.suppression_key = first.suppression_key.clone();
-        insert_or_supersede_pending(&conn, &second, "2026-01-02T00:00:00Z").expect("second emit same id");
+        insert_or_supersede_pending(&conn, &second, "2026-01-02T00:00:00Z")
+            .expect("second emit same id");
 
         let list = list_pending_suggestions(&conn).expect("list");
-        assert_eq!(list.len(), 1, "re-emit with same id must not create a duplicate");
+        assert_eq!(
+            list.len(),
+            1,
+            "re-emit with same id must not create a duplicate"
+        );
         assert_eq!(list[0].id, "sug-stable-1");
-        assert_eq!(list[0].updated_at, "2026-01-02T00:00:00Z", "updated_at must advance on re-emit");
+        assert_eq!(
+            list[0].updated_at, "2026-01-02T00:00:00Z",
+            "updated_at must advance on re-emit"
+        );
         assert_eq!(list[0].confidence, 85, "confidence must update on re-emit");
 
         // Row must still be pending, not suppressed
         let state: String = conn
-            .query_row("SELECT state FROM gardener_suggestions WHERE id='sug-stable-1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT state FROM gardener_suggestions WHERE id='sug-stable-1'",
+                [],
+                |r| r.get(0),
+            )
             .expect("query state");
         assert_eq!(state, "pending");
     }
@@ -679,17 +719,33 @@ mod tests {
         let input = make_insert("sug-1", "eng-1", 70);
         insert_or_supersede_pending(&conn, &input, "2026-01-01T00:00:00Z").expect("insert");
 
-        transition_suggestion(&conn, "sug-1", SuggestionState::Applied, "2026-01-02T00:00:00Z")
-            .expect("transition");
+        transition_suggestion(
+            &conn,
+            "sug-1",
+            SuggestionState::Applied,
+            "2026-01-02T00:00:00Z",
+        )
+        .expect("transition");
 
         let state: String = conn
-            .query_row("SELECT state FROM gardener_suggestions WHERE id='sug-1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT state FROM gardener_suggestions WHERE id='sug-1'",
+                [],
+                |r| r.get(0),
+            )
             .expect("query");
         let terminal: Option<String> = conn
-            .query_row("SELECT terminal_at FROM gardener_suggestions WHERE id='sug-1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT terminal_at FROM gardener_suggestions WHERE id='sug-1'",
+                [],
+                |r| r.get(0),
+            )
             .expect("query terminal");
         assert_eq!(state, "applied");
-        assert!(terminal.is_some(), "terminal_at should be set for terminal states");
+        assert!(
+            terminal.is_some(),
+            "terminal_at should be set for terminal states"
+        );
     }
 
     #[test]
@@ -699,19 +755,35 @@ mod tests {
         insert_or_supersede_pending(&conn, &input, "2026-01-01T00:00:00Z").expect("insert");
 
         // pending -> generating is invalid
-        let result = transition_suggestion(&conn, "sug-1", SuggestionState::Generating, "2026-01-02T00:00:00Z");
+        let result = transition_suggestion(
+            &conn,
+            "sug-1",
+            SuggestionState::Generating,
+            "2026-01-02T00:00:00Z",
+        );
         assert!(result.is_err(), "invalid transition must be rejected");
         let err = result.unwrap_err();
-        assert_eq!(err.category, crate::gardener::errors::GardenerErrorCategory::InvalidTransition);
+        assert_eq!(
+            err.category,
+            crate::gardener::errors::GardenerErrorCategory::InvalidTransition
+        );
     }
 
     #[test]
     fn transition_not_found_returns_error() {
         let conn = open_test_db();
-        let result = transition_suggestion(&conn, "no-such-id", SuggestionState::Applied, "2026-01-01T00:00:00Z");
+        let result = transition_suggestion(
+            &conn,
+            "no-such-id",
+            SuggestionState::Applied,
+            "2026-01-01T00:00:00Z",
+        );
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.category, crate::gardener::errors::GardenerErrorCategory::NotFound);
+        assert_eq!(
+            err.category,
+            crate::gardener::errors::GardenerErrorCategory::NotFound
+        );
     }
 
     #[test]
@@ -729,7 +801,12 @@ mod tests {
             (Pending, Suppressed),
         ];
         for (from, to) in &valid {
-            assert!(from.can_transition_to(to), "{:?} -> {:?} should be valid", from, to);
+            assert!(
+                from.can_transition_to(to),
+                "{:?} -> {:?} should be valid",
+                from,
+                to
+            );
         }
     }
 
@@ -744,7 +821,12 @@ mod tests {
             (Suppressed, Pending),
         ];
         for (from, to) in &invalid {
-            assert!(!from.can_transition_to(to), "{:?} -> {:?} should be invalid", from, to);
+            assert!(
+                !from.can_transition_to(to),
+                "{:?} -> {:?} should be invalid",
+                from,
+                to
+            );
         }
     }
 
@@ -802,10 +884,24 @@ mod tests {
 
     #[test]
     fn pair_suppression_key_is_order_independent() {
-        let a = SourceIdentityKey { source_id: "s".into(), source_kind: "jira_issue".into(), upstream_id: "A-1".into() };
-        let b = SourceIdentityKey { source_id: "s".into(), source_kind: "jira_issue".into(), upstream_id: "B-1".into() };
-        let key_ab = SuppressionKey::Pair { left: a.clone(), right: b.clone() };
-        let key_ba = SuppressionKey::Pair { left: b.clone(), right: a.clone() };
+        let a = SourceIdentityKey {
+            source_id: "s".into(),
+            source_kind: "jira_issue".into(),
+            upstream_id: "A-1".into(),
+        };
+        let b = SourceIdentityKey {
+            source_id: "s".into(),
+            source_kind: "jira_issue".into(),
+            upstream_id: "B-1".into(),
+        };
+        let key_ab = SuppressionKey::Pair {
+            left: a.clone(),
+            right: b.clone(),
+        };
+        let key_ba = SuppressionKey::Pair {
+            left: b.clone(),
+            right: a.clone(),
+        };
         let json_ab = canonical_suppression_key_json(&key_ab).expect("ab");
         let json_ba = canonical_suppression_key_json(&key_ba).expect("ba");
         assert_eq!(json_ab, json_ba, "pair key must be order-independent");
@@ -817,12 +913,28 @@ mod tests {
         let initial = read_watermark(&conn, "eng-1", "src-1", "page").expect("read initial");
         assert!(initial.is_none(), "no watermark before set");
 
-        advance_watermark(&conn, "eng-1", "src-1", "page", "42", "2026-01-01T00:00:00Z").expect("advance");
+        advance_watermark(
+            &conn,
+            "eng-1",
+            "src-1",
+            "page",
+            "42",
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("advance");
         let after = read_watermark(&conn, "eng-1", "src-1", "page").expect("read after");
         assert_eq!(after.as_deref(), Some("42"));
 
         // Advance again
-        advance_watermark(&conn, "eng-1", "src-1", "page", "100", "2026-01-02T00:00:00Z").expect("advance2");
+        advance_watermark(
+            &conn,
+            "eng-1",
+            "src-1",
+            "page",
+            "100",
+            "2026-01-02T00:00:00Z",
+        )
+        .expect("advance2");
         let after2 = read_watermark(&conn, "eng-1", "src-1", "page").expect("read after2");
         assert_eq!(after2.as_deref(), Some("100"));
     }
@@ -852,7 +964,10 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("query rejected row");
-        assert_eq!(rejected_state, "rejected", "terminal row must remain rejected, not suppressed");
+        assert_eq!(
+            rejected_state, "rejected",
+            "terminal row must remain rejected, not suppressed"
+        );
 
         // The new pending row should be present
         let pending = list_pending_suggestions(&conn).expect("list pending");
@@ -891,9 +1006,18 @@ mod tests {
         insert_or_supersede_pending(&conn, &a, "2026-01-01T00:00:00Z").expect("a");
         insert_or_supersede_pending(&conn, &b, "2026-01-01T00:00:00Z").expect("b");
 
-        let n = suppress_pending_for_changed_target(&conn, "src-1", "jira_issue", "UP-10", "2026-01-02T00:00:00Z")
-            .expect("suppress");
-        assert_eq!(n, 2, "both pending suggestions for target should be suppressed");
+        let n = suppress_pending_for_changed_target(
+            &conn,
+            "src-1",
+            "jira_issue",
+            "UP-10",
+            "2026-01-02T00:00:00Z",
+        )
+        .expect("suppress");
+        assert_eq!(
+            n, 2,
+            "both pending suggestions for target should be suppressed"
+        );
 
         let list = list_pending_suggestions(&conn).expect("list");
         assert!(list.is_empty(), "no pending suggestions should remain");

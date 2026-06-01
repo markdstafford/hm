@@ -1,8 +1,8 @@
+use crate::gardener::errors::{GardenerError, GardenerErrorCategory};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::BTreeMap;
-use rusqlite::Connection;
-use crate::gardener::errors::{GardenerError, GardenerErrorCategory};
 
 pub const GARDENER_POLICY_KEY: &str = "gardener.policy.v1";
 
@@ -73,20 +73,20 @@ impl GardenerPolicy {
 }
 
 pub fn load_gardener_policy(conn: &Connection) -> Result<GardenerPolicy, GardenerError> {
-    let result = crate::settings::shared::shared_settings_get(conn, GARDENER_POLICY_KEY)
-        .map_err(|_| GardenerError {
-            category: GardenerErrorCategory::Settings,
-            message: "Could not load gardener policy.".into(),
+    let result =
+        crate::settings::shared::shared_settings_get(conn, GARDENER_POLICY_KEY).map_err(|_| {
+            GardenerError {
+                category: GardenerErrorCategory::Settings,
+                message: "Could not load gardener policy.".into(),
+            }
         })?;
 
     match result {
         None => Ok(GardenerPolicy::default_policy()),
-        Some(value) => {
-            serde_json::from_value(value).map_err(|_| GardenerError {
-                category: GardenerErrorCategory::Settings,
-                message: "Could not load gardener policy.".into(),
-            })
-        }
+        Some(value) => serde_json::from_value(value).map_err(|_| GardenerError {
+            category: GardenerErrorCategory::Settings,
+            message: "Could not load gardener policy.".into(),
+        }),
     }
 }
 
@@ -114,7 +114,10 @@ mod tests {
         assert!(policy.engines["reference"].on_demand);
         assert!(policy.engines["enrichment"].first_run_cap == Some(25));
         assert!(policy.engines["enrichment"].per_sweep_cap == Some(10));
-        assert_eq!(policy.engines["enrichment"].generation_policy.as_deref(), Some("eager_all"));
+        assert_eq!(
+            policy.engines["enrichment"].generation_policy.as_deref(),
+            Some("eager_all")
+        );
     }
 
     #[test]
@@ -126,7 +129,10 @@ mod tests {
         shared_settings_set(&conn, GARDENER_POLICY_KEY, &value).unwrap();
 
         let loaded = load_gardener_policy(&conn).expect("should succeed");
-        assert!(!loaded.engines["reference"].enabled, "custom value should be returned");
+        assert!(
+            !loaded.engines["reference"].enabled,
+            "custom value should be returned"
+        );
     }
 
     #[test]

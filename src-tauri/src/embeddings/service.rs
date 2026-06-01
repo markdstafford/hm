@@ -1,12 +1,12 @@
-use serde::{Deserialize, Serialize};
-use specta::Type;
 use crate::embeddings::errors::{EmbeddingError, EmbeddingErrorCategory};
-use crate::embeddings::limits::{EmbeddingBatchLimits, TextBatch, split_claimed_documents};
+use crate::embeddings::limits::{split_claimed_documents, EmbeddingBatchLimits, TextBatch};
 use crate::embeddings::provider::{EmbeddingProvider, EmbeddingRequest};
 use crate::embeddings::repository::{
-    assemble_text, claim_documents, recover_stuck_embedding_claims,
-    record_embedding_failure, write_embedding_batch, ClaimOptions,
+    assemble_text, claim_documents, record_embedding_failure, recover_stuck_embedding_claims,
+    write_embedding_batch, ClaimOptions,
 };
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct EmbeddingRunOptions {
@@ -82,7 +82,9 @@ pub fn embed_query_text_for_search(
     conn: &rusqlite::Connection,
     text: &str,
 ) -> Result<(Vec<f32>, String), EmbeddingError> {
-    let request = EmbeddingRequest { input: vec![text.to_string()] };
+    let request = EmbeddingRequest {
+        input: vec![text.to_string()],
+    };
     let mut response = provider.embed(request)?;
     let model_id = crate::embeddings::repository::stable_model_id(
         &response.profile,
@@ -91,7 +93,11 @@ pub fn embed_query_text_for_search(
         response.dimension,
         "l2",
     );
-    let vector = response.vectors.drain(..).next().ok_or_else(EmbeddingError::invalid_response)?;
+    let vector = response
+        .vectors
+        .drain(..)
+        .next()
+        .ok_or_else(EmbeddingError::invalid_response)?;
     // Dimension check requires a DB read — acceptable here since this function is
     // called in test paths where conn is passed directly (not mutex-guarded).
     // The command path uses embed_query_text_no_conn + dimension check in Phase 3.
@@ -117,7 +123,9 @@ pub fn embed_query_text_unlocked(
     provider: &dyn EmbeddingProvider,
     text: &str,
 ) -> Result<(Vec<f32>, String, usize), EmbeddingError> {
-    let request = EmbeddingRequest { input: vec![text.to_string()] };
+    let request = EmbeddingRequest {
+        input: vec![text.to_string()],
+    };
     let mut response = provider.embed(request)?;
     let model_id = crate::embeddings::repository::stable_model_id(
         &response.profile,
@@ -127,7 +135,11 @@ pub fn embed_query_text_unlocked(
         "l2",
     );
     let dimension = response.dimension;
-    let vector = response.vectors.drain(..).next().ok_or_else(EmbeddingError::invalid_response)?;
+    let vector = response
+        .vectors
+        .drain(..)
+        .next()
+        .ok_or_else(EmbeddingError::invalid_response)?;
     Ok((vector, model_id, dimension))
 }
 
@@ -146,7 +158,11 @@ pub fn nearest_neighbors_by_precomputed_vector(
 ) -> Result<Vec<EmbeddingCandidate>, EmbeddingError> {
     // Validate dimension against stored embeddings for this profile/model
     if let Ok(stored_dim) = crate::embeddings::repository::stored_dimension_for_profile(
-        conn, profile, model, "OpenAiEmbeddings", "l2",
+        conn,
+        profile,
+        model,
+        "OpenAiEmbeddings",
+        "l2",
     ) {
         if stored_dim != query_dimension {
             return Err(EmbeddingError::dimension_mismatch());
@@ -154,7 +170,11 @@ pub fn nearest_neighbors_by_precomputed_vector(
     }
 
     let model_id = crate::embeddings::repository::stable_model_id(
-        profile, model, "OpenAiEmbeddings", query_dimension, "l2",
+        profile,
+        model,
+        "OpenAiEmbeddings",
+        query_dimension,
+        "l2",
     );
 
     run_knn_query(conn, query_vector, &model_id, query)
@@ -169,7 +189,11 @@ fn run_knn_query(
     query: &EmbeddingCandidateQuery,
 ) -> Result<Vec<EmbeddingCandidate>, EmbeddingError> {
     // Get KNN candidates from sqlite-vec; over-fetch to allow for filtering/self-exclusion
-    let fetch_limit = if query.include_self { query.limit as usize } else { query.limit as usize + 1 };
+    let fetch_limit = if query.include_self {
+        query.limit as usize
+    } else {
+        query.limit as usize + 1
+    };
     let raw_matches = crate::embeddings::sqlite_vec::nearest_by_vector(conn, vector, fetch_limit)?;
 
     if raw_matches.is_empty() {
@@ -217,7 +241,10 @@ fn run_knn_query(
         let kind_placeholders: Vec<String> = (start..start + query.entity_kinds.len())
             .map(|i| format!("?{i}"))
             .collect();
-        sql.push_str(&format!(" AND de.entity_kind IN ({})", kind_placeholders.join(", ")));
+        sql.push_str(&format!(
+            " AND de.entity_kind IN ({})",
+            kind_placeholders.join(", ")
+        ));
         for k in &query.entity_kinds {
             params.push(Box::new(k.clone()));
         }
@@ -246,16 +273,19 @@ fn run_knn_query(
             rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())),
             |row| {
                 let rowid: i64 = row.get(0)?;
-                Ok((rowid, EmbeddingCandidate {
-                    document_id: row.get(1)?,
-                    entity_kind: row.get(2)?,
-                    entity_id: row.get(3)?,
-                    work_item_id: row.get(4)?,
-                    source_system_id: row.get(5)?,
-                    content_hash: row.get(6)?,
-                    model_id: row.get(7)?,
-                    distance: 0.0, // filled below
-                }))
+                Ok((
+                    rowid,
+                    EmbeddingCandidate {
+                        document_id: row.get(1)?,
+                        entity_kind: row.get(2)?,
+                        entity_id: row.get(3)?,
+                        work_item_id: row.get(4)?,
+                        source_system_id: row.get(5)?,
+                        content_hash: row.get(6)?,
+                        model_id: row.get(7)?,
+                        distance: 0.0, // filled below
+                    },
+                ))
             },
         )
         .map_err(EmbeddingError::from)?
@@ -270,7 +300,11 @@ fn run_knn_query(
         })
         .collect();
 
-    candidates.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        a.distance
+            .partial_cmp(&b.distance)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     candidates.truncate(query.limit as usize);
 
     Ok(candidates)
@@ -297,10 +331,11 @@ pub fn nearest_neighbors(
     }
 
     let (vector, model_id) = if let Some(doc_id) = &query.document_id {
-        let (_emb_id, model_id, _dimension, vector) =
-            crate::embeddings::repository::fresh_embedding_for_document(conn, doc_id)?
-                .unwrap_or_else(|| unreachable!("fresh_embedding_for_document returns Err, not Ok(None)"));
-        (vector, model_id)
+        let embedding = crate::embeddings::repository::fresh_embedding_for_document(conn, doc_id)?
+            .unwrap_or_else(|| {
+                unreachable!("fresh_embedding_for_document returns Err, not Ok(None)")
+            });
+        (embedding.vector, embedding.model_id)
     } else {
         let text = query.query_text.as_deref().unwrap_or("");
         let (vector, model_id) = embed_query_text_for_search(provider, conn, text)?;
@@ -325,10 +360,9 @@ pub fn nearest_neighbors_by_document_id(
             "document_id must be provided for nearest_neighbors_by_document_id.",
         )
     })?;
-    let (_emb_id, model_id, _dimension, vector) =
-        crate::embeddings::repository::fresh_embedding_for_document(conn, doc_id)?
-            .unwrap_or_else(|| unreachable!("fresh_embedding_for_document returns Err, not Ok(None)"));
-    run_knn_query(conn, &vector, &model_id, &query)
+    let embedding = crate::embeddings::repository::fresh_embedding_for_document(conn, doc_id)?
+        .unwrap_or_else(|| unreachable!("fresh_embedding_for_document returns Err, not Ok(None)"));
+    run_knn_query(conn, &embedding.vector, &embedding.model_id, &query)
 }
 
 pub fn refresh_embeddings_with_provider(
@@ -354,8 +388,11 @@ pub fn refresh_embeddings_with_provider(
             sql.push_str(" AND entity_kind = ?");
             rebuild_params.push(Box::new(kind.clone()));
         }
-        conn.execute(&sql, rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())))
-            .map_err(EmbeddingError::from)?;
+        conn.execute(
+            &sql,
+            rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())),
+        )
+        .map_err(EmbeddingError::from)?;
     }
 
     let limit = options.limit.unwrap_or(25).max(1) as usize;
@@ -392,7 +429,9 @@ pub fn refresh_embeddings_with_provider(
     let mut acc = RefreshAccumulator::new(scanned);
 
     for text_batch in &text_batches {
-        let request = EmbeddingRequest { input: text_batch.texts.clone() };
+        let request = EmbeddingRequest {
+            input: text_batch.texts.clone(),
+        };
 
         // Call provider — no DB lock is held here (conn is passed but not locked
         // inside this function; the caller holds no mutex in tests).
@@ -401,7 +440,8 @@ pub fn refresh_embeddings_with_provider(
             Err(e) => {
                 // Record failure for all docs in this batch
                 for doc in &text_batch.docs {
-                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+                    let _ =
+                        record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
                 }
                 acc.failed += text_batch.docs.len() as u32;
                 acc.paused = true;
@@ -428,7 +468,8 @@ pub fn refresh_embeddings_with_provider(
             }
             Err(e) => {
                 for doc in &text_batch.docs {
-                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+                    let _ =
+                        record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
                 }
                 acc.failed += text_batch.docs.len() as u32;
                 acc.paused = true;
@@ -450,7 +491,7 @@ pub fn refresh_embeddings(
     now_utc: &str,
 ) -> Result<EmbeddingRunSummary, EmbeddingError> {
     use crate::embeddings::provider::AiEmbeddingProvider;
-    let provider = AiEmbeddingProvider::default();
+    let provider = AiEmbeddingProvider;
 
     recover_stuck_embedding_claims(conn).map_err(EmbeddingError::from)?;
 
@@ -467,8 +508,11 @@ pub fn refresh_embeddings(
             sql.push_str(" AND entity_kind = ?");
             rebuild_params.push(Box::new(kind.clone()));
         }
-        conn.execute(&sql, rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())))
-            .map_err(EmbeddingError::from)?;
+        conn.execute(
+            &sql,
+            rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())),
+        )
+        .map_err(EmbeddingError::from)?;
     }
 
     let limit = options.limit.unwrap_or(25).max(1) as usize;
@@ -483,12 +527,18 @@ pub fn refresh_embeddings(
     if claimed.is_empty() {
         return Ok(EmbeddingRunSummary {
             status: EmbeddingRunStatus::Complete,
-            scanned: 0, embedded: 0, skipped: 0, failed: 0,
-            model_id: String::new(), dimension: 0, safe_error: None,
+            scanned: 0,
+            embedded: 0,
+            skipped: 0,
+            failed: 0,
+            model_id: String::new(),
+            dimension: 0,
+            safe_error: None,
         });
     }
 
-    let texts: Vec<String> = claimed.iter()
+    let texts: Vec<String> = claimed
+        .iter()
         .map(|doc| assemble_text(doc.title.as_deref(), &doc.body))
         .collect();
     let limits = EmbeddingBatchLimits::default();
@@ -498,35 +548,49 @@ pub fn refresh_embeddings(
     let mut acc = RefreshAccumulator::new(scanned);
 
     for text_batch in &text_batches {
-        let request = EmbeddingRequest { input: text_batch.texts.clone() };
+        let request = EmbeddingRequest {
+            input: text_batch.texts.clone(),
+        };
 
         let response = match provider.embed_for_default_route(conn, store, request) {
             Ok(r) => r,
             Err(e) => {
                 for doc in &text_batch.docs {
-                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+                    let _ =
+                        record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
                 }
                 acc.failed += text_batch.docs.len() as u32;
                 acc.paused = true;
-                if acc.safe_error.is_none() { acc.safe_error = Some(e.to_string()); }
+                if acc.safe_error.is_none() {
+                    acc.safe_error = Some(e.to_string());
+                }
                 break;
             }
         };
 
         acc.model_id = crate::embeddings::repository::stable_model_id(
-            &response.profile, &response.model, "OpenAiEmbeddings", response.dimension, "l2",
+            &response.profile,
+            &response.model,
+            "OpenAiEmbeddings",
+            response.dimension,
+            "l2",
         );
         acc.dimension = response.dimension as u32;
 
         match write_embedding_batch(conn, &text_batch.docs, &response, now_utc) {
-            Ok(()) => { acc.embedded += text_batch.docs.len() as u32; }
+            Ok(()) => {
+                acc.embedded += text_batch.docs.len() as u32;
+            }
             Err(e) => {
                 for doc in &text_batch.docs {
-                    let _ = record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
+                    let _ =
+                        record_embedding_failure(conn, &doc.id, &doc.source_system_id, &e, now_utc);
                 }
                 acc.failed += text_batch.docs.len() as u32;
                 acc.paused = true;
-                if acc.safe_error.is_none() { acc.safe_error = Some(e.to_string()); }
+                if acc.safe_error.is_none() {
+                    acc.safe_error = Some(e.to_string());
+                }
                 break;
             }
         }
@@ -572,8 +636,11 @@ pub fn prepare_refresh_batch(
             sql.push_str(" AND entity_kind = ?");
             rebuild_params.push(Box::new(kind.clone()));
         }
-        conn.execute(&sql, rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())))
-            .map_err(EmbeddingError::from)?;
+        conn.execute(
+            &sql,
+            rusqlite::params_from_iter(rebuild_params.iter().map(|p| p.as_ref())),
+        )
+        .map_err(EmbeddingError::from)?;
     }
 
     let claim_opts = ClaimOptions {
@@ -595,7 +662,10 @@ pub fn prepare_refresh_batch(
     let text_batches = split_claimed_documents(claimed, texts, limits);
     let scanned = text_batches.iter().map(|b| b.docs.len() as u32).sum();
 
-    Ok(Some(PreparedRefreshBatch { text_batches, scanned }))
+    Ok(Some(PreparedRefreshBatch {
+        text_batches,
+        scanned,
+    }))
 }
 
 /// Phase 3 of a scoped refresh for a single `TextBatch`: write embedding vectors and
@@ -678,11 +748,16 @@ pub fn embedding_status(
     let mut failed = 0u32;
 
     if let Some(ssid) = source_system_id {
-        let mut stmt = conn.prepare(
-            "SELECT embedding_status, count(*) FROM indexable_documents \
+        let mut stmt = conn
+            .prepare(
+                "SELECT embedding_status, count(*) FROM indexable_documents \
              WHERE source_system_id = ? GROUP BY embedding_status",
-        ).map_err(EmbeddingError::from)?;
-        let rows = stmt.query_map([ssid], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            )
+            .map_err(EmbeddingError::from)?;
+        let rows = stmt
+            .query_map([ssid], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
             .map_err(EmbeddingError::from)?;
         for row in rows {
             let (status, count) = row.map_err(EmbeddingError::from)?;
@@ -700,7 +775,10 @@ pub fn embedding_status(
         let mut stmt = conn.prepare(
             "SELECT embedding_status, count(*) FROM indexable_documents GROUP BY embedding_status",
         ).map_err(EmbeddingError::from)?;
-        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
             .map_err(EmbeddingError::from)?;
         for row in rows {
             let (status, count) = row.map_err(EmbeddingError::from)?;
@@ -721,13 +799,15 @@ pub fn embedding_status(
             "SELECT MAX(embedded_at) FROM document_embeddings WHERE source_system_id = ?",
             [ssid],
             |r| r.get(0),
-        ).unwrap_or(None)
+        )
+        .unwrap_or(None)
     } else {
         conn.query_row(
             "SELECT MAX(embedded_at) FROM document_embeddings",
             [],
             |r| r.get(0),
-        ).unwrap_or(None)
+        )
+        .unwrap_or(None)
     };
 
     let warning: Option<String> = if let Some(ssid) = source_system_id {
@@ -736,13 +816,15 @@ pub fn embedding_status(
              WHERE source_system_id = ? ORDER BY last_attempted_at DESC LIMIT 1",
             [ssid],
             |r| r.get(0),
-        ).unwrap_or(None)
+        )
+        .unwrap_or(None)
     } else {
         conn.query_row(
             "SELECT safe_summary FROM embedding_failures ORDER BY last_attempted_at DESC LIMIT 1",
             [],
             |r| r.get(0),
-        ).unwrap_or(None)
+        )
+        .unwrap_or(None)
     };
 
     Ok(EmbeddingStatusSummary {
@@ -761,8 +843,10 @@ mod tests {
     use super::*;
     use crate::db::open_in_memory;
     use crate::embeddings::errors::EmbeddingError;
-    use crate::embeddings::provider::{EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, FakeEmbeddingProvider};
-    use crate::embeddings::repository::{setup_schema, seed_source_and_document};
+    use crate::embeddings::provider::{
+        EmbeddingProvider, EmbeddingRequest, EmbeddingResponse, FakeEmbeddingProvider,
+    };
+    use crate::embeddings::repository::{seed_source_and_document, setup_schema};
 
     fn open_with_embedding_schema() -> rusqlite::Connection {
         let conn = open_in_memory().expect("db");
@@ -783,9 +867,9 @@ mod tests {
             force_rebuild: false,
         };
 
-        let summary = refresh_embeddings_with_provider(
-            &conn, &provider, options, "2026-01-01T00:00:00Z",
-        ).expect("refresh");
+        let summary =
+            refresh_embeddings_with_provider(&conn, &provider, options, "2026-01-01T00:00:00Z")
+                .expect("refresh");
 
         assert_eq!(summary.embedded, 1);
         assert_eq!(summary.failed, 0);
@@ -795,11 +879,13 @@ mod tests {
         assert!(summary.safe_error.is_none());
 
         // Verify DB state
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "embedded");
     }
 
@@ -823,24 +909,34 @@ mod tests {
         };
 
         let summary = refresh_embeddings_with_provider(
-            &conn, &FailingProvider, options, "2026-01-01T00:00:00Z",
-        ).expect("refresh");
+            &conn,
+            &FailingProvider,
+            options,
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("refresh");
 
         assert_eq!(summary.embedded, 0);
         assert_eq!(summary.failed, 1);
         assert!(matches!(summary.status, EmbeddingRunStatus::Paused));
 
         let safe_error = summary.safe_error.expect("should have safe error");
-        assert!(safe_error.contains("Embedding provider"), "error should be safe");
+        assert!(
+            safe_error.contains("Embedding provider"),
+            "error should be safe"
+        );
         assert!(!safe_error.contains("sk-test"), "must not contain secret");
-        assert!(!safe_error.contains("Cannot sign in"), "must not contain document text");
+        assert!(
+            !safe_error.contains("Cannot sign in"),
+            "must not contain document text"
+        );
     }
 
     #[test]
     fn refresh_respects_source_and_entity_kind_filters() {
         let conn = open_with_embedding_schema();
         seed_source_and_document(&conn, "doc_1", "hash_a"); // srcsys_1, jira_issue
-        // Insert a second doc with different entity_kind
+                                                            // Insert a second doc with different entity_kind
         conn.execute(
             "INSERT INTO indexable_documents (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
              VALUES ('doc_2', 'srcsys_1', 'other_kind', 'wi_1', 'wi_1', 'Other', 'Other body', '{}', 'hash_b', 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
@@ -855,18 +951,20 @@ mod tests {
             force_rebuild: false,
         };
 
-        let summary = refresh_embeddings_with_provider(
-            &conn, &provider, options, "2026-01-01T00:00:00Z",
-        ).expect("refresh");
+        let summary =
+            refresh_embeddings_with_provider(&conn, &provider, options, "2026-01-01T00:00:00Z")
+                .expect("refresh");
 
         assert_eq!(summary.embedded, 1);
 
         // doc_2 should still be pending
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_2'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "pending");
     }
 
@@ -893,7 +991,11 @@ mod tests {
         ).unwrap();
 
         // Insert 3 distinct documents
-        for (doc_id, hash) in [("doc_a", "hash_a"), ("doc_b", "hash_b"), ("doc_c", "hash_c")] {
+        for (doc_id, hash) in [
+            ("doc_a", "hash_a"),
+            ("doc_b", "hash_b"),
+            ("doc_c", "hash_c"),
+        ] {
             conn.execute(
                 "INSERT OR IGNORE INTO indexable_documents (id, source_system_id, entity_kind, entity_id, work_item_id, title, body, metadata_json, content_hash, embedding_status, created_at, updated_at) \
                  VALUES (?1, 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', ?1, ?1, '{}', ?2, 'pending', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
@@ -933,7 +1035,11 @@ mod tests {
         assert!(!candidates.is_empty(), "should return candidates");
         // Distances should be non-negative
         for c in &candidates {
-            assert!(c.distance >= 0.0, "distance should be non-negative: {}", c.distance);
+            assert!(
+                c.distance >= 0.0,
+                "distance should be non-negative: {}",
+                c.distance
+            );
         }
     }
 
@@ -957,7 +1063,8 @@ mod tests {
 
         let err = nearest_neighbors(&conn, &provider, query).unwrap_err();
         assert!(
-            err.to_string().contains("Embedding unavailable") || err.to_string().contains("embedding"),
+            err.to_string().contains("Embedding unavailable")
+                || err.to_string().contains("embedding"),
             "error should mention embedding: {err}"
         );
     }
@@ -978,7 +1085,8 @@ mod tests {
         };
         let err = nearest_neighbors(&conn, &provider, query).unwrap_err();
         assert!(
-            err.to_string().to_lowercase().contains("exactly one") || err.to_string().contains("InvalidQuery"),
+            err.to_string().to_lowercase().contains("exactly one")
+                || err.to_string().contains("InvalidQuery"),
             "should mention query requirement: {err}"
         );
     }
@@ -999,7 +1107,8 @@ mod tests {
         };
         let err = nearest_neighbors(&conn, &provider, query).unwrap_err();
         assert!(
-            err.to_string().to_lowercase().contains("exactly one") || err.to_string().contains("InvalidQuery"),
+            err.to_string().to_lowercase().contains("exactly one")
+                || err.to_string().contains("InvalidQuery"),
             "should mention query requirement: {err}"
         );
     }
@@ -1012,18 +1121,21 @@ mod tests {
         // First embed doc_1 so there are neighbors to find
         let provider = FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small");
         let embed_opts = EmbeddingRunOptions {
-            source_system_id: None, entity_kind: None, limit: Some(10), force_rebuild: false,
+            source_system_id: None,
+            entity_kind: None,
+            limit: Some(10),
+            force_rebuild: false,
         };
         refresh_embeddings_with_provider(&conn, &provider, embed_opts, "2026-01-01T00:00:00Z")
             .expect("embed");
 
         // Count documents/embeddings before query
-        let doc_count_before: i64 = conn.query_row(
-            "SELECT count(*) FROM indexable_documents", [], |r| r.get(0)
-        ).unwrap();
-        let emb_count_before: i64 = conn.query_row(
-            "SELECT count(*) FROM document_embeddings", [], |r| r.get(0)
-        ).unwrap();
+        let doc_count_before: i64 = conn
+            .query_row("SELECT count(*) FROM indexable_documents", [], |r| r.get(0))
+            .unwrap();
+        let emb_count_before: i64 = conn
+            .query_row("SELECT count(*) FROM document_embeddings", [], |r| r.get(0))
+            .unwrap();
 
         // Query by text
         let query = EmbeddingCandidateQuery {
@@ -1039,12 +1151,12 @@ mod tests {
         let _candidates = nearest_neighbors(&conn, &provider, query).expect("query text search");
 
         // Counts unchanged — query text was not stored
-        let doc_count_after: i64 = conn.query_row(
-            "SELECT count(*) FROM indexable_documents", [], |r| r.get(0)
-        ).unwrap();
-        let emb_count_after: i64 = conn.query_row(
-            "SELECT count(*) FROM document_embeddings", [], |r| r.get(0)
-        ).unwrap();
+        let doc_count_after: i64 = conn
+            .query_row("SELECT count(*) FROM indexable_documents", [], |r| r.get(0))
+            .unwrap();
+        let emb_count_after: i64 = conn
+            .query_row("SELECT count(*) FROM document_embeddings", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(doc_count_before, doc_count_after);
         assert_eq!(emb_count_before, emb_count_after);
     }
@@ -1057,7 +1169,10 @@ mod tests {
         // Embed with dimension 3
         let provider3 = FakeEmbeddingProvider::new(3, "embed-small", "text-embedding-3-small");
         let embed_opts = EmbeddingRunOptions {
-            source_system_id: None, entity_kind: None, limit: Some(10), force_rebuild: false,
+            source_system_id: None,
+            entity_kind: None,
+            limit: Some(10),
+            force_rebuild: false,
         };
         refresh_embeddings_with_provider(&conn, &provider3, embed_opts, "2026-01-01T00:00:00Z")
             .expect("embed");
@@ -1099,11 +1214,13 @@ mod tests {
             .expect("first refresh");
 
         // Verify embedded
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "embedded");
 
         // Force rebuild
@@ -1113,8 +1230,9 @@ mod tests {
             limit: Some(10),
             force_rebuild: true,
         };
-        let summary = refresh_embeddings_with_provider(&conn, &provider, opts2, "2026-01-01T00:00:00Z")
-            .expect("force refresh");
+        let summary =
+            refresh_embeddings_with_provider(&conn, &provider, opts2, "2026-01-01T00:00:00Z")
+                .expect("force refresh");
 
         assert_eq!(summary.embedded, 1);
         assert!(matches!(summary.status, EmbeddingRunStatus::Complete));
@@ -1135,8 +1253,9 @@ mod tests {
         };
         // Must not panic or return a SQL error — it simply matches zero rows because
         // no source has this synthetic id.
-        let summary = refresh_embeddings_with_provider(&conn, &provider, opts, "2026-01-01T00:00:00Z")
-            .expect("force_rebuild with quote in source_system_id must not error");
+        let summary =
+            refresh_embeddings_with_provider(&conn, &provider, opts, "2026-01-01T00:00:00Z")
+                .expect("force_rebuild with quote in source_system_id must not error");
         assert_eq!(summary.embedded, 0); // no matching documents for the injected id
     }
 
@@ -1152,8 +1271,9 @@ mod tests {
             limit: Some(10),
             force_rebuild: true,
         };
-        let summary = refresh_embeddings_with_provider(&conn, &provider, opts, "2026-01-01T00:00:00Z")
-            .expect("force_rebuild with quote in entity_kind must not error");
+        let summary =
+            refresh_embeddings_with_provider(&conn, &provider, opts, "2026-01-01T00:00:00Z")
+                .expect("force_rebuild with quote in entity_kind must not error");
         assert_eq!(summary.embedded, 0);
     }
 
@@ -1200,7 +1320,10 @@ mod tests {
         // Embed both docs using dimension 1536 to match the vec0 table DDL
         let provider = FakeEmbeddingProvider::new(1536, "embed-small", "text-embedding-3-small");
         let opts = EmbeddingRunOptions {
-            source_system_id: None, entity_kind: None, limit: Some(10), force_rebuild: false,
+            source_system_id: None,
+            entity_kind: None,
+            limit: Some(10),
+            force_rebuild: false,
         };
         refresh_embeddings_with_provider(&conn, &provider, opts, "2026-01-01T00:00:00Z")
             .expect("embed both");
@@ -1219,7 +1342,10 @@ mod tests {
         let candidates = nearest_neighbors(&conn, &provider, query).expect("neighbors");
 
         // All returned candidates must have Bug work items
-        assert!(!candidates.is_empty(), "should return at least one Bug candidate");
+        assert!(
+            !candidates.is_empty(),
+            "should return at least one Bug candidate"
+        );
         for c in &candidates {
             assert_eq!(
                 c.work_item_id.as_deref(),
@@ -1255,9 +1381,10 @@ mod tests {
             fn embed(&self, _req: EmbeddingRequest) -> Result<EmbeddingResponse, EmbeddingError> {
                 // If the caller holds the DB lock, try_lock() returns Err.
                 // The test fails at this point, proving the bug is present.
-                let _guard = self.db.try_lock().expect(
-                    "DB mutex must NOT be held when the embedding provider is called",
-                );
+                let _guard = self
+                    .db
+                    .try_lock()
+                    .expect("DB mutex must NOT be held when the embedding provider is called");
                 Ok(EmbeddingResponse {
                     vectors: vec![vec![0.1f32, 0.2, 0.3]],
                     model: "test-model".into(),
@@ -1289,20 +1416,24 @@ mod tests {
         // Phase 2: provider call (no lock held — verified inside embed()).
         // With the new batching structure, use the first (and only) text batch.
         let first_batch = &batch.text_batches[0];
-        let request = EmbeddingRequest { input: first_batch.texts.clone() };
+        let request = EmbeddingRequest {
+            input: first_batch.texts.clone(),
+        };
         let response = provider.embed(request).expect("embed");
 
         // Phase 3: write results (brief lock).
         let conn = db.lock().expect("phase 3 lock");
-        let (_, _) = complete_text_batch(&conn, first_batch, response, now)
-            .expect("complete batch");
+        let (_, _) =
+            complete_text_batch(&conn, first_batch, response, now).expect("complete batch");
 
         // Verify by checking DB state
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "embedded");
     }
 
@@ -1325,7 +1456,8 @@ mod tests {
         conn.execute(
             "UPDATE indexable_documents SET embedding_status = 'embedding' WHERE id = 'doc_1'",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         let provider = FakeEmbeddingProvider::new(3, "grove-embed-v4", "embed-v-4-0");
         let options = EmbeddingRunOptions {
@@ -1334,23 +1466,25 @@ mod tests {
             limit: Some(10),
             force_rebuild: false,
         };
-        let summary = refresh_embeddings_with_provider(
-            &conn,
-            &provider,
-            options,
-            "2026-01-01T00:00:00Z",
-        ).expect("refresh");
+        let summary =
+            refresh_embeddings_with_provider(&conn, &provider, options, "2026-01-01T00:00:00Z")
+                .expect("refresh");
 
         // Verify that the stuck 'embedding' status was recovered and re-processed.
         // When sqlite-vec is available the document is fully embedded; when not
         // available the write fails and status is 'failed' — but in either case
         // the document must NOT remain stuck in 'embedding'.
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
-        assert_ne!(status, "embedding", "stuck 'embedding' claim must be recovered before the next run");
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_ne!(
+            status, "embedding",
+            "stuck 'embedding' claim must be recovered before the next run"
+        );
 
         // When sqlite-vec is available (embedded successfully), assert full success.
         if crate::db::load_sqlite_vec(&conn).is_ok() {
@@ -1407,7 +1541,11 @@ mod tests {
             inner: FakeEmbeddingProvider,
         }
         impl EmbeddingProvider for CountingProvider {
-            fn embed(&self, req: EmbeddingRequest) -> Result<crate::embeddings::provider::EmbeddingResponse, EmbeddingError> {
+            fn embed(
+                &self,
+                req: EmbeddingRequest,
+            ) -> Result<crate::embeddings::provider::EmbeddingResponse, EmbeddingError>
+            {
                 self.call_sizes.lock().unwrap().push(req.input.len());
                 self.inner.embed(req)
             }
@@ -1425,12 +1563,17 @@ mod tests {
             force_rebuild: false,
         };
 
-        let summary = refresh_embeddings_with_provider(
-            &conn, &provider, options, "2026-01-01T00:00:00Z",
-        ).expect("refresh");
+        let summary =
+            refresh_embeddings_with_provider(&conn, &provider, options, "2026-01-01T00:00:00Z")
+                .expect("refresh");
 
         let sizes = call_sizes.lock().unwrap().clone();
-        assert_eq!(sizes, vec![96, 96, 8], "expected three provider calls with sizes [96, 96, 8], got {:?}", sizes);
+        assert_eq!(
+            sizes,
+            vec![96, 96, 8],
+            "expected three provider calls with sizes [96, 96, 8], got {:?}",
+            sizes
+        );
         assert_eq!(summary.scanned, 200);
         assert_eq!(summary.embedded, 200);
         assert_eq!(summary.failed, 0);
@@ -1485,7 +1628,11 @@ mod tests {
             inner: FakeEmbeddingProvider,
         }
         impl EmbeddingProvider for RateLimitOnSecondCall {
-            fn embed(&self, req: EmbeddingRequest) -> Result<crate::embeddings::provider::EmbeddingResponse, EmbeddingError> {
+            fn embed(
+                &self,
+                req: EmbeddingRequest,
+            ) -> Result<crate::embeddings::provider::EmbeddingResponse, EmbeddingError>
+            {
                 let mut count = self.call_count.lock().unwrap();
                 *count += 1;
                 if *count >= 2 {
@@ -1508,9 +1655,9 @@ mod tests {
             force_rebuild: false,
         };
 
-        let summary = refresh_embeddings_with_provider(
-            &conn, &provider, options, "2026-01-01T00:00:00Z",
-        ).expect("refresh");
+        let summary =
+            refresh_embeddings_with_provider(&conn, &provider, options, "2026-01-01T00:00:00Z")
+                .expect("refresh");
 
         // 96 embedded (first batch), 4 failed (second batch hit rate limit)
         assert_eq!(summary.scanned, 100, "scanned should be 100");
@@ -1518,21 +1665,32 @@ mod tests {
         assert_eq!(summary.failed, 4, "second batch of 4 should fail");
         assert!(
             matches!(summary.status, EmbeddingRunStatus::Partial),
-            "status should be Partial when some embedded and some failed, got {:?}", summary.status
+            "status should be Partial when some embedded and some failed, got {:?}",
+            summary.status
         );
 
         // Verify DB state: 96 rows embedded, 4 rows failed
-        let embedded_count: i64 = conn.query_row(
-            "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'embedded'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
-        let failed_count: i64 = conn.query_row(
-            "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'failed'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
-        assert_eq!(embedded_count, 96, "96 docs should have embedding_status=embedded");
-        assert_eq!(failed_count, 4, "4 docs should have embedding_status=failed");
+        let embedded_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'embedded'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let failed_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM indexable_documents WHERE embedding_status = 'failed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            embedded_count, 96,
+            "96 docs should have embedding_status=embedded"
+        );
+        assert_eq!(
+            failed_count, 4,
+            "4 docs should have embedding_status=failed"
+        );
     }
 }

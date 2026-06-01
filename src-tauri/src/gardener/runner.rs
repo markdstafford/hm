@@ -1,11 +1,11 @@
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use rusqlite::Connection;
 
-use crate::gardener::contract::{GardenerTrigger, GardenerDependency};
-use crate::gardener::engine::{GardenerEngine, EngineRunContext};
+use crate::gardener::contract::{GardenerDependency, GardenerTrigger};
+use crate::gardener::engine::{EngineRunContext, GardenerEngine};
 use crate::gardener::repository::{self, SuggestionInsert};
 use crate::gardener::settings::load_gardener_policy;
 
@@ -273,7 +273,10 @@ pub fn run_on_demand(
     let engine_id = contract.id.0.clone();
 
     // Check that the engine's contract accepts on-demand triggers.
-    if !contract.accepted_triggers.contains(&GardenerTrigger::OnDemand) {
+    if !contract
+        .accepted_triggers
+        .contains(&GardenerTrigger::OnDemand)
+    {
         return GardenerRunSummary {
             trigger: GardenerTrigger::OnDemand,
             status: GardenerRunStatus::Skipped,
@@ -312,7 +315,11 @@ pub fn run_on_demand(
 
     // Check dependencies (mirrors the scheduled path).
     let deps = DependencyAvailability::check(conn);
-    let missing_deps: Vec<_> = contract.dependencies.iter().filter(|d| !deps.has(d)).collect();
+    let missing_deps: Vec<_> = contract
+        .dependencies
+        .iter()
+        .filter(|d| !deps.has(d))
+        .collect();
     if !missing_deps.is_empty() {
         return GardenerRunSummary {
             trigger: GardenerTrigger::OnDemand,
@@ -426,22 +433,20 @@ fn run_engine_pipeline(
         // Persist candidates
         let mut persist_errors = 0u32;
         for candidate in &output.candidates {
-            let key_json = match repository::canonical_suppression_key_json(&candidate.suppression_key) {
-                Ok(k) => k,
-                Err(_) => {
-                    persist_errors += 1;
-                    continue;
-                }
-            };
+            let key_json =
+                match repository::canonical_suppression_key_json(&candidate.suppression_key) {
+                    Ok(k) => k,
+                    Err(_) => {
+                        persist_errors += 1;
+                        continue;
+                    }
+                };
 
             // Consult suppression for scheduled runs
             if trigger == GardenerTrigger::Scheduled {
-                let is_suppressed = repository::suppression_exists(
-                    conn,
-                    &engine_id,
-                    &candidate.suppression_key,
-                )
-                .unwrap_or(false);
+                let is_suppressed =
+                    repository::suppression_exists(conn, &engine_id, &candidate.suppression_key)
+                        .unwrap_or(false);
                 if is_suppressed {
                     suppressed += 1;
                     continue;
@@ -521,7 +526,11 @@ fn compute_overall_status(summaries: &[EngineRunSummary]) -> GardenerRunStatus {
             GardenerRunStatus::Skipped | GardenerRunStatus::Coalesced
         )
     });
-    if any_failed && summaries.iter().any(|s| s.status == GardenerRunStatus::Complete) {
+    if any_failed
+        && summaries
+            .iter()
+            .any(|s| s.status == GardenerRunStatus::Complete)
+    {
         GardenerRunStatus::Partial
     } else if any_failed {
         GardenerRunStatus::Failed
@@ -539,20 +548,24 @@ fn compute_overall_status(summaries: &[EngineRunSummary]) -> GardenerRunStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use crate::db::open_in_memory;
     use crate::gardener::contract::{
-        ApprovalPolicy, EngineCost, EngineContract, GardenerEngineId, GardenerTrigger,
-        GatePolicy, PipelineStageSpec, RunPolicy, SuggestionCategory, SuppressionKeySpec,
+        ApprovalPolicy, EngineContract, EngineCost, GardenerEngineId, GardenerTrigger, GatePolicy,
+        PipelineStageSpec, RunPolicy, SuggestionCategory, SuppressionKeySpec,
     };
-    use crate::gardener::engine::{EmittedSuggestion, EngineRunContext, GardenerEngine, StageOutput};
+    use crate::gardener::engine::{
+        EmittedSuggestion, EngineRunContext, GardenerEngine, StageOutput,
+    };
     use crate::gardener::errors::GardenerError;
     use crate::gardener::repository::{
-        GardenerTarget, SuppressionInput, SuppressionKey, record_suppression,
-        list_pending_suggestions, read_watermark,
+        list_pending_suggestions, read_watermark, record_suppression, GardenerTarget,
+        SuppressionInput, SuppressionKey,
     };
-    use crate::issues::repository::{upsert_source_system, SourceSystemInput, upsert_work_item, WorkItemInput};
     use crate::issues::ids::stable_id;
+    use crate::issues::repository::{
+        upsert_source_system, upsert_work_item, SourceSystemInput, WorkItemInput,
+    };
+    use std::sync::{Arc, Mutex};
 
     // -----------------------------------------------------------------------
     // Test helpers
@@ -663,7 +676,10 @@ mod tests {
             self
         }
 
-        fn with_dependencies(mut self, deps: Vec<crate::gardener::contract::GardenerDependency>) -> Self {
+        fn with_dependencies(
+            mut self,
+            deps: Vec<crate::gardener::contract::GardenerDependency>,
+        ) -> Self {
             self.dependencies = deps;
             self
         }
@@ -694,7 +710,11 @@ mod tests {
             }
         }
 
-        fn compute(&self, _ctx: EngineRunContext, stage_id: &str) -> Result<StageOutput, GardenerError> {
+        fn compute(
+            &self,
+            _ctx: EngineRunContext,
+            stage_id: &str,
+        ) -> Result<StageOutput, GardenerError> {
             self.calls.lock().unwrap().push(stage_id.to_string());
 
             if self.fail {
@@ -746,12 +766,7 @@ mod tests {
         let engine: Arc<dyn GardenerEngine> = Arc::new(FakeEngine::new("reference"));
         let runtime = GardenerRuntime::default();
 
-        let summary = run_scheduled(
-            &conn,
-            &runtime,
-            &[engine],
-            make_scheduled_input("src-1"),
-        );
+        let summary = run_scheduled(&conn, &runtime, &[engine], make_scheduled_input("src-1"));
 
         assert_eq!(summary.status, GardenerRunStatus::Complete);
         assert_eq!(summary.engines.len(), 1);
@@ -787,12 +802,7 @@ mod tests {
         let engine: Arc<dyn GardenerEngine> = Arc::new(FakeEngine::new("reference"));
         let runtime = GardenerRuntime::default();
 
-        let summary = run_scheduled(
-            &conn,
-            &runtime,
-            &[engine],
-            make_scheduled_input("src-1"),
-        );
+        let summary = run_scheduled(&conn, &runtime, &[engine], make_scheduled_input("src-1"));
 
         assert_eq!(summary.status, GardenerRunStatus::Complete);
         let es = &summary.engines[0];
@@ -800,7 +810,10 @@ mod tests {
         assert_eq!(es.suppressed, 1, "suppressed counter should increment");
 
         let pending = list_pending_suggestions(&conn).expect("list");
-        assert!(pending.is_empty(), "no pending suggestions should be persisted");
+        assert!(
+            pending.is_empty(),
+            "no pending suggestions should be persisted"
+        );
     }
 
     #[test]
@@ -834,7 +847,10 @@ mod tests {
 
         assert_eq!(summary.status, GardenerRunStatus::Complete);
         let es = &summary.engines[0];
-        assert_eq!(es.emitted, 1, "on-demand bypasses suppression → candidate emitted");
+        assert_eq!(
+            es.emitted, 1,
+            "on-demand bypasses suppression → candidate emitted"
+        );
         assert_eq!(es.suppressed, 0);
 
         let pending = list_pending_suggestions(&conn).expect("list");
@@ -854,14 +870,13 @@ mod tests {
         assert!(started, "first try_start should succeed");
 
         // Now run scheduled — should coalesce
-        let summary = run_scheduled(
-            &conn,
-            &runtime,
-            &[engine],
-            make_scheduled_input("src-1"),
-        );
+        let summary = run_scheduled(&conn, &runtime, &[engine], make_scheduled_input("src-1"));
 
-        assert_eq!(summary.status, GardenerRunStatus::Skipped, "all coalesced → skipped overall");
+        assert_eq!(
+            summary.status,
+            GardenerRunStatus::Skipped,
+            "all coalesced → skipped overall"
+        );
         let es = &summary.engines[0];
         assert_eq!(es.status, GardenerRunStatus::Coalesced);
         assert!(es.coalesced);
@@ -877,7 +892,7 @@ mod tests {
 
         // Store a policy that enables both engines
         {
-            use crate::gardener::settings::{GardenerPolicy, EnginePolicy, GARDENER_POLICY_KEY};
+            use crate::gardener::settings::{EnginePolicy, GardenerPolicy, GARDENER_POLICY_KEY};
             use crate::settings::shared::shared_settings_set;
             let mut policy = GardenerPolicy::default_policy();
             policy.engines.insert(
@@ -896,10 +911,10 @@ mod tests {
         }
 
         // Engine 1: requires AiProvider (always false in DependencyAvailability::check)
-        let engine_with_dep: Arc<dyn GardenerEngine> = Arc::new(
-            FakeEngine::new("needs_embeddings")
-                .with_dependencies(vec![crate::gardener::contract::GardenerDependency::AiProvider]),
-        );
+        let engine_with_dep: Arc<dyn GardenerEngine> =
+            Arc::new(FakeEngine::new("needs_embeddings").with_dependencies(vec![
+                crate::gardener::contract::GardenerDependency::AiProvider,
+            ]));
 
         // Engine 2: no dependencies
         let engine_no_dep: Arc<dyn GardenerEngine> = Arc::new(FakeEngine::new("reference"));
@@ -916,12 +931,22 @@ mod tests {
         // Overall should be partial or complete (one skipped, one succeeded)
         assert_ne!(summary.status, GardenerRunStatus::Failed);
 
-        let skip_sum = summary.engines.iter().find(|e| e.engine_id == "needs_embeddings")
+        let skip_sum = summary
+            .engines
+            .iter()
+            .find(|e| e.engine_id == "needs_embeddings")
             .expect("should have summary for needs_embeddings");
         assert_eq!(skip_sum.status, GardenerRunStatus::Skipped);
-        assert!(skip_sum.safe_error.as_deref().unwrap_or("").contains("dependency"));
+        assert!(skip_sum
+            .safe_error
+            .as_deref()
+            .unwrap_or("")
+            .contains("dependency"));
 
-        let ok_sum = summary.engines.iter().find(|e| e.engine_id == "reference")
+        let ok_sum = summary
+            .engines
+            .iter()
+            .find(|e| e.engine_id == "reference")
             .expect("should have summary for reference");
         assert_eq!(ok_sum.status, GardenerRunStatus::Complete);
         assert_eq!(ok_sum.emitted, 1);
@@ -969,9 +994,16 @@ mod tests {
                     emits: "stale_issue".into(),
                 }
             }
-            fn compute(&self, _ctx: EngineRunContext, stage_id: &str) -> Result<StageOutput, GardenerError> {
+            fn compute(
+                &self,
+                _ctx: EngineRunContext,
+                stage_id: &str,
+            ) -> Result<StageOutput, GardenerError> {
                 self.calls.lock().unwrap().push(stage_id.to_string());
-                Ok(StageOutput { candidates: vec![], scanned: 1 })
+                Ok(StageOutput {
+                    candidates: vec![],
+                    scanned: 1,
+                })
             }
         }
 
@@ -982,12 +1014,7 @@ mod tests {
         });
 
         let runtime = GardenerRuntime::default();
-        let summary = run_scheduled(
-            &conn,
-            &runtime,
-            &[engine],
-            make_scheduled_input("src-1"),
-        );
+        let summary = run_scheduled(&conn, &runtime, &[engine], make_scheduled_input("src-1"));
 
         assert_eq!(summary.status, GardenerRunStatus::Complete);
         let called = calls.lock().unwrap().clone();
@@ -1007,7 +1034,8 @@ mod tests {
         seed_work_item(&conn, "src-1", "UP-1");
 
         let success_engine: Arc<dyn GardenerEngine> = Arc::new(FakeEngine::new("reference"));
-        let failure_engine: Arc<dyn GardenerEngine> = Arc::new(FakeEngine::new("duplicate").with_fail());
+        let failure_engine: Arc<dyn GardenerEngine> =
+            Arc::new(FakeEngine::new("duplicate").with_fail());
 
         let runtime = GardenerRuntime::default();
         let input = ScheduledRunInput {
@@ -1018,23 +1046,26 @@ mod tests {
             now: "2026-01-01T12:00:00Z".into(),
         };
 
-        let summary = run_scheduled(
-            &conn,
-            &runtime,
-            &[success_engine, failure_engine],
-            input,
-        );
+        let summary = run_scheduled(&conn, &runtime, &[success_engine, failure_engine], input);
 
         // Overall should be partial (one success, one failure)
         assert_eq!(summary.status, GardenerRunStatus::Partial);
 
         // Watermark should exist for reference (success)
         let wm = read_watermark(&conn, "reference", "src-1", "updated_at").expect("read wm");
-        assert_eq!(wm.as_deref(), Some("2026-01-01T12:00:00Z"), "watermark should advance for success");
+        assert_eq!(
+            wm.as_deref(),
+            Some("2026-01-01T12:00:00Z"),
+            "watermark should advance for success"
+        );
 
         // Watermark should NOT exist for duplicate (failure)
-        let wm_fail = read_watermark(&conn, "duplicate", "src-1", "updated_at").expect("read wm fail");
-        assert!(wm_fail.is_none(), "watermark must not advance after failure");
+        let wm_fail =
+            read_watermark(&conn, "duplicate", "src-1", "updated_at").expect("read wm fail");
+        assert!(
+            wm_fail.is_none(),
+            "watermark must not advance after failure"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1066,7 +1097,11 @@ mod tests {
             }
         }
 
-        fn compute(&self, _ctx: EngineRunContext, _stage_id: &str) -> Result<StageOutput, GardenerError> {
+        fn compute(
+            &self,
+            _ctx: EngineRunContext,
+            _stage_id: &str,
+        ) -> Result<StageOutput, GardenerError> {
             // Emit two distinct candidates from the same source
             let make_candidate = |upstream_id: &str| EmittedSuggestion {
                 action_id: "flag_stale".into(),
@@ -1114,7 +1149,11 @@ mod tests {
         assert_eq!(es.emitted, 2, "both candidates must be persisted");
 
         let pending = list_pending_suggestions(&conn).expect("list");
-        assert_eq!(pending.len(), 2, "both suggestions must be visible with no collision");
+        assert_eq!(
+            pending.len(),
+            2,
+            "both suggestions must be visible with no collision"
+        );
         // IDs must differ
         assert_ne!(pending[0].id, pending[1].id);
     }
@@ -1128,7 +1167,12 @@ mod tests {
         let runtime = GardenerRuntime::default();
 
         // First run
-        run_scheduled(&conn, &runtime, &[engine.clone()], make_scheduled_input("src-1"));
+        run_scheduled(
+            &conn,
+            &runtime,
+            &[engine.clone()],
+            make_scheduled_input("src-1"),
+        );
         let after_first = list_pending_suggestions(&conn).expect("list after first");
         assert_eq!(after_first.len(), 1);
         let first_id = after_first[0].id.clone();
@@ -1136,7 +1180,11 @@ mod tests {
         // Second run — same candidate
         run_scheduled(&conn, &runtime, &[engine], make_scheduled_input("src-1"));
         let after_second = list_pending_suggestions(&conn).expect("list after second");
-        assert_eq!(after_second.len(), 1, "re-emission must not create a duplicate");
+        assert_eq!(
+            after_second.len(),
+            1,
+            "re-emission must not create a duplicate"
+        );
         assert_eq!(after_second[0].id, first_id, "stable id must be unchanged");
     }
 
@@ -1150,7 +1198,8 @@ mod tests {
         seed_work_item(&conn, "src-1", "UP-1");
 
         // Drop the suggestions table so all INSERTs fail
-        conn.execute_batch("DROP TABLE gardener_suggestions").expect("drop table");
+        conn.execute_batch("DROP TABLE gardener_suggestions")
+            .expect("drop table");
 
         let engine: Arc<dyn GardenerEngine> = Arc::new(FakeEngine::new("reference"));
         let runtime = GardenerRuntime::default();
@@ -1165,12 +1214,22 @@ mod tests {
         let summary = run_scheduled(&conn, &runtime, &[engine], input);
 
         let es = &summary.engines[0];
-        assert_eq!(es.status, GardenerRunStatus::Failed, "persistence error must fail the engine");
-        assert!(es.safe_error.is_some(), "safe_error must be set on persistence failure");
+        assert_eq!(
+            es.status,
+            GardenerRunStatus::Failed,
+            "persistence error must fail the engine"
+        );
+        assert!(
+            es.safe_error.is_some(),
+            "safe_error must be set on persistence failure"
+        );
 
         // Watermark must NOT have advanced
         let wm = read_watermark(&conn, "reference", "src-1", "updated_at").expect("read wm");
-        assert!(wm.is_none(), "watermark must not advance when persistence fails");
+        assert!(
+            wm.is_none(),
+            "watermark must not advance when persistence fails"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1200,8 +1259,15 @@ mod tests {
             }
         }
 
-        fn compute(&self, _ctx: EngineRunContext, _stage_id: &str) -> Result<StageOutput, GardenerError> {
-            Ok(StageOutput { candidates: vec![], scanned: 0 })
+        fn compute(
+            &self,
+            _ctx: EngineRunContext,
+            _stage_id: &str,
+        ) -> Result<StageOutput, GardenerError> {
+            Ok(StageOutput {
+                candidates: vec![],
+                scanned: 0,
+            })
         }
     }
 
@@ -1210,15 +1276,26 @@ mod tests {
         let conn = open_in_memory().unwrap();
         // Seed policy so the engine is enabled
         {
-            use crate::gardener::settings::{GardenerPolicy, EnginePolicy, GARDENER_POLICY_KEY};
+            use crate::gardener::settings::{EnginePolicy, GardenerPolicy, GARDENER_POLICY_KEY};
             use crate::settings::shared::shared_settings_set;
             let mut policy = GardenerPolicy::default_policy();
             policy.engines.insert(
                 "scheduled_only".into(),
-                EnginePolicy { enabled: true, scheduled: true, on_demand: true,
-                               generation_policy: None, first_run_cap: None, per_sweep_cap: None },
+                EnginePolicy {
+                    enabled: true,
+                    scheduled: true,
+                    on_demand: true,
+                    generation_policy: None,
+                    first_run_cap: None,
+                    per_sweep_cap: None,
+                },
             );
-            shared_settings_set(&conn, GARDENER_POLICY_KEY, &serde_json::to_value(&policy).unwrap()).unwrap();
+            shared_settings_set(
+                &conn,
+                GARDENER_POLICY_KEY,
+                &serde_json::to_value(&policy).unwrap(),
+            )
+            .unwrap();
         }
 
         let engine: Arc<dyn GardenerEngine> = Arc::new(ScheduledOnlyEngine);
@@ -1232,8 +1309,10 @@ mod tests {
 
         assert_eq!(summary.status, GardenerRunStatus::Skipped);
         let es = &summary.engines[0];
-        assert!(es.safe_error.as_deref().unwrap_or("").contains("on-demand"),
-                "error must mention on-demand trigger rejection");
+        assert!(
+            es.safe_error.as_deref().unwrap_or("").contains("on-demand"),
+            "error must mention on-demand trigger rejection"
+        );
     }
 
     #[test]
@@ -1241,21 +1320,32 @@ mod tests {
         let conn = open_in_memory().unwrap();
         // Seed policy so the engine is enabled
         {
-            use crate::gardener::settings::{GardenerPolicy, EnginePolicy, GARDENER_POLICY_KEY};
+            use crate::gardener::settings::{EnginePolicy, GardenerPolicy, GARDENER_POLICY_KEY};
             use crate::settings::shared::shared_settings_set;
             let mut policy = GardenerPolicy::default_policy();
             policy.engines.insert(
                 "needs_ai".into(),
-                EnginePolicy { enabled: true, scheduled: true, on_demand: true,
-                               generation_policy: None, first_run_cap: None, per_sweep_cap: None },
+                EnginePolicy {
+                    enabled: true,
+                    scheduled: true,
+                    on_demand: true,
+                    generation_policy: None,
+                    first_run_cap: None,
+                    per_sweep_cap: None,
+                },
             );
-            shared_settings_set(&conn, GARDENER_POLICY_KEY, &serde_json::to_value(&policy).unwrap()).unwrap();
+            shared_settings_set(
+                &conn,
+                GARDENER_POLICY_KEY,
+                &serde_json::to_value(&policy).unwrap(),
+            )
+            .unwrap();
         }
 
-        let engine: Arc<dyn GardenerEngine> = Arc::new(
-            FakeEngine::new("needs_ai")
-                .with_dependencies(vec![crate::gardener::contract::GardenerDependency::AiProvider])
-        );
+        let engine: Arc<dyn GardenerEngine> =
+            Arc::new(FakeEngine::new("needs_ai").with_dependencies(vec![
+                crate::gardener::contract::GardenerDependency::AiProvider,
+            ]));
         let runtime = GardenerRuntime::default();
         let input = OnDemandRunInput {
             source_id: Some("src-1".into()),
@@ -1266,15 +1356,25 @@ mod tests {
 
         assert_eq!(summary.status, GardenerRunStatus::Skipped);
         let es = &summary.engines[0];
-        assert!(es.safe_error.as_deref().unwrap_or("").contains("dependency"),
-                "error must mention missing dependency");
+        assert!(
+            es.safe_error
+                .as_deref()
+                .unwrap_or("")
+                .contains("dependency"),
+            "error must mention missing dependency"
+        );
     }
 
     // -----------------------------------------------------------------------
     // INIT-4: scheduled run stays scoped to the specified project
     // -----------------------------------------------------------------------
 
-    fn seed_work_item_with_project(conn: &Connection, source_id: &str, upstream_id: &str, project_key: &str) {
+    fn seed_work_item_with_project(
+        conn: &Connection,
+        source_id: &str,
+        upstream_id: &str,
+        project_key: &str,
+    ) {
         upsert_source_system(
             conn,
             "2026-01-01T00:00:00Z",

@@ -47,9 +47,7 @@ impl IngestionError {
         let cat = match category_hint.to_ascii_lowercase().as_str() {
             "authentication" => IngestionErrorCategory::Authentication,
             "forbidden" => IngestionErrorCategory::Forbidden,
-            "rate limited" | "rate_limited" | "ratelimited" => {
-                IngestionErrorCategory::RateLimited
-            }
+            "rate limited" | "rate_limited" | "ratelimited" => IngestionErrorCategory::RateLimited,
             "network" => IngestionErrorCategory::Network,
             "schema" => IngestionErrorCategory::Schema,
             "decode" => IngestionErrorCategory::Decode,
@@ -199,10 +197,7 @@ mod tests {
         );
         let rendered = format!("{err}");
         assert!(rendered.contains("Authentication failed"));
-        assert!(
-            !rendered.contains("secret-token"),
-            "rendered={rendered}"
-        );
+        assert!(!rendered.contains("secret-token"), "rendered={rendered}");
         assert!(
             !rendered.to_ascii_lowercase().contains("authorization"),
             "rendered={rendered}"
@@ -315,10 +310,8 @@ mod tests {
         ];
 
         for (hint, expected) in cases {
-            let err = IngestionError::safe(
-                hint,
-                "Authorization: Bearer secret-token raw response body",
-            );
+            let err =
+                IngestionError::safe(hint, "Authorization: Bearer secret-token raw response body");
             assert_eq!(err.category(), expected, "hint={hint}");
             let rendered = format!("{err}");
             assert!(

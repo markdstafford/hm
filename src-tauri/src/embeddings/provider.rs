@@ -1,6 +1,6 @@
+use crate::embeddings::errors::EmbeddingError;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use crate::embeddings::errors::EmbeddingError;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct EmbeddingRequest {
@@ -35,13 +35,21 @@ pub struct FakeEmbeddingProvider {
 
 impl FakeEmbeddingProvider {
     pub fn new(dimension: usize, profile: impl Into<String>, model: impl Into<String>) -> Self {
-        Self { dimension, profile: profile.into(), model: model.into() }
+        Self {
+            dimension,
+            profile: profile.into(),
+            model: model.into(),
+        }
     }
 }
 
 impl EmbeddingProvider for FakeEmbeddingProvider {
     fn embed(&self, request: EmbeddingRequest) -> Result<EmbeddingResponse, EmbeddingError> {
-        let vectors = request.input.iter().map(|text| deterministic_vector(text, self.dimension)).collect();
+        let vectors = request
+            .input
+            .iter()
+            .map(|text| deterministic_vector(text, self.dimension))
+            .collect();
         Ok(EmbeddingResponse {
             vectors,
             model: self.model.clone(),
@@ -62,8 +70,12 @@ impl AiEmbeddingProvider {
         store: &dyn crate::settings::secrets::SecretStore,
         request: EmbeddingRequest,
     ) -> Result<EmbeddingResponse, EmbeddingError> {
-        let resolved = crate::ai::resolver::resolve_for_task(conn, store, crate::embeddings::EMBEDDING_DEFAULT_ROUTE)
-            .map_err(EmbeddingError::from)?;
+        let resolved = crate::ai::resolver::resolve_for_task(
+            conn,
+            store,
+            crate::embeddings::EMBEDDING_DEFAULT_ROUTE,
+        )
+        .map_err(EmbeddingError::from)?;
         crate::ai::runners::openai_embeddings::OpenAiEmbeddingsRunner::default()
             .run(&resolved, request)
     }
@@ -96,7 +108,9 @@ mod tests {
                 "Body:\nSecond comment".into(),
             ],
         };
-        let first = provider.embed(request.clone()).expect("first fake response");
+        let first = provider
+            .embed(request.clone())
+            .expect("first fake response");
         let second = provider.embed(request).expect("second fake response");
         assert_eq!(first, second);
         assert_eq!(first.dimension, 3);
@@ -108,9 +122,18 @@ mod tests {
     fn provider_error_display_redacts_secret_and_document_text() {
         let err = EmbeddingError::provider_rejected();
         let msg = err.to_string();
-        assert!(msg.contains("Embedding provider rejected the request"), "should contain safe message");
+        assert!(
+            msg.contains("Embedding provider rejected the request"),
+            "should contain safe message"
+        );
         assert!(!msg.contains("sk-test-secret"), "must not contain secret");
-        assert!(!msg.contains("Authorization"), "must not contain auth header");
-        assert!(!msg.contains("Cannot sign in"), "must not contain document text");
+        assert!(
+            !msg.contains("Authorization"),
+            "must not contain auth header"
+        );
+        assert!(
+            !msg.contains("Cannot sign in"),
+            "must not contain document text"
+        );
     }
 }

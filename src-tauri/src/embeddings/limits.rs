@@ -31,11 +31,15 @@ pub struct TextBatch {
 }
 
 pub fn estimated_tokens(text: &str) -> usize {
-    ((text.chars().count() + 3) / 4).max(1)
+    text.chars().count().div_ceil(4).max(1)
 }
 
 fn setting_usize(settings: &JsonValue, key: &str) -> Option<usize> {
-    settings.0.get(key).and_then(|v| v.as_u64()).map(|v| v as usize)
+    settings
+        .0
+        .get(key)
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
 }
 
 fn setting_u64(settings: &JsonValue, key: &str) -> Option<u64> {
@@ -48,9 +52,12 @@ pub fn limits_from_settings(settings: &JsonValue) -> EmbeddingBatchLimits {
         max_inputs_per_request: setting_usize(settings, "max_inputs_per_request")
             .unwrap_or(defaults.max_inputs_per_request)
             .clamp(1, DEFAULT_MAX_INPUTS_PER_REQUEST),
-        max_estimated_tokens_per_request: setting_usize(settings, "max_estimated_tokens_per_request")
-            .unwrap_or(defaults.max_estimated_tokens_per_request)
-            .max(1),
+        max_estimated_tokens_per_request: setting_usize(
+            settings,
+            "max_estimated_tokens_per_request",
+        )
+        .unwrap_or(defaults.max_estimated_tokens_per_request)
+        .max(1),
         max_batches_per_run: setting_usize(settings, "max_batches_per_run")
             .unwrap_or(defaults.max_batches_per_run)
             .max(1),
@@ -73,9 +80,8 @@ pub fn split_claimed_documents(
     for (doc, text) in docs.into_iter().zip(texts.into_iter()) {
         let text_tokens = estimated_tokens(&text);
         let would_exceed_count = current_texts.len() >= limits.max_inputs_per_request;
-        let would_exceed_tokens =
-            !current_texts.is_empty()
-                && current_tokens + text_tokens > limits.max_estimated_tokens_per_request;
+        let would_exceed_tokens = !current_texts.is_empty()
+            && current_tokens + text_tokens > limits.max_estimated_tokens_per_request;
         if would_exceed_count || would_exceed_tokens {
             batches.push(TextBatch {
                 docs: std::mem::take(&mut current_docs),
@@ -89,7 +95,10 @@ pub fn split_claimed_documents(
     }
 
     if !current_texts.is_empty() {
-        batches.push(TextBatch { docs: current_docs, texts: current_texts });
+        batches.push(TextBatch {
+            docs: current_docs,
+            texts: current_texts,
+        });
     }
 
     batches

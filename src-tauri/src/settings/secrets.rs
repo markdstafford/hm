@@ -1,6 +1,6 @@
+use crate::settings::{error::SettingsError, keys};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::settings::{error::SettingsError, keys};
 
 pub trait SecretStore: Send + Sync {
     fn set(&self, key: &str, value: &str) -> Result<(), SettingsError>;
@@ -60,7 +60,9 @@ pub struct KeychainSecretStore {
 
 impl KeychainSecretStore {
     pub fn new(service: impl Into<String>) -> Self {
-        KeychainSecretStore { service: service.into() }
+        KeychainSecretStore {
+            service: service.into(),
+        }
     }
 }
 
@@ -135,21 +137,33 @@ mod tests {
     #[test]
     fn set_rejects_invalid_key() {
         let s = store();
-        assert!(s.set("bad key!", "v").is_err(), "space in key should be rejected");
+        assert!(
+            s.set("bad key!", "v").is_err(),
+            "space in key should be rejected"
+        );
         assert!(s.set("", "v").is_err(), "empty key should be rejected");
-        assert!(s.set("path/sep", "v").is_err(), "slash in key should be rejected");
+        assert!(
+            s.set("path/sep", "v").is_err(),
+            "slash in key should be rejected"
+        );
     }
 
     #[test]
     fn get_rejects_invalid_key() {
         let s = store();
-        assert!(s.get("bad key!").is_err(), "invalid key should be rejected by get");
+        assert!(
+            s.get("bad key!").is_err(),
+            "invalid key should be rejected by get"
+        );
     }
 
     #[test]
     fn delete_rejects_invalid_key() {
         let s = store();
-        assert!(s.delete("bad\nkey").is_err(), "control char in key should be rejected by delete");
+        assert!(
+            s.delete("bad\nkey").is_err(),
+            "control char in key should be rejected by delete"
+        );
     }
 
     #[test]

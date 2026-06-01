@@ -6,9 +6,9 @@ pub fn validate_key(key: &str) -> Result<(), SettingsError> {
             "key must be 1-128 characters".into(),
         ));
     }
-    let valid = key.chars().all(|c| {
-        c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-'
-    });
+    let valid = key
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
     if !valid {
         return Err(SettingsError::InvalidKey(
             "key may only contain ASCII letters, digits, '.', '_', and '-'".into(),

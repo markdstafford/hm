@@ -43,7 +43,8 @@ pub fn set_keychain_credential_secret(
     value: &str,
     store: &dyn SecretStore,
 ) -> Result<(), AiError> {
-    store.set(&credential_keychain_key(credential_name)?, value)
+    store
+        .set(&credential_keychain_key(credential_name)?, value)
         .map_err(|e| AiError::Storage(e.to_string()))
 }
 
@@ -51,7 +52,8 @@ pub fn delete_keychain_credential_secret(
     credential_name: &str,
     store: &dyn SecretStore,
 ) -> Result<(), AiError> {
-    store.delete(&credential_keychain_key(credential_name)?)
+    store
+        .delete(&credential_keychain_key(credential_name)?)
         .map_err(|e| AiError::Storage(e.to_string()))
 }
 
@@ -60,23 +62,20 @@ pub fn load_credential_secret(
     store: &dyn SecretStore,
 ) -> Result<LoadedCredentialSecret, AiError> {
     let value = match &credential.source {
-        CredentialSource::Keychain { key_ref } => {
-            store.get(key_ref)
-                .map_err(|e| AiError::Storage(e.to_string()))?
-                .ok_or_else(|| AiError::MissingSecret {
-                    credential_name: credential.name.clone(),
-                    source: "keychain",
-                })?
-        }
-        CredentialSource::Env { var_name } => {
-            std::env::var(var_name)
-                .ok()
-                .filter(|v| !v.is_empty())
-                .ok_or_else(|| AiError::MissingSecret {
-                    credential_name: credential.name.clone(),
-                    source: "env",
-                })?
-        }
+        CredentialSource::Keychain { key_ref } => store
+            .get(key_ref)
+            .map_err(|e| AiError::Storage(e.to_string()))?
+            .ok_or_else(|| AiError::MissingSecret {
+                credential_name: credential.name.clone(),
+                source: "keychain",
+            })?,
+        CredentialSource::Env { var_name } => std::env::var(var_name)
+            .ok()
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| AiError::MissingSecret {
+                credential_name: credential.name.clone(),
+                source: "env",
+            })?,
     };
     Ok(LoadedCredentialSecret {
         credential_name: credential.name.clone(),
@@ -102,7 +101,9 @@ mod tests {
     #[test]
     fn keychain_secret_loads_but_debug_redacts() {
         let store = InMemorySecretStore::new();
-        store.set("ai.credentials.anthropic-prod", "sk-test-secret").unwrap();
+        store
+            .set("ai.credentials.anthropic-prod", "sk-test-secret")
+            .unwrap();
         let credential = AiCredentialConfig {
             name: "anthropic-prod".into(),
             kind: AiCredentialKind::ApiKey,

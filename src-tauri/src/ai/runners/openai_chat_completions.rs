@@ -1,9 +1,9 @@
-use std::time::Duration;
 use crate::ai::config::{AiEndpointProtocol, AiExecutionMode, AiRunner};
 use crate::ai::errors::AiError;
 use crate::ai::resolver::ResolvedAiProvider;
 use crate::ai::runners::AiRunnerClient;
 use crate::ai::service::{AiMessageRole, AiRequest, AiResponse, AiUsage};
+use std::time::Duration;
 
 pub struct OpenAiChatCompletionsRunner {
     pub timeout: Duration,
@@ -11,12 +11,18 @@ pub struct OpenAiChatCompletionsRunner {
 
 impl Default for OpenAiChatCompletionsRunner {
     fn default() -> Self {
-        Self { timeout: Duration::from_secs(30) }
+        Self {
+            timeout: Duration::from_secs(30),
+        }
     }
 }
 
 impl AiRunnerClient for OpenAiChatCompletionsRunner {
-    fn run(&self, resolved: &ResolvedAiProvider, request: AiRequest) -> Result<AiResponse, AiError> {
+    fn run(
+        &self,
+        resolved: &ResolvedAiProvider,
+        request: AiRequest,
+    ) -> Result<AiResponse, AiError> {
         // Validate: protocol must be OpenAiChatCompletionsCompatible, runner OpenAiChatCompletions, mode DirectApi
         match (&resolved.endpoint.protocol, &resolved.profile.runner, &resolved.profile.execution_mode) {
             (AiEndpointProtocol::OpenAiChatCompletionsCompatible, AiRunner::OpenAiChatCompletions, AiExecutionMode::DirectApi) => {}
@@ -53,9 +59,7 @@ impl AiRunnerClient for OpenAiChatCompletionsRunner {
             body["temperature"] = serde_json::json!(temp);
         }
 
-        let agent = ureq::AgentBuilder::new()
-            .timeout(self.timeout)
-            .build();
+        let agent = ureq::AgentBuilder::new().timeout(self.timeout).build();
 
         let result = agent
             .post(&url)
@@ -88,7 +92,10 @@ impl AiRunnerClient for OpenAiChatCompletionsRunner {
             .ok_or_else(|| AiError::Provider("unexpected response format".into()))?
             .to_string();
 
-        let model = resp_json["model"].as_str().unwrap_or(&resolved.profile.model).to_string();
+        let model = resp_json["model"]
+            .as_str()
+            .unwrap_or(&resolved.profile.model)
+            .to_string();
         let usage = resp_json.get("usage").map(|u| AiUsage {
             input_tokens: u["prompt_tokens"].as_u64().map(|v| v as u32),
             output_tokens: u["completion_tokens"].as_u64().map(|v| v as u32),
@@ -119,7 +126,10 @@ fn safe_error_message(status: u16, _resp: &ureq::Response) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::config::{AiCredentialConfig, AiCredentialKind, AiEndpointConfig, AiEndpointProtocol, AiExecutionMode, AiProfileConfig, AiRunner, CredentialSource};
+    use crate::ai::config::{
+        AiCredentialConfig, AiCredentialKind, AiEndpointConfig, AiEndpointProtocol,
+        AiExecutionMode, AiProfileConfig, AiRunner, CredentialSource,
+    };
     use crate::ai::credentials::LoadedCredentialSecret;
     use crate::commands::JsonValue;
 
@@ -142,7 +152,9 @@ mod tests {
             credential: AiCredentialConfig {
                 name: "key".into(),
                 kind: AiCredentialKind::BearerToken,
-                source: CredentialSource::Keychain { key_ref: "ai.credentials.key".into() },
+                source: CredentialSource::Keychain {
+                    key_ref: "ai.credentials.key".into(),
+                },
             },
             secret: LoadedCredentialSecret::new_for_test("key", "sk-test-secret"),
         }
@@ -157,11 +169,17 @@ mod tests {
             // Verify path
             assert_eq!(req.url(), "/v1/chat/completions");
             // Verify Authorization: Bearer header is present (not logging value)
-            let has_auth = req.headers().iter().any(|h| h.field.as_str().to_ascii_lowercase() == "authorization");
+            let has_auth = req
+                .headers()
+                .iter()
+                .any(|h| h.field.as_str().to_ascii_lowercase() == "authorization");
             assert!(has_auth, "Authorization header must be present");
             let body = r#"{"model":"gpt-test","usage":{"prompt_tokens":3,"completion_tokens":1},"choices":[{"message":{"role":"assistant","content":"ok"}}]}"#;
-            let resp = tiny_http::Response::from_string(body)
-                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            let resp = tiny_http::Response::from_string(body).with_header(
+                "content-type: application/json"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             req.respond(resp).unwrap();
         });
         let runner = OpenAiChatCompletionsRunner::default();
@@ -181,9 +199,15 @@ mod tests {
         let port = server.server_addr().to_ip().unwrap().port();
         let handle = std::thread::spawn(move || {
             let req = server.recv().unwrap();
-            let resp = tiny_http::Response::from_string(r#"{"error":{"message":"Incorrect API key provided"}}"#)
-                .with_status_code(401)
-                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            let resp = tiny_http::Response::from_string(
+                r#"{"error":{"message":"Incorrect API key provided"}}"#,
+            )
+            .with_status_code(401)
+            .with_header(
+                "content-type: application/json"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             req.respond(resp).unwrap();
         });
         let runner = OpenAiChatCompletionsRunner::default();
@@ -192,8 +216,14 @@ mod tests {
         handle.join().unwrap();
         let msg = err.to_string();
         assert!(msg.contains("401"), "error should mention 401");
-        assert!(msg.contains("credential"), "error should suggest checking credential");
-        assert!(!msg.contains("sk-test-secret"), "error must not contain secret");
+        assert!(
+            msg.contains("credential"),
+            "error should suggest checking credential"
+        );
+        assert!(
+            !msg.contains("sk-test-secret"),
+            "error must not contain secret"
+        );
     }
 
     #[test]
@@ -205,9 +235,14 @@ mod tests {
             let _req = server.recv().unwrap();
             std::thread::sleep(Duration::from_secs(60));
         });
-        let runner = OpenAiChatCompletionsRunner { timeout: Duration::from_millis(50) };
+        let runner = OpenAiChatCompletionsRunner {
+            timeout: Duration::from_millis(50),
+        };
         let resolved = make_resolved(&format!("http://127.0.0.1:{port}/v1"));
         let err = runner.run(&resolved, AiRequest::smoke_test()).unwrap_err();
-        assert!(matches!(err, AiError::Timeout), "expected Timeout error, got: {err}");
+        assert!(
+            matches!(err, AiError::Timeout),
+            "expected Timeout error, got: {err}"
+        );
     }
 }

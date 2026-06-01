@@ -19,7 +19,9 @@ pub fn execute_jira_add_comment<C: JiraMutationClient + ?Sized>(
         return Err(MutationError::InvalidInput("issue_key is required".into()));
     }
     if input.body.trim().is_empty() {
-        return Err(MutationError::InvalidInput("comment body is required".into()));
+        return Err(MutationError::InvalidInput(
+            "comment body is required".into(),
+        ));
     }
 
     let created = client
@@ -55,8 +57,8 @@ pub fn jira_add_comment(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_add_comment(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
@@ -95,15 +97,20 @@ mod tests {
     fn add_comment_empty_body_returns_invalid_input() {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
-        let err = execute_jira_add_comment(&conn, &client, JiraAddCommentInput {
-            common: MutationCommonInput {
-                source_id: "src_1".to_string(),
-                issue_key: "AMP-1043".to_string(),
-                source_feature: None,
-                batch_id: None,
+        let err = execute_jira_add_comment(
+            &conn,
+            &client,
+            JiraAddCommentInput {
+                common: MutationCommonInput {
+                    source_id: "src_1".to_string(),
+                    issue_key: "AMP-1043".to_string(),
+                    source_feature: None,
+                    batch_id: None,
+                },
+                body: "  ".to_string(),
             },
-            body: "  ".to_string(),
-        }).unwrap_err();
+        )
+        .unwrap_err();
         assert!(matches!(err, MutationError::InvalidInput(_)));
     }
 }

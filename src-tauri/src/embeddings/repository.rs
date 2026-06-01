@@ -1,5 +1,5 @@
-use rusqlite::Connection;
 use crate::embeddings::errors::{EmbeddingError, EmbeddingErrorCategory};
+use rusqlite::Connection;
 
 pub fn setup_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
@@ -55,7 +55,6 @@ pub fn setup_schema(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-
 pub fn stable_model_id(
     provider_profile: &str,
     provider_model: &str,
@@ -65,7 +64,13 @@ pub fn stable_model_id(
 ) -> String {
     crate::issues::ids::stable_id(
         "emod",
-        &[provider_profile, provider_model, runner, &dimension.to_string(), distance_metric],
+        &[
+            provider_profile,
+            provider_model,
+            runner,
+            &dimension.to_string(),
+            distance_metric,
+        ],
     )
 }
 
@@ -78,7 +83,13 @@ pub fn upsert_embedding_model(
     distance_metric: &str,
     now_utc: &str,
 ) -> Result<String, crate::embeddings::errors::EmbeddingError> {
-    let id = stable_model_id(provider_profile, provider_model, runner, dimension, distance_metric);
+    let id = stable_model_id(
+        provider_profile,
+        provider_model,
+        runner,
+        dimension,
+        distance_metric,
+    );
     conn.execute(
         "INSERT INTO embedding_models (id, provider_profile, provider_model, runner, dimension, distance_metric, created_at, last_used_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
@@ -365,10 +376,7 @@ pub fn write_embedding_batch(
     )?;
 
     for (doc, vector) in docs.iter().zip(response.vectors.iter()) {
-        let emb_id = crate::issues::ids::stable_id(
-            "emb",
-            &[&doc.id, &doc.content_hash, &model_id],
-        );
+        let emb_id = crate::issues::ids::stable_id("emb", &[&doc.id, &doc.content_hash, &model_id]);
 
         // Mark any prior fresh embedding for this document as stale when content or model changed
         conn.execute(
@@ -464,41 +472,57 @@ pub fn write_embedding_batch(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct FreshDocumentEmbedding {
+    pub embedding_id: String,
+    pub model_id: String,
+    pub dimension: usize,
+    pub vector: Vec<f32>,
+}
+
 /// Get fresh embedding vector and metadata for a document.
 /// Returns (embedding_id, model_id, dimension, vector) only when embedding is fresh.
 pub fn fresh_embedding_for_document(
     conn: &Connection,
     document_id: &str,
-) -> Result<Option<(String, String, usize, Vec<f32>)>, EmbeddingError> {
+) -> Result<Option<FreshDocumentEmbedding>, EmbeddingError> {
     use rusqlite::OptionalExtension;
     // Check the document exists and has a fresh embedding
-    let result: Option<(String, String, i64)> = conn.query_row(
-        "SELECT de.id, de.model_id, de.dimension \
+    let result: Option<(String, String, i64)> = conn
+        .query_row(
+            "SELECT de.id, de.model_id, de.dimension \
          FROM document_embeddings de \
          JOIN indexable_documents id ON id.id = de.document_id \
          WHERE de.document_id = ?1 \
            AND de.status = 'fresh' \
            AND id.embedding_status = 'embedded'
          LIMIT 1",
-        [document_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-    ).optional().map_err(EmbeddingError::from)?;
+            [document_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(EmbeddingError::from)?;
 
     let (emb_id, model_id, dimension) = match result {
-        None => return Err(EmbeddingError::new(
-            EmbeddingErrorCategory::MissingFreshEmbedding,
-            "Embedding unavailable: no fresh embedding exists for this document.",
-        )),
+        None => {
+            return Err(EmbeddingError::new(
+                EmbeddingErrorCategory::MissingFreshEmbedding,
+                "Embedding unavailable: no fresh embedding exists for this document.",
+            ))
+        }
         Some(r) => r,
     };
 
     // Get the vector from vec_document_embeddings.
     // sqlite-vec stores vectors as packed little-endian f32 bytes (BLOB), not JSON.
-    let vec_result: Option<Vec<u8>> = conn.query_row(
-        "SELECT embedding FROM vec_document_embeddings WHERE embedding_id = ?1",
-        [&emb_id],
-        |r| r.get(0),
-    ).optional().map_err(EmbeddingError::from)?;
+    let vec_result: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT embedding FROM vec_document_embeddings WHERE embedding_id = ?1",
+            [&emb_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(EmbeddingError::from)?;
 
     let Some(vec_bytes) = vec_result else {
         return Err(EmbeddingError::new(
@@ -515,21 +539,31 @@ pub fn fresh_embedding_for_document(
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
         .collect();
 
-    Ok(Some((emb_id, model_id, dimension as usize, vector)))
+    Ok(Some(FreshDocumentEmbedding {
+        embedding_id: emb_id,
+        model_id,
+        dimension: dimension as usize,
+        vector,
+    }))
 }
 
 pub fn model_dimension(conn: &Connection, model_id: &str) -> Result<usize, EmbeddingError> {
     use rusqlite::OptionalExtension;
-    let dim: Option<i64> = conn.query_row(
-        "SELECT dimension FROM embedding_models WHERE id = ?1",
-        [model_id],
-        |r| r.get(0),
-    ).optional().map_err(EmbeddingError::from)?;
+    let dim: Option<i64> = conn
+        .query_row(
+            "SELECT dimension FROM embedding_models WHERE id = ?1",
+            [model_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(EmbeddingError::from)?;
 
-    dim.map(|d| d as usize).ok_or_else(|| EmbeddingError::new(
-        EmbeddingErrorCategory::DimensionMismatch,
-        "Embedding dimension changed: Rebuild embeddings for this model before searching.",
-    ))
+    dim.map(|d| d as usize).ok_or_else(|| {
+        EmbeddingError::new(
+            EmbeddingErrorCategory::DimensionMismatch,
+            "Embedding dimension changed: Rebuild embeddings for this model before searching.",
+        )
+    })
 }
 
 /// Return the stored dimension for any embedding model with the same
@@ -555,10 +589,12 @@ pub fn stored_dimension_for_profile(
         |r| r.get(0),
     ).optional().map_err(EmbeddingError::from)?;
 
-    dim.map(|d| d as usize).ok_or_else(|| EmbeddingError::new(
-        EmbeddingErrorCategory::DimensionMismatch,
-        "No stored model found for this profile.",
-    ))
+    dim.map(|d| d as usize).ok_or_else(|| {
+        EmbeddingError::new(
+            EmbeddingErrorCategory::DimensionMismatch,
+            "No stored model found for this profile.",
+        )
+    })
 }
 
 /// Test helper: seed a source system, work item, and indexable document.
@@ -569,7 +605,8 @@ pub(crate) fn seed_source_and_document(conn: &Connection, document_id: &str, con
         "INSERT OR IGNORE INTO source_systems (id, kind, display_name, created_at, updated_at) \
          VALUES ('srcsys_1', 'jira', 'Jira', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
         [],
-    ).unwrap();
+    )
+    .unwrap();
     conn.execute(
         "INSERT OR IGNORE INTO work_items (id, source_system_id, source_kind, upstream_id, title, state, last_seen_at, raw_updated_hash, created_at, updated_at) \
          VALUES ('wi_1', 'srcsys_1', 'jira_issue', '1001', 'Login bug', 'open', '2026-01-01T00:00:00Z', 'raw', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
@@ -591,12 +628,18 @@ mod tests {
     fn schema_creates_embedding_tables() {
         let conn = open_in_memory().expect("db");
         setup_schema(&conn).expect("embedding schema setup");
-        for table in &["embedding_models", "document_embeddings", "embedding_failures"] {
-            let count: i64 = conn.query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
-                [table],
-                |r| r.get(0),
-            ).expect("query");
+        for table in &[
+            "embedding_models",
+            "document_embeddings",
+            "embedding_failures",
+        ] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .expect("query");
             assert_eq!(count, 1, "table {table} must exist");
         }
     }
@@ -607,7 +650,11 @@ mod tests {
         setup_schema(&conn).expect("schema");
         seed_source_and_document(&conn, "doc_1", "hash_a");
 
-        let options = ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 };
+        let options = ClaimOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: 10,
+        };
         let claimed = claim_documents(&conn, &options, "2026-01-01T00:00:00Z").expect("claim");
         assert_eq!(claimed.len(), 1);
         assert_eq!(claimed[0].id, "doc_1");
@@ -617,11 +664,13 @@ mod tests {
         assert_eq!(claimed2.len(), 0);
 
         // Verify status in DB
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "embedding");
     }
 
@@ -637,11 +686,13 @@ mod tests {
         record_embedding_failure(&conn, "doc_1", "srcsys_1", &err, "2026-01-01T00:00:00Z")
             .expect("record failure 2");
 
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "failed");
 
         let (attempt_count, safe_summary): (i64, String) = conn.query_row(
@@ -650,8 +701,14 @@ mod tests {
             |r| Ok((r.get(0)?, r.get(1)?)),
         ).unwrap();
         assert_eq!(attempt_count, 2);
-        assert!(!safe_summary.contains("sk-test"), "safe_summary must not contain secret");
-        assert!(!safe_summary.contains("Cannot sign in"), "safe_summary must not contain document text");
+        assert!(
+            !safe_summary.contains("sk-test"),
+            "safe_summary must not contain secret"
+        );
+        assert!(
+            !safe_summary.contains("Cannot sign in"),
+            "safe_summary must not contain document text"
+        );
     }
 
     #[test]
@@ -661,7 +718,11 @@ mod tests {
         crate::db::load_sqlite_vec(&conn).ok(); // load vec if available
         seed_source_and_document(&conn, "doc_1", "hash_a");
 
-        let options = ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 };
+        let options = ClaimOptions {
+            source_system_id: None,
+            entity_kind: None,
+            limit: 10,
+        };
         let claimed = claim_documents(&conn, &options, "2026-01-01T00:00:00Z").expect("claim");
         assert_eq!(claimed.len(), 1);
 
@@ -682,19 +743,23 @@ mod tests {
             .expect("write batch 2");
 
         // Should have exactly one document_embeddings row
-        let count: i64 = conn.query_row(
-            "SELECT count(*) FROM document_embeddings WHERE document_id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM document_embeddings WHERE document_id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
 
         // Document should be 'embedded'
-        let status: String = conn.query_row(
-            "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT embedding_status FROM indexable_documents WHERE id = 'doc_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "embedded");
     }
 
@@ -709,16 +774,26 @@ mod tests {
 
         let before = claim_documents(
             &conn,
-            &ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 },
+            &ClaimOptions {
+                source_system_id: None,
+                entity_kind: None,
+                limit: 10,
+            },
             "2026-01-01T00:01:00Z",
-        ).expect("claim before retry");
+        )
+        .expect("claim before retry");
         assert!(before.is_empty());
 
         let after = claim_documents(
             &conn,
-            &ClaimOptions { source_system_id: None, entity_kind: None, limit: 10 },
+            &ClaimOptions {
+                source_system_id: None,
+                entity_kind: None,
+                limit: 10,
+            },
             "2026-01-01T00:02:01Z",
-        ).expect("claim after retry");
+        )
+        .expect("claim after retry");
         assert_eq!(after.len(), 1);
         assert_eq!(after[0].id, "doc_1");
     }
@@ -760,6 +835,9 @@ mod tests {
              VALUES ('emb_2', 'doc_1', 'srcsys_1', 'jira_issue', 'wi_1', 'wi_1', 'hash_a', 'model_1', 3, '2026-01-01T00:00:00Z', 'fresh')",
             [],
         ).unwrap_err();
-        assert!(err.to_string().to_lowercase().contains("unique") || err.to_string().to_lowercase().contains("constraint"));
+        assert!(
+            err.to_string().to_lowercase().contains("unique")
+                || err.to_string().to_lowercase().contains("constraint")
+        );
     }
 }

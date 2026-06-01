@@ -1,4 +1,7 @@
-use crate::ai::config::{load_ai_provider_config, AiCredentialConfig, AiEndpointConfig, AiProfileConfig, AiProviderConfig};
+use crate::ai::config::{
+    load_ai_provider_config, AiCredentialConfig, AiEndpointConfig, AiProfileConfig,
+    AiProviderConfig,
+};
 use crate::ai::credentials::{load_credential_secret, LoadedCredentialSecret};
 use crate::ai::errors::AiError;
 use crate::settings::secrets::SecretStore;
@@ -17,11 +20,14 @@ pub fn resolve_for_task(
     task_name: &str,
 ) -> Result<ResolvedAiProvider, AiError> {
     let config = load_ai_provider_config(conn)?;
-    let profile_name = config
-        .routing
-        .get(task_name)
-        .cloned()
-        .ok_or_else(|| AiError::MissingRoute { task_name: task_name.into() })?;
+    let profile_name =
+        config
+            .routing
+            .get(task_name)
+            .cloned()
+            .ok_or_else(|| AiError::MissingRoute {
+                task_name: task_name.into(),
+            })?;
     resolve_loaded(config, store, &profile_name)
 }
 
@@ -53,23 +59,34 @@ fn resolve_loaded(
         .iter()
         .find(|p| p.name == profile_name)
         .cloned()
-        .ok_or_else(|| AiError::MissingProfile { profile_name: profile_name.into() })?;
+        .ok_or_else(|| AiError::MissingProfile {
+            profile_name: profile_name.into(),
+        })?;
     let endpoint = config
         .endpoints
         .iter()
         .find(|e| e.name == profile.endpoint_ref)
         .cloned()
-        .ok_or_else(|| AiError::MissingEndpoint { endpoint_name: profile.endpoint_ref.clone() })?;
+        .ok_or_else(|| AiError::MissingEndpoint {
+            endpoint_name: profile.endpoint_ref.clone(),
+        })?;
     let credential = config
         .credentials
         .iter()
         .find(|c| c.name == endpoint.credential_ref)
         .cloned()
-        .ok_or_else(|| AiError::MissingCredential { credential_name: endpoint.credential_ref.clone() })?;
+        .ok_or_else(|| AiError::MissingCredential {
+            credential_name: endpoint.credential_ref.clone(),
+        })?;
     // Note: SQLite lock is NOT held at this point — load_ai_provider_config holds it internally
     // and releases before returning. Secret loading happens outside any lock.
     let secret = load_credential_secret(&credential, store)?;
-    Ok(ResolvedAiProvider { profile, endpoint, credential, secret })
+    Ok(ResolvedAiProvider {
+        profile,
+        endpoint,
+        credential,
+        secret,
+    })
 }
 
 #[cfg(test)]
@@ -116,7 +133,9 @@ mod tests {
     fn resolve_task_returns_full_chain() {
         let conn = crate::db::open_in_memory().unwrap();
         let store = InMemorySecretStore::new();
-        store.set("ai.credentials.openai-prod", "sk-test-secret").unwrap();
+        store
+            .set("ai.credentials.openai-prod", "sk-test-secret")
+            .unwrap();
         save_ai_provider_config(&conn, &openai_config()).unwrap();
         let resolved = resolve_for_task(&conn, &store, "chat.answer").unwrap();
         assert_eq!(resolved.profile.name, "chat-fast");
@@ -130,7 +149,9 @@ mod tests {
     fn resolve_reads_latest_config_at_call_time() {
         let conn = crate::db::open_in_memory().unwrap();
         let store = InMemorySecretStore::new();
-        store.set("ai.credentials.openai-prod", "sk-test-secret").unwrap();
+        store
+            .set("ai.credentials.openai-prod", "sk-test-secret")
+            .unwrap();
         save_ai_provider_config(&conn, &openai_config()).unwrap();
         let r1 = resolve_for_task(&conn, &store, "chat.answer").unwrap();
         assert_eq!(r1.profile.model, "gpt-4o-mini");
@@ -150,14 +171,18 @@ mod tests {
         let store = InMemorySecretStore::new();
         save_ai_provider_config(&conn, &openai_config()).unwrap();
         let err = resolve_for_task(&conn, &store, "issue.triage").unwrap_err();
-        assert!(err.to_string().contains("No AI profile is routed for issue.triage"));
+        assert!(err
+            .to_string()
+            .contains("No AI profile is routed for issue.triage"));
     }
 
     #[test]
     fn resolve_for_profile_works_without_routing() {
         let conn = crate::db::open_in_memory().unwrap();
         let store = InMemorySecretStore::new();
-        store.set("ai.credentials.openai-prod", "sk-test-secret").unwrap();
+        store
+            .set("ai.credentials.openai-prod", "sk-test-secret")
+            .unwrap();
         // Config with no routing
         let mut config = openai_config();
         config.routing.clear();
@@ -172,7 +197,9 @@ mod tests {
         let store = InMemorySecretStore::new();
         save_ai_provider_config(&conn, &openai_config()).unwrap();
         let err = resolve_for_profile(&conn, &store, "nonexistent").unwrap_err();
-        assert!(err.to_string().contains("AI profile not found: nonexistent"));
+        assert!(err
+            .to_string()
+            .contains("AI profile not found: nonexistent"));
     }
 
     #[test]

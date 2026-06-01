@@ -96,10 +96,14 @@ pub fn append_entry(
 ) -> Result<AuditLogEntry, AuditError> {
     // Validate state is JSON object
     if !input.before_state.value().is_object() {
-        return Err(AuditError::InvalidInput("before_state must be a JSON object"));
+        return Err(AuditError::InvalidInput(
+            "before_state must be a JSON object",
+        ));
     }
     if !input.after_state.value().is_object() {
-        return Err(AuditError::InvalidInput("after_state must be a JSON object"));
+        return Err(AuditError::InvalidInput(
+            "after_state must be a JSON object",
+        ));
     }
 
     let id = input
@@ -287,10 +291,14 @@ mod tests {
         input2.batch_id = "batch_B".to_string();
         append_entry(&conn, input1).unwrap();
         append_entry(&conn, input2).unwrap();
-        let entries = list_entries(&conn, AuditLogListFilter {
-            batch_id: Some("batch_A".to_string()),
-            ..Default::default()
-        }).unwrap();
+        let entries = list_entries(
+            &conn,
+            AuditLogListFilter {
+                batch_id: Some("batch_A".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].batch_id, "batch_A");
     }
@@ -304,10 +312,14 @@ mod tests {
         input2.target_ref = "jira:AMP-200".to_string();
         append_entry(&conn, input1).unwrap();
         append_entry(&conn, input2).unwrap();
-        let entries = list_entries(&conn, AuditLogListFilter {
-            target_ref: Some("jira:AMP-100".to_string()),
-            ..Default::default()
-        }).unwrap();
+        let entries = list_entries(
+            &conn,
+            AuditLogListFilter {
+                target_ref: Some("jira:AMP-100".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].target_ref, "jira:AMP-100");
     }
@@ -321,10 +333,14 @@ mod tests {
         input2.reversible = false;
         append_entry(&conn, input1).unwrap();
         append_entry(&conn, input2).unwrap();
-        let rev = list_entries(&conn, AuditLogListFilter {
-            reversible: Some(true),
-            ..Default::default()
-        }).unwrap();
+        let rev = list_entries(
+            &conn,
+            AuditLogListFilter {
+                reversible: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(rev.len(), 1);
         assert!(rev[0].reversible);
     }
@@ -338,10 +354,14 @@ mod tests {
         input2.created_at = Some("2026-06-01T00:00:00Z".to_string());
         append_entry(&conn, input1).unwrap();
         append_entry(&conn, input2).unwrap();
-        let entries = list_entries(&conn, AuditLogListFilter {
-            created_from: Some("2026-05-01T00:00:00Z".to_string()),
-            ..Default::default()
-        }).unwrap();
+        let entries = list_entries(
+            &conn,
+            AuditLogListFilter {
+                created_from: Some("2026-05-01T00:00:00Z".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "audit_61");
     }
@@ -351,7 +371,9 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let mut input = base_input("70");
         // Manually create a non-object AuditState to bypass new()
-        input.before_state = AuditState(crate::commands::JsonValue(serde_json::json!(["not", "an", "object"])));
+        input.before_state = AuditState(crate::commands::JsonValue(serde_json::json!([
+            "not", "an", "object"
+        ])));
         let err = append_entry(&conn, input).unwrap_err();
         assert!(matches!(err, AuditError::InvalidInput(_)));
     }
@@ -361,30 +383,48 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let entry = append_entry(&conn, base_input("80")).unwrap();
         assert!(entry.reverted_at.is_none());
-        let reverted = mark_reverted(&conn, AuditLogMarkRevertedInput {
-            id: entry.id.clone(),
-            reverted_by_action_id: "audit_reverse_001".to_string(),
-            reverted_at: Some("2026-02-01T00:00:00Z".to_string()),
-        }).unwrap();
-        assert_eq!(reverted.reverted_at.as_deref(), Some("2026-02-01T00:00:00Z"));
-        assert_eq!(reverted.reverted_by_action_id.as_deref(), Some("audit_reverse_001"));
+        let reverted = mark_reverted(
+            &conn,
+            AuditLogMarkRevertedInput {
+                id: entry.id.clone(),
+                reverted_by_action_id: "audit_reverse_001".to_string(),
+                reverted_at: Some("2026-02-01T00:00:00Z".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            reverted.reverted_at.as_deref(),
+            Some("2026-02-01T00:00:00Z")
+        );
+        assert_eq!(
+            reverted.reverted_by_action_id.as_deref(),
+            Some("audit_reverse_001")
+        );
     }
 
     #[test]
     fn mark_reverted_already_reverted_returns_not_found() {
         let conn = open_in_memory().unwrap();
         append_entry(&conn, base_input("90")).unwrap();
-        mark_reverted(&conn, AuditLogMarkRevertedInput {
-            id: "audit_90".to_string(),
-            reverted_by_action_id: "audit_rev_001".to_string(),
-            reverted_at: Some("2026-02-01T00:00:00Z".to_string()),
-        }).unwrap();
+        mark_reverted(
+            &conn,
+            AuditLogMarkRevertedInput {
+                id: "audit_90".to_string(),
+                reverted_by_action_id: "audit_rev_001".to_string(),
+                reverted_at: Some("2026-02-01T00:00:00Z".to_string()),
+            },
+        )
+        .unwrap();
         // Second attempt fails because reverted_at is already set
-        let err = mark_reverted(&conn, AuditLogMarkRevertedInput {
-            id: "audit_90".to_string(),
-            reverted_by_action_id: "audit_rev_002".to_string(),
-            reverted_at: None,
-        }).unwrap_err();
+        let err = mark_reverted(
+            &conn,
+            AuditLogMarkRevertedInput {
+                id: "audit_90".to_string(),
+                reverted_by_action_id: "audit_rev_002".to_string(),
+                reverted_at: None,
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, AuditError::NotFound));
     }
 }

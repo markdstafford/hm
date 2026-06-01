@@ -410,7 +410,9 @@ mod tests {
 
         // Both relationships involving the target project are gone.
         let rels: i64 = conn
-            .query_row("SELECT COUNT(*) FROM work_item_relationships", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM work_item_relationships", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(rels, 0);
 
@@ -458,7 +460,9 @@ mod tests {
             .unwrap();
         assert_eq!(identities, 1);
         let field_defs: i64 = conn
-            .query_row("SELECT COUNT(*) FROM jira_field_definitions", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM jira_field_definitions", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(field_defs, 1);
     }
@@ -467,8 +471,7 @@ mod tests {
     fn no_op_when_no_data_for_project() {
         let mut conn = open();
         seed_source(&conn, "srcsys_1");
-        let counts =
-            reset_jira_project_data(&mut conn, "srcsys_1", "GHOST").expect("reset no-op");
+        let counts = reset_jira_project_data(&mut conn, "srcsys_1", "GHOST").expect("reset no-op");
         assert_eq!(counts, ResetJiraProjectCounts::default());
     }
 
@@ -483,8 +486,7 @@ mod tests {
         }
         crate::embeddings::sqlite_vec::setup_vec_table_with_dimension(&conn, 3)
             .expect("vec table setup");
-        crate::embeddings::repository::setup_schema(&conn)
-            .expect("embedding schema");
+        crate::embeddings::repository::setup_schema(&conn).expect("embedding schema");
 
         seed_source(&conn, "srcsys_1");
         seed_work_item(&conn, "wi_a1", "srcsys_1", "AMP", "1001", "AMP-1");
@@ -510,31 +512,33 @@ mod tests {
         ).unwrap();
 
         // Seed the vec row (rowid 1 matches first embedding_models row)
-        let rowid: i64 = conn.query_row(
-            "SELECT rowid FROM document_embeddings WHERE id = 'emb_1'",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let rowid: i64 = conn
+            .query_row(
+                "SELECT rowid FROM document_embeddings WHERE id = 'emb_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         crate::embeddings::sqlite_vec::upsert_vector(&conn, rowid, "emb_1", &[1.0f32, 0.0, 0.0])
             .expect("upsert vec row");
 
         // Verify vec row exists before reset
-        let vec_before: i64 = conn.query_row(
-            "SELECT count(*) FROM vec_document_embeddings",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let vec_before: i64 = conn
+            .query_row("SELECT count(*) FROM vec_document_embeddings", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(vec_before, 1, "vec row should exist before reset");
 
         // Run reset
         reset_jira_project_data(&mut conn, "srcsys_1", "AMP").expect("reset");
 
         // Verify vec row was deleted
-        let vec_after: i64 = conn.query_row(
-            "SELECT count(*) FROM vec_document_embeddings",
-            [],
-            |r| r.get(0),
-        ).unwrap();
+        let vec_after: i64 = conn
+            .query_row("SELECT count(*) FROM vec_document_embeddings", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(vec_after, 0, "vec rows must be deleted on project reset");
     }
 }

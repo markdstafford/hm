@@ -63,10 +63,14 @@ mod tests {
             source_feature: "test".to_string(),
         };
         append_entry(&conn, input).unwrap();
-        let entries = audit_log_list_with_conn(&conn, AuditLogListFilter {
-            batch_id: Some("batch_001".to_string()),
-            ..Default::default()
-        }).unwrap();
+        let entries = audit_log_list_with_conn(
+            &conn,
+            AuditLogListFilter {
+                batch_id: Some("batch_001".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].id, "audit_cmd_001");
     }
@@ -86,12 +90,22 @@ mod tests {
             source_feature: "test".to_string(),
         };
         append_entry(&conn, input).unwrap();
-        let reverted = audit_log_mark_reverted_with_conn(&conn, AuditLogMarkRevertedInput {
-            id: "audit_cmd_002".to_string(),
-            reverted_by_action_id: "audit_rev_001".to_string(),
-            reverted_at: Some("2026-02-01T00:00:00Z".to_string()),
-        }).unwrap();
-        assert_eq!(reverted.reverted_at.as_deref(), Some("2026-02-01T00:00:00Z"));
-        assert_eq!(reverted.reverted_by_action_id.as_deref(), Some("audit_rev_001"));
+        let reverted = audit_log_mark_reverted_with_conn(
+            &conn,
+            AuditLogMarkRevertedInput {
+                id: "audit_cmd_002".to_string(),
+                reverted_by_action_id: "audit_rev_001".to_string(),
+                reverted_at: Some("2026-02-01T00:00:00Z".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            reverted.reverted_at.as_deref(),
+            Some("2026-02-01T00:00:00Z")
+        );
+        assert_eq!(
+            reverted.reverted_by_action_id.as_deref(),
+            Some("audit_rev_001")
+        );
     }
 }

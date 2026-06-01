@@ -1,6 +1,6 @@
+use crate::gardener::errors::{GardenerError, GardenerErrorCategory};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use crate::gardener::errors::{GardenerError, GardenerErrorCategory};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct GardenerEngineId(pub String);
@@ -155,7 +155,9 @@ pub fn validate_contract(contract: &EngineContract) -> Result<(), GardenerError>
         if !has_gate {
             return Err(GardenerError {
                 category: GardenerErrorCategory::InvalidEngineContract,
-                message: "Engine with HumanReviewRequired approval must have at least one gated stage.".into(),
+                message:
+                    "Engine with HumanReviewRequired approval must have at least one gated stage."
+                        .into(),
             });
         }
     }

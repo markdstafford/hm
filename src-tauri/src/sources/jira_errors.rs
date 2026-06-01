@@ -25,7 +25,9 @@ impl JiraApiError {
             403 => JiraApiError::Forbidden,
             404 => JiraApiError::NotFound,
             409 => JiraApiError::Conflict,
-            429 => JiraApiError::RateLimited { retry_after_seconds },
+            429 => JiraApiError::RateLimited {
+                retry_after_seconds,
+            },
             _ => JiraApiError::Server { status },
         }
     }
@@ -60,7 +62,9 @@ impl fmt::Display for JiraApiError {
             JiraApiError::Forbidden => f.write_str("Jira access denied"),
             JiraApiError::NotFound => f.write_str("Jira resource not found"),
             JiraApiError::BadRequest => f.write_str("Jira rejected the request"),
-            JiraApiError::RateLimited { retry_after_seconds } => match retry_after_seconds {
+            JiraApiError::RateLimited {
+                retry_after_seconds,
+            } => match retry_after_seconds {
                 Some(seconds) => write!(
                     f,
                     "Jira rate limited the request; retry after {seconds} seconds"
@@ -72,8 +76,12 @@ impl fmt::Display for JiraApiError {
             }
             JiraApiError::Network => f.write_str("network error connecting to Jira"),
             JiraApiError::Decode => f.write_str("could not decode Jira response"),
-            JiraApiError::Conflict => f.write_str("Jira rejected the write because the resource changed"),
-            JiraApiError::UnsafeWriteUnknownOutcome => f.write_str("Jira write outcome is unknown; not retrying to avoid duplicate changes"),
+            JiraApiError::Conflict => {
+                f.write_str("Jira rejected the write because the resource changed")
+            }
+            JiraApiError::UnsafeWriteUnknownOutcome => f.write_str(
+                "Jira write outcome is unknown; not retrying to avoid duplicate changes",
+            ),
         }
     }
 }
@@ -97,7 +105,9 @@ impl fmt::Debug for JiraApiError {
             JiraApiError::Forbidden => write!(f, "Forbidden"),
             JiraApiError::NotFound => write!(f, "NotFound"),
             JiraApiError::BadRequest => write!(f, "BadRequest"),
-            JiraApiError::RateLimited { retry_after_seconds } => f
+            JiraApiError::RateLimited {
+                retry_after_seconds,
+            } => f
                 .debug_struct("RateLimited")
                 .field("retry_after_seconds", retry_after_seconds)
                 .finish(),
@@ -148,8 +158,7 @@ mod tests {
     fn debug_is_safe_for_all_error_variants() {
         // InvalidRequest.message must not appear in Debug output even when it contains
         // token-shaped or header-shaped strings (e.g. upstream request details).
-        let sensitive_message =
-            "Authorization: Bearer secret-token raw-response-body".to_string();
+        let sensitive_message = "Authorization: Bearer secret-token raw-response-body".to_string();
         let errors: Vec<JiraApiError> = vec![
             JiraApiError::InvalidBaseUrl,
             JiraApiError::InvalidRequest {
@@ -195,9 +204,18 @@ mod tests {
 
     #[test]
     fn maps_http_status_codes_to_safe_errors() {
-        assert_eq!(JiraApiError::from_status(400, None), JiraApiError::BadRequest);
-        assert_eq!(JiraApiError::from_status(401, None), JiraApiError::Unauthorized);
-        assert_eq!(JiraApiError::from_status(403, None), JiraApiError::Forbidden);
+        assert_eq!(
+            JiraApiError::from_status(400, None),
+            JiraApiError::BadRequest
+        );
+        assert_eq!(
+            JiraApiError::from_status(401, None),
+            JiraApiError::Unauthorized
+        );
+        assert_eq!(
+            JiraApiError::from_status(403, None),
+            JiraApiError::Forbidden
+        );
         assert_eq!(JiraApiError::from_status(404, None), JiraApiError::NotFound);
         assert_eq!(
             JiraApiError::from_status(429, Some(15)),
@@ -234,8 +252,13 @@ mod tests {
     fn safe_write_error_variants_are_correct() {
         assert_eq!(JiraApiError::from_status(409, None), JiraApiError::Conflict);
         let unsafe_error = JiraApiError::UnsafeWriteUnknownOutcome;
-        assert_eq!(format!("{unsafe_error}"), "Jira write outcome is unknown; not retrying to avoid duplicate changes");
-        assert!(!format!("{unsafe_error:?}").to_ascii_lowercase().contains("authorization"));
+        assert_eq!(
+            format!("{unsafe_error}"),
+            "Jira write outcome is unknown; not retrying to avoid duplicate changes"
+        );
+        assert!(!format!("{unsafe_error:?}")
+            .to_ascii_lowercase()
+            .contains("authorization"));
         assert!(!JiraApiError::Conflict.is_retryable());
         assert!(!JiraApiError::UnsafeWriteUnknownOutcome.is_retryable());
     }

@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use specta::Type;
 use crate::settings::keys;
 use crate::sources::errors::SourceError;
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub enum SourceCredentialKind {
@@ -25,14 +25,16 @@ impl SourceSecretValue {
 
 /// Validate a source_id using the same character rules as `settings::keys::validate_key`.
 fn validate_source_id(source_id: &str) -> Result<(), SourceError> {
-    keys::validate_key(source_id)
-        .map_err(|e| SourceError::InvalidConfig(e.to_string()))
+    keys::validate_key(source_id).map_err(|e| SourceError::InvalidConfig(e.to_string()))
 }
 
 /// Build the deterministic credential ref for a source credential.
 ///
 /// Returns `"source.jira.<source_id>.pat"` for `SourceCredentialKind::JiraPat`.
-pub fn source_credential_ref(source_id: &str, kind: SourceCredentialKind) -> Result<String, SourceError> {
+pub fn source_credential_ref(
+    source_id: &str,
+    kind: SourceCredentialKind,
+) -> Result<String, SourceError> {
     validate_source_id(source_id)?;
     let ref_str = match kind {
         SourceCredentialKind::JiraPat => format!("source.jira.{source_id}.pat"),
@@ -48,9 +50,9 @@ pub fn validate_source_credential_ref(credential_ref: &str) -> Result<(), Source
     let prefix = "source.jira.";
     let suffix = ".pat";
     if !credential_ref.starts_with(prefix) || !credential_ref.ends_with(suffix) {
-        return Err(SourceError::InvalidConfig(
-            format!("invalid credential ref format: {credential_ref}"),
-        ));
+        return Err(SourceError::InvalidConfig(format!(
+            "invalid credential ref format: {credential_ref}"
+        )));
     }
     let source_id = &credential_ref[prefix.len()..credential_ref.len() - suffix.len()];
     validate_source_id(source_id)
@@ -100,9 +102,7 @@ pub fn load_source_credential_secret(
         .ok_or_else(|| SourceError::MissingCredential("credential not found".into()))?;
     let trimmed = value.trim().to_string();
     if trimmed.is_empty() {
-        return Err(SourceError::MissingCredential(
-            "credential is empty".into(),
-        ));
+        return Err(SourceError::MissingCredential("credential is empty".into()));
     }
     Ok(SourceSecretValue(trimmed))
 }
@@ -130,16 +130,16 @@ pub fn remove_source_config_and_credentials(
     let mut config = load_sources_config(conn)?;
 
     // 2. Find the source and extract its credential refs before removing it
-    let credential_refs: Vec<String> = config.sources.iter()
+    let credential_refs: Vec<String> = config
+        .sources
+        .iter()
         .filter(|s| s.id() == source_id)
         .flat_map(|s| match s {
-            crate::sources::config::SourceConfig::Jira(jira) => {
-                match &jira.auth {
-                    crate::sources::config::JiraAuthConfig::Pat { credential_ref } => {
-                        vec![credential_ref.clone()]
-                    }
+            crate::sources::config::SourceConfig::Jira(jira) => match &jira.auth {
+                crate::sources::config::JiraAuthConfig::Pat { credential_ref } => {
+                    vec![credential_ref.clone()]
                 }
-            }
+            },
         })
         .collect();
 
@@ -203,8 +203,12 @@ mod tests {
             ],
         };
         crate::sources::config::save_sources_config(&conn, &cfg).unwrap();
-        store.set("source.jira.src_remove.pat", "remove-secret").unwrap();
-        store.set("source.jira.src_keep.pat", "keep-secret").unwrap();
+        store
+            .set("source.jira.src_remove.pat", "remove-secret")
+            .unwrap();
+        store
+            .set("source.jira.src_keep.pat", "keep-secret")
+            .unwrap();
 
         remove_source_config_and_credentials(&conn, &store, "src_remove").unwrap();
 
@@ -212,19 +216,31 @@ mod tests {
         assert_eq!(next.sources.len(), 1);
         assert!(next.sources.iter().any(|s| s.id() == "src_keep"));
         assert_eq!(store.get("source.jira.src_remove.pat").unwrap(), None);
-        assert_eq!(store.get("source.jira.src_keep.pat").unwrap(), Some("keep-secret".into()));
+        assert_eq!(
+            store.get("source.jira.src_keep.pat").unwrap(),
+            Some("keep-secret".into())
+        );
     }
 
     #[test]
     fn jira_pat_credential_ref_is_deterministic() {
-        assert_eq!(source_credential_ref("src_abc", SourceCredentialKind::JiraPat).unwrap(), "source.jira.src_abc.pat");
+        assert_eq!(
+            source_credential_ref("src_abc", SourceCredentialKind::JiraPat).unwrap(),
+            "source.jira.src_abc.pat"
+        );
         assert!(source_credential_ref("bad id", SourceCredentialKind::JiraPat).is_err());
     }
 
     #[test]
     fn stores_loads_and_deletes_jira_pat_without_debug_leak() {
         let store = crate::settings::secrets::InMemorySecretStore::new();
-        let credential_ref = set_source_credential_secret("src_abc", SourceCredentialKind::JiraPat, "jira-pat-value", &store).unwrap();
+        let credential_ref = set_source_credential_secret(
+            "src_abc",
+            SourceCredentialKind::JiraPat,
+            "jira-pat-value",
+            &store,
+        )
+        .unwrap();
         assert_eq!(credential_ref, "source.jira.src_abc.pat");
         let loaded = load_source_credential_secret(&credential_ref, &store).unwrap();
         assert_eq!(loaded.expose_for_jira_client(), "jira-pat-value");
@@ -278,11 +294,7 @@ mod tests {
         store
             .set("source.jira.src_legacy.pat", "jira-pat-value\n")
             .unwrap();
-        let loaded = load_source_credential_secret(
-            "source.jira.src_legacy.pat",
-            &store,
-        )
-        .unwrap();
+        let loaded = load_source_credential_secret("source.jira.src_legacy.pat", &store).unwrap();
         assert_eq!(loaded.expose_for_jira_client(), "jira-pat-value");
     }
 }

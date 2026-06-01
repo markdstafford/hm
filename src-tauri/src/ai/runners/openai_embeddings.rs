@@ -1,8 +1,8 @@
-use std::time::Duration;
 use crate::ai::config::{AiEndpointProtocol, AiExecutionMode, AiRunner};
 use crate::ai::resolver::ResolvedAiProvider;
 use crate::embeddings::errors::EmbeddingError;
 use crate::embeddings::provider::{EmbeddingRequest, EmbeddingResponse, EmbeddingUsage};
+use std::time::Duration;
 
 pub struct OpenAiEmbeddingsRunner {
     pub timeout: Duration,
@@ -16,7 +16,9 @@ fn retry_after_seconds(resp: &ureq::Response) -> Option<u64> {
 
 impl Default for OpenAiEmbeddingsRunner {
     fn default() -> Self {
-        Self { timeout: Duration::from_secs(30) }
+        Self {
+            timeout: Duration::from_secs(30),
+        }
     }
 }
 
@@ -26,8 +28,16 @@ impl OpenAiEmbeddingsRunner {
         resolved: &ResolvedAiProvider,
         request: EmbeddingRequest,
     ) -> Result<EmbeddingResponse, EmbeddingError> {
-        match (&resolved.endpoint.protocol, &resolved.profile.runner, &resolved.profile.execution_mode) {
-            (AiEndpointProtocol::OpenAiEmbeddingsCompatible, AiRunner::OpenAiEmbeddings, AiExecutionMode::DirectApi) => {}
+        match (
+            &resolved.endpoint.protocol,
+            &resolved.profile.runner,
+            &resolved.profile.execution_mode,
+        ) {
+            (
+                AiEndpointProtocol::OpenAiEmbeddingsCompatible,
+                AiRunner::OpenAiEmbeddings,
+                AiExecutionMode::DirectApi,
+            ) => {}
             _ => return Err(EmbeddingError::unsupported_profile()),
         }
 
@@ -157,7 +167,9 @@ mod tests {
             credential: AiCredentialConfig {
                 name: "key".into(),
                 kind: AiCredentialKind::BearerToken,
-                source: CredentialSource::Keychain { key_ref: "ai.credentials.key".into() },
+                source: CredentialSource::Keychain {
+                    key_ref: "ai.credentials.key".into(),
+                },
             },
             secret: LoadedCredentialSecret::new_for_test("key", "sk-test-secret"),
         }
@@ -170,7 +182,10 @@ mod tests {
         let handle = std::thread::spawn(move || {
             let mut req = server.recv().unwrap();
             assert_eq!(req.url(), "/v1/embeddings");
-            let has_auth = req.headers().iter().any(|h| h.field.as_str().to_ascii_lowercase() == "authorization");
+            let has_auth = req
+                .headers()
+                .iter()
+                .any(|h| h.field.as_str().to_ascii_lowercase() == "authorization");
             assert!(has_auth, "Authorization header must be present");
             // Read request body to verify model and input fields
             let mut body = String::new();
@@ -179,8 +194,11 @@ mod tests {
             assert_eq!(parsed["model"], "text-embedding-3-small");
             assert_eq!(parsed["input"].as_array().unwrap().len(), 2);
             let resp_body = r#"{"model":"text-embedding-3-small","usage":{"prompt_tokens":5,"total_tokens":5},"data":[{"index":0,"embedding":[1.0,0.0,0.0]},{"index":1,"embedding":[0.0,1.0,0.0]}]}"#;
-            let resp = tiny_http::Response::from_string(resp_body)
-                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            let resp = tiny_http::Response::from_string(resp_body).with_header(
+                "content-type: application/json"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             req.respond(resp).unwrap();
         });
         let runner = OpenAiEmbeddingsRunner::default();
@@ -207,16 +225,25 @@ mod tests {
                 r#"{"error":{"message":"sk-test-secret is invalid"}}"#,
             )
             .with_status_code(401)
-            .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            .with_header(
+                "content-type: application/json"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             req.respond(resp).unwrap();
         });
         let runner = OpenAiEmbeddingsRunner::default();
         let resolved = make_resolved(&format!("http://127.0.0.1:{port}/v1"));
-        let request = crate::embeddings::provider::EmbeddingRequest { input: vec!["hi".into()] };
+        let request = crate::embeddings::provider::EmbeddingRequest {
+            input: vec!["hi".into()],
+        };
         let err = runner.run(&resolved, request).unwrap_err();
         handle.join().unwrap();
         let msg = err.to_string();
-        assert!(msg.contains("Embedding provider rejected the request"), "should be safe error");
+        assert!(
+            msg.contains("Embedding provider rejected the request"),
+            "should be safe error"
+        );
         assert!(!msg.contains("sk-test-secret"), "must not contain secret");
         crate::embeddings::errors::assert_safe_message(&msg);
     }
@@ -229,8 +256,11 @@ mod tests {
             let req = server.recv().unwrap();
             // Return vectors with inconsistent lengths
             let resp_body = r#"{"model":"text-embedding-3-small","data":[{"index":0,"embedding":[1.0,0.0]},{"index":1,"embedding":[0.0,1.0,0.0]}]}"#;
-            let resp = tiny_http::Response::from_string(resp_body)
-                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            let resp = tiny_http::Response::from_string(resp_body).with_header(
+                "content-type: application/json"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             req.respond(resp).unwrap();
         });
         let runner = OpenAiEmbeddingsRunner::default();
@@ -241,7 +271,10 @@ mod tests {
         let err = runner.run(&resolved, request).unwrap_err();
         handle.join().unwrap();
         let msg = err.to_string();
-        assert!(msg.contains("dimension") || msg.contains("Embedding dimension"), "error should mention dimension");
+        assert!(
+            msg.contains("dimension") || msg.contains("Embedding dimension"),
+            "error should mention dimension"
+        );
         assert!(!msg.contains("sk-test-secret"), "must not contain secret");
     }
 
@@ -251,18 +284,28 @@ mod tests {
         let port = server.server_addr().to_ip().unwrap().port();
         let handle = std::thread::spawn(move || {
             let req = server.recv().unwrap();
-            let resp = tiny_http::Response::from_string(r#"{"error":{"message":"too many requests"}}"#)
-                .with_status_code(429)
-                .with_header("retry-after: 15".parse::<tiny_http::Header>().unwrap())
-                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            let resp =
+                tiny_http::Response::from_string(r#"{"error":{"message":"too many requests"}}"#)
+                    .with_status_code(429)
+                    .with_header("retry-after: 15".parse::<tiny_http::Header>().unwrap())
+                    .with_header(
+                        "content-type: application/json"
+                            .parse::<tiny_http::Header>()
+                            .unwrap(),
+                    );
             req.respond(resp).unwrap();
         });
         let runner = OpenAiEmbeddingsRunner::default();
         let resolved = make_resolved(&format!("http://127.0.0.1:{port}/v1"));
-        let request = crate::embeddings::provider::EmbeddingRequest { input: vec!["hi".into()] };
+        let request = crate::embeddings::provider::EmbeddingRequest {
+            input: vec!["hi".into()],
+        };
         let err = runner.run(&resolved, request).unwrap_err();
         handle.join().unwrap();
-        assert_eq!(err.category, crate::embeddings::errors::EmbeddingErrorCategory::ProviderRateLimited);
+        assert_eq!(
+            err.category,
+            crate::embeddings::errors::EmbeddingErrorCategory::ProviderRateLimited
+        );
         assert_eq!(err.retry_after_seconds, Some(60));
         crate::embeddings::errors::assert_safe_message(&err.to_string());
     }
@@ -295,8 +338,11 @@ mod tests {
             assert_eq!(parsed["input"].as_array().unwrap().len(), 1);
 
             let resp_body = r#"{"model":"embed-v-4-0","usage":{"prompt_tokens":4,"total_tokens":4},"data":[{"index":0,"embedding":[0.5,0.25,0.125]}]}"#;
-            let resp = tiny_http::Response::from_string(resp_body)
-                .with_header("content-type: application/json".parse::<tiny_http::Header>().unwrap());
+            let resp = tiny_http::Response::from_string(resp_body).with_header(
+                "content-type: application/json"
+                    .parse::<tiny_http::Header>()
+                    .unwrap(),
+            );
             req.respond(resp).unwrap();
         });
 
@@ -320,11 +366,18 @@ mod tests {
             let _req = server.recv().unwrap();
             std::thread::sleep(std::time::Duration::from_secs(60));
         });
-        let runner = OpenAiEmbeddingsRunner { timeout: std::time::Duration::from_millis(50) };
+        let runner = OpenAiEmbeddingsRunner {
+            timeout: std::time::Duration::from_millis(50),
+        };
         let resolved = make_resolved(&format!("http://127.0.0.1:{port}/v1"));
-        let request = crate::embeddings::provider::EmbeddingRequest { input: vec!["hi".into()] };
+        let request = crate::embeddings::provider::EmbeddingRequest {
+            input: vec!["hi".into()],
+        };
         let err = runner.run(&resolved, request).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("unavailable") || msg.contains("Embedding provider"), "should be safe unavailable error");
+        assert!(
+            msg.contains("unavailable") || msg.contains("Embedding provider"),
+            "should be safe unavailable error"
+        );
     }
 }

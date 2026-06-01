@@ -111,7 +111,10 @@ fn convert_offset_to_utc(s: &str) -> Option<String> {
         let (h, rest) = offset_body.split_once(':')?;
         (h.parse::<i64>().ok()?, rest.parse::<i64>().ok()?)
     } else if offset_body.len() == 4 {
-        (offset_body[..2].parse::<i64>().ok()?, offset_body[2..].parse::<i64>().ok()?)
+        (
+            offset_body[..2].parse::<i64>().ok()?,
+            offset_body[2..].parse::<i64>().ok()?,
+        )
     } else {
         return None;
     };
@@ -148,7 +151,9 @@ fn convert_offset_to_utc(s: &str) -> Option<String> {
     // Adjust calendar date.
     let (ny, nmo, nd) = add_days_simple(y, mo, d, day_delta);
 
-    Some(format!("{ny:04}-{nmo:02}-{nd:02}T{utc_h:02}:{utc_m:02}:{sec:02}Z"))
+    Some(format!(
+        "{ny:04}-{nmo:02}-{nd:02}T{utc_h:02}:{utc_m:02}:{sec:02}Z"
+    ))
 }
 
 /// Add `delta` days (expected to be -1, 0, or +1 — timezone offsets never span
@@ -159,12 +164,18 @@ fn add_days_simple(y: i64, m: i64, d: i64, delta: i64) -> (i64, i64, i64) {
     }
     let dims = days_in_month_i64(y, m);
     if delta == 1 {
-        if d < dims { return (y, m, d + 1); }
-        if m < 12  { return (y, m + 1, 1); }
+        if d < dims {
+            return (y, m, d + 1);
+        }
+        if m < 12 {
+            return (y, m + 1, 1);
+        }
         return (y + 1, 1, 1);
     }
     // delta == -1
-    if d > 1 { return (y, m, d - 1); }
+    if d > 1 {
+        return (y, m, d - 1);
+    }
     if m > 1 {
         let prev_m = m - 1;
         return (y, prev_m, days_in_month_i64(y, prev_m));
@@ -176,7 +187,13 @@ fn days_in_month_i64(y: i64, m: i64) -> i64 {
     match m {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
-        2 => if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 29 } else { 28 },
+        2 => {
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
+        }
         _ => 30,
     }
 }
@@ -241,10 +258,7 @@ pub fn project_changelog_entry(
     actor_identity_id: Option<&str>,
 ) -> Result<Vec<IssueEventInput>, IssueHistoryError> {
     let occurred_at = normalize_jira_datetime(&entry.created);
-    let actor_display_name = entry
-        .author
-        .as_ref()
-        .and_then(|u| u.display_name.clone());
+    let actor_display_name = entry.author.as_ref().and_then(|u| u.display_name.clone());
 
     let mut events = Vec::with_capacity(entry.items.len());
 
@@ -375,8 +389,9 @@ mod tests {
     /// The caller passes actor_identity_id = None, mirroring what resolve_actor_identity
     /// returns when no stable key (accountId / name / key) exists.
     fn project_deleted_author_fixture() -> Result<Vec<IssueEventInput>, IssueHistoryError> {
-        let entry =
-            entry_from_json(include_str!("fixtures/jira_changelog_history_deleted_author.json"));
+        let entry = entry_from_json(include_str!(
+            "fixtures/jira_changelog_history_deleted_author.json"
+        ));
         project_changelog_entry(
             "srcsys_jira_1",
             "wi_amp_1043",
@@ -391,8 +406,7 @@ mod tests {
 
     /// Project the fields fixture and return the event for the unknown custom field.
     fn project_unknown_custom_field_fixture() -> Result<Vec<IssueEventInput>, IssueHistoryError> {
-        let entry =
-            entry_from_json(include_str!("fixtures/jira_changelog_history_fields.json"));
+        let entry = entry_from_json(include_str!("fixtures/jira_changelog_history_fields.json"));
         let all = project_changelog_entry(
             "srcsys_jira_1",
             "wi_amp_1043",
@@ -425,7 +439,10 @@ mod tests {
     #[test]
     fn deleted_author_uses_display_name_without_identity_when_no_stable_key_exists() {
         let mut events = project_deleted_author_fixture().unwrap();
-        assert!(!events.is_empty(), "fixture should produce at least one event");
+        assert!(
+            !events.is_empty(),
+            "fixture should produce at least one event"
+        );
         let event = events.remove(0);
         assert_eq!(event.actor_display_name.as_deref(), Some("Deleted User"));
         assert_eq!(event.actor_identity_id, None);
@@ -434,7 +451,10 @@ mod tests {
     #[test]
     fn unknown_custom_fields_project_as_field_changed_events() {
         let mut events = project_unknown_custom_field_fixture().unwrap();
-        assert!(!events.is_empty(), "fixture should contain customfield_99999 event");
+        assert!(
+            !events.is_empty(),
+            "fixture should contain customfield_99999 event"
+        );
         let event = events.remove(0);
         assert_eq!(event.event_type, "field_changed");
         assert_eq!(event.field_id.as_deref(), Some("customfield_99999"));
@@ -442,8 +462,7 @@ mod tests {
 
     #[test]
     fn maps_status_item_to_status_changed_event() {
-        let entry =
-            entry_from_json(include_str!("fixtures/jira_changelog_history_status.json"));
+        let entry = entry_from_json(include_str!("fixtures/jira_changelog_history_status.json"));
         let events = project_changelog_entry(
             "srcsys_jira_1",
             "wi_amp_1043",
@@ -463,8 +482,7 @@ mod tests {
 
     #[test]
     fn preserves_unknown_fields_as_field_changed() {
-        let entry =
-            entry_from_json(include_str!("fixtures/jira_changelog_history_fields.json"));
+        let entry = entry_from_json(include_str!("fixtures/jira_changelog_history_fields.json"));
         let events = project_changelog_entry(
             "srcsys_jira_1",
             "wi_amp_1043",
@@ -491,8 +509,9 @@ mod tests {
 
     #[test]
     fn missing_author_keeps_event_without_actor_identity() {
-        let entry =
-            entry_from_json(include_str!("fixtures/jira_changelog_history_missing_author.json"));
+        let entry = entry_from_json(include_str!(
+            "fixtures/jira_changelog_history_missing_author.json"
+        ));
         let events = project_changelog_entry(
             "srcsys_jira_1",
             "wi_amp_1043",
@@ -508,8 +527,7 @@ mod tests {
 
     #[test]
     fn event_ids_are_deterministic() {
-        let entry =
-            entry_from_json(include_str!("fixtures/jira_changelog_history_status.json"));
+        let entry = entry_from_json(include_str!("fixtures/jira_changelog_history_status.json"));
         let events1 = project_changelog_entry(
             "srcsys_jira_1",
             "wi_amp_1043",
@@ -534,8 +552,7 @@ mod tests {
 
     #[test]
     fn payload_json_does_not_contain_account_id() {
-        let entry =
-            entry_from_json(include_str!("fixtures/jira_changelog_history_status.json"));
+        let entry = entry_from_json(include_str!("fixtures/jira_changelog_history_status.json"));
         let events = project_changelog_entry(
             "srcsys_jira_1",
             "wi_amp_1043",
@@ -589,8 +606,7 @@ mod tests {
 
     #[test]
     fn multi_item_entry_produces_correct_upstream_item_ids() {
-        let entry =
-            entry_from_json(include_str!("fixtures/jira_changelog_history_fields.json"));
+        let entry = entry_from_json(include_str!("fixtures/jira_changelog_history_fields.json"));
         let events = project_changelog_entry(
             "srcsys_jira_1",
             "wi_amp_1043",

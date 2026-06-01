@@ -15,12 +15,30 @@ pub struct ActionMetadata {
 
 pub fn action_metadata(action_id: &str) -> Option<ActionMetadata> {
     match action_id {
-        JIRA_CLOSE_ISSUE => Some(ActionMetadata { action_id: JIRA_CLOSE_ISSUE, reversible: true }),
-        JIRA_LINK_AS_DUPLICATE => Some(ActionMetadata { action_id: JIRA_LINK_AS_DUPLICATE, reversible: true }),
-        JIRA_UPDATE_TITLE => Some(ActionMetadata { action_id: JIRA_UPDATE_TITLE, reversible: true }),
-        JIRA_UPDATE_LABELS => Some(ActionMetadata { action_id: JIRA_UPDATE_LABELS, reversible: true }),
-        JIRA_REASSIGN => Some(ActionMetadata { action_id: JIRA_REASSIGN, reversible: true }),
-        JIRA_ADD_COMMENT => Some(ActionMetadata { action_id: JIRA_ADD_COMMENT, reversible: false }),
+        JIRA_CLOSE_ISSUE => Some(ActionMetadata {
+            action_id: JIRA_CLOSE_ISSUE,
+            reversible: true,
+        }),
+        JIRA_LINK_AS_DUPLICATE => Some(ActionMetadata {
+            action_id: JIRA_LINK_AS_DUPLICATE,
+            reversible: true,
+        }),
+        JIRA_UPDATE_TITLE => Some(ActionMetadata {
+            action_id: JIRA_UPDATE_TITLE,
+            reversible: true,
+        }),
+        JIRA_UPDATE_LABELS => Some(ActionMetadata {
+            action_id: JIRA_UPDATE_LABELS,
+            reversible: true,
+        }),
+        JIRA_REASSIGN => Some(ActionMetadata {
+            action_id: JIRA_REASSIGN,
+            reversible: true,
+        }),
+        JIRA_ADD_COMMENT => Some(ActionMetadata {
+            action_id: JIRA_ADD_COMMENT,
+            reversible: false,
+        }),
         _ => None,
     }
 }

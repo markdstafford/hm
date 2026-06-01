@@ -20,13 +20,19 @@ pub fn execute_jira_close_issue<C: JiraMutationClient + ?Sized>(
         return Err(MutationError::InvalidInput("issue_key is required".into()));
     }
     if input.transition_id.trim().is_empty() {
-        return Err(MutationError::InvalidInput("transition_id is required".into()));
+        return Err(MutationError::InvalidInput(
+            "transition_id is required".into(),
+        ));
     }
 
     let transitions = client
         .list_transitions(&issue_key)
         .map_err(|e| MutationError::Jira(e.to_string()))?;
-    if !transitions.transitions.iter().any(|t| t.id == input.transition_id) {
+    if !transitions
+        .transitions
+        .iter()
+        .any(|t| t.id == input.transition_id)
+    {
         return Err(MutationError::InvalidInput(format!(
             "transition not available: {}",
             input.transition_id
@@ -149,8 +155,8 @@ pub fn jira_close_issue(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_close_issue(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
@@ -163,8 +169,8 @@ pub fn jira_close_issue_reverse(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_close_issue_reverse(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
@@ -175,7 +181,12 @@ mod tests {
     use crate::mutations::inputs::MutationCommonInput;
     use crate::mutations::tests::RecordingJiraClient;
 
-    fn make_input(issue_key: &str, transition_id: &str, inverse_transition_id: Option<&str>, comment: Option<&str>) -> JiraCloseIssueInput {
+    fn make_input(
+        issue_key: &str,
+        transition_id: &str,
+        inverse_transition_id: Option<&str>,
+        comment: Option<&str>,
+    ) -> JiraCloseIssueInput {
         JiraCloseIssueInput {
             common: MutationCommonInput {
                 source_id: "src_1".to_string(),
@@ -196,9 +207,11 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
         let entry = execute_jira_close_issue(
-            &conn, &client,
+            &conn,
+            &client,
             make_input("AMP-1043", "31", Some("11"), Some("Closing as stale")),
-        ).unwrap();
+        )
+        .unwrap();
 
         let calls = client.calls.lock().unwrap().clone();
         assert_eq!(calls[0], "list_transitions:AMP-1043");
@@ -219,10 +232,9 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
         // RecordingJiraClient returns transitions "31" and "11"; "99" is not in the list
-        let err = execute_jira_close_issue(
-            &conn, &client,
-            make_input("AMP-1043", "99", None, None),
-        ).unwrap_err();
+        let err =
+            execute_jira_close_issue(&conn, &client, make_input("AMP-1043", "99", None, None))
+                .unwrap_err();
         assert!(matches!(err, MutationError::InvalidInput(_)));
         assert!(format!("{err}").contains("transition not available"));
     }
@@ -232,18 +244,25 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
         let original = execute_jira_close_issue(
-            &conn, &client,
+            &conn,
+            &client,
             make_input("AMP-1043", "31", Some("11"), None),
-        ).unwrap();
+        )
+        .unwrap();
 
-        let reverse = execute_jira_close_issue_reverse(&conn, &client, crate::mutations::inputs::JiraReverseMutationInput {
-            common: crate::mutations::inputs::ReverseCommonInput {
-                source_id: "src_1".to_string(),
-                audit_entry_id: original.id.clone(),
-                source_feature: Some("test".to_string()),
-                batch_id: None,
+        let reverse = execute_jira_close_issue_reverse(
+            &conn,
+            &client,
+            crate::mutations::inputs::JiraReverseMutationInput {
+                common: crate::mutations::inputs::ReverseCommonInput {
+                    source_id: "src_1".to_string(),
+                    audit_entry_id: original.id.clone(),
+                    source_feature: Some("test".to_string()),
+                    batch_id: None,
+                },
             },
-        }).unwrap();
+        )
+        .unwrap();
 
         let calls = client.calls.lock().unwrap().clone();
         assert_eq!(calls[2], "transition:AMP-1043:11:");
@@ -257,21 +276,28 @@ mod tests {
     fn close_issue_reverse_fails_when_inverse_missing() {
         let conn = open_in_memory().unwrap();
         let client = RecordingJiraClient::default();
-        let original = execute_jira_close_issue(
-            &conn, &client,
-            make_input("AMP-1043", "31", None, None),
-        ).unwrap();
+        let original =
+            execute_jira_close_issue(&conn, &client, make_input("AMP-1043", "31", None, None))
+                .unwrap();
 
-        let err = execute_jira_close_issue_reverse(&conn, &client, crate::mutations::inputs::JiraReverseMutationInput {
-            common: crate::mutations::inputs::ReverseCommonInput {
-                source_id: "src_1".to_string(),
-                audit_entry_id: original.id,
-                source_feature: Some("test".to_string()),
-                batch_id: None,
+        let err = execute_jira_close_issue_reverse(
+            &conn,
+            &client,
+            crate::mutations::inputs::JiraReverseMutationInput {
+                common: crate::mutations::inputs::ReverseCommonInput {
+                    source_id: "src_1".to_string(),
+                    audit_entry_id: original.id,
+                    source_feature: Some("test".to_string()),
+                    batch_id: None,
+                },
             },
-        }).unwrap_err();
+        )
+        .unwrap_err();
 
         assert!(matches!(err, MutationError::ReverseUnsupported(_)));
-        assert_eq!(format!("{err}"), "reverse mutation is unsupported: inverse transition id is missing");
+        assert_eq!(
+            format!("{err}"),
+            "reverse mutation is unsupported: inverse transition id is missing"
+        );
     }
 }

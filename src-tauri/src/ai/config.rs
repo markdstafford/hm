@@ -257,7 +257,9 @@ fn looks_like_secret_key(key: &str) -> bool {
     let multi_word = ["api_key", "authorization"];
     let single_word = ["token", "secret", "password"];
     multi_word.iter().any(|needle| key_lower.contains(needle))
-        || single_word.iter().any(|needle| segments.iter().any(|s| s == needle))
+        || single_word
+            .iter()
+            .any(|needle| segments.iter().any(|s| s == needle))
 }
 
 fn validate_settings_no_secrets(value: &serde_json::Value, path: &str) -> Result<(), AiError> {
@@ -365,7 +367,11 @@ impl AiProviderConfig {
                 )));
             }
             if task_name == "embedding.default" {
-                let profile = self.profiles.iter().find(|p| p.name == *profile_ref).expect("profile exists because we checked above");
+                let profile = self
+                    .profiles
+                    .iter()
+                    .find(|p| p.name == *profile_ref)
+                    .expect("profile exists because we checked above");
                 if profile.runner != AiRunner::OpenAiEmbeddings {
                     return Err(AiError::InvalidConfig(format!(
                         "routing task embedding.default references profile {:?}, which cannot create embeddings",
@@ -710,12 +716,15 @@ mod tests {
             credentials: vec![AiCredentialConfig {
                 name: "grove".into(),
                 kind: AiCredentialKind::ApiKey,
-                source: CredentialSource::Keychain { key_ref: "ai.credentials.grove".into() },
+                source: CredentialSource::Keychain {
+                    key_ref: "ai.credentials.grove".into(),
+                },
             }],
             endpoints: vec![AiEndpointConfig {
                 name: "grove-embeddings".into(),
                 protocol: AiEndpointProtocol::OpenAiEmbeddingsCompatible,
-                base_url: "https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1".into(),
+                base_url: "https://grove-gateway-prod.azure-api.net/grove-foundry-prod/openai/v1"
+                    .into(),
                 credential_ref: "grove".into(),
             }],
             profiles: vec![AiProfileConfig {
@@ -737,17 +746,29 @@ mod tests {
 
     #[test]
     fn validation_accepts_embedding_default_route_to_embedding_profile() {
-        embedding_config().validate().expect("embedding route should validate");
+        embedding_config()
+            .validate()
+            .expect("embedding route should validate");
     }
 
     #[test]
     fn validation_rejects_chat_profile_for_embedding_default_route() {
         let mut config = valid_openai_config();
-        config.routing.insert("embedding.default".into(), "chat-fast".into());
-        let err = config.validate().expect_err("chat profile must not serve embedding.default");
+        config
+            .routing
+            .insert("embedding.default".into(), "chat-fast".into());
+        let err = config
+            .validate()
+            .expect_err("chat profile must not serve embedding.default");
         let msg = err.to_string();
-        assert!(msg.contains("embedding.default"), "error should mention embedding.default");
-        assert!(msg.contains("cannot create embeddings"), "error should mention cannot create embeddings");
+        assert!(
+            msg.contains("embedding.default"),
+            "error should mention embedding.default"
+        );
+        assert!(
+            msg.contains("cannot create embeddings"),
+            "error should mention cannot create embeddings"
+        );
         assert!(!msg.contains("sk-"), "error must not contain secret");
     }
 
@@ -755,8 +776,13 @@ mod tests {
     fn validation_rejects_embedding_runner_on_chat_endpoint() {
         let mut config = embedding_config();
         config.endpoints[0].protocol = AiEndpointProtocol::OpenAiChatCompletionsCompatible;
-        let err = config.validate().expect_err("runner/protocol mismatch must fail");
-        assert!(err.to_string().contains("unsupported"), "error should contain 'unsupported'");
+        let err = config
+            .validate()
+            .expect_err("runner/protocol mismatch must fail");
+        assert!(
+            err.to_string().contains("unsupported"),
+            "error should contain 'unsupported'"
+        );
     }
 
     #[test]

@@ -17,7 +17,7 @@ impl AuditState {
     }
 
     pub fn value(&self) -> &serde_json::Value {
-        &self.0.0
+        &self.0 .0
     }
 }
 

@@ -75,11 +75,7 @@ pub struct WorkItemInput<'a> {
 
 /// Upsert a row into `work_items`. Idempotent on
 /// `UNIQUE(source_system_id, source_kind, upstream_id)`.
-pub fn upsert_work_item(
-    conn: &Connection,
-    now_utc: &str,
-    input: &WorkItemInput<'_>,
-) -> Result<()> {
+pub fn upsert_work_item(conn: &Connection, now_utc: &str, input: &WorkItemInput<'_>) -> Result<()> {
     conn.execute(
         "INSERT INTO work_items (
             id, source_system_id, source_kind, upstream_id, key, url, title, body, state,
@@ -429,7 +425,12 @@ pub fn upsert_indexable_document(
             AND entity_id = ?3
             AND content_hash != ?4
             AND embedding_status != 'stale'",
-        params![now_utc, input.entity_kind, input.entity_id, input.content_hash],
+        params![
+            now_utc,
+            input.entity_kind,
+            input.entity_id,
+            input.content_hash
+        ],
     )?;
 
     // 2. Insert the new row; UNIQUE(entity_kind, entity_id, content_hash) makes
@@ -585,14 +586,14 @@ mod tests {
             .query_row("SELECT count(*) FROM work_item_terms", [], |row| row.get(0))
             .expect("term count");
         let comment_count: i64 = conn
-            .query_row("SELECT count(*) FROM work_item_comments", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM work_item_comments", [], |row| {
+                row.get(0)
+            })
             .expect("comment count");
         let rel_count: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM work_item_relationships",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT count(*) FROM work_item_relationships", [], |row| {
+                row.get(0)
+            })
             .expect("rel count");
 
         assert_eq!(term_count, 1, "duplicate term must not insert twice");
@@ -639,7 +640,10 @@ mod tests {
         let count: i64 = conn
             .query_row("SELECT count(*) FROM work_items", [], |row| row.get(0))
             .expect("count");
-        assert_eq!(count, 1, "upsert on the same upstream_id must update, not duplicate");
+        assert_eq!(
+            count, 1,
+            "upsert on the same upstream_id must update, not duplicate"
+        );
 
         let (title, state, hash): (String, String, String) = conn
             .query_row(
@@ -756,7 +760,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count after");
-        assert_eq!(count_after, 2, "repeat upsert with same hash must not duplicate");
+        assert_eq!(
+            count_after, 2,
+            "repeat upsert with same hash must not duplicate"
+        );
     }
 
     #[test]
@@ -809,7 +816,10 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("count after");
-        assert_eq!(after, 1, "stale 'backend' label must be removed after resync");
+        assert_eq!(
+            after, 1,
+            "stale 'backend' label must be removed after resync"
+        );
 
         let remaining_key: String = conn
             .query_row(

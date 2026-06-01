@@ -284,11 +284,7 @@ pub fn fold_events_to_day_end(
 
     // Sort descending (newest first) so we undo changes in reverse chronological
     // order, preserving correct state at each step.
-    to_reverse.sort_by(|a, b| {
-        b.occurred_at
-            .cmp(&a.occurred_at)
-            .then(b.id.cmp(&a.id))
-    });
+    to_reverse.sort_by(|a, b| b.occurred_at.cmp(&a.occurred_at).then(b.id.cmp(&a.id)));
 
     let mut state = state;
     for event in &to_reverse {
@@ -439,16 +435,16 @@ fn load_base_state(
         params![issue_id],
         |row| {
             Ok((
-                row.get::<_, String>(0)?,   // issue_id
-                row.get::<_, String>(1)?,   // source_system_id
-                row.get::<_, String>(2)?,   // source_kind
-                row.get::<_, Option<String>>(3)?, // key
-                row.get::<_, String>(4)?,   // title
-                row.get::<_, String>(5)?,   // state
-                row.get::<_, Option<String>>(6)?, // status_name
-                row.get::<_, Option<String>>(7)?, // resolution_name
-                row.get::<_, Option<String>>(8)?, // priority_name
-                row.get::<_, Option<String>>(9)?, // item_type
+                row.get::<_, String>(0)?,          // issue_id
+                row.get::<_, String>(1)?,          // source_system_id
+                row.get::<_, String>(2)?,          // source_kind
+                row.get::<_, Option<String>>(3)?,  // key
+                row.get::<_, String>(4)?,          // title
+                row.get::<_, String>(5)?,          // state
+                row.get::<_, Option<String>>(6)?,  // status_name
+                row.get::<_, Option<String>>(7)?,  // resolution_name
+                row.get::<_, Option<String>>(8)?,  // priority_name
+                row.get::<_, Option<String>>(9)?,  // item_type
                 row.get::<_, Option<String>>(10)?, // project_key
                 row.get::<_, Option<String>>(11)?, // project_name
                 row.get::<_, Option<String>>(12)?, // assignee_person_id
@@ -538,9 +534,7 @@ fn load_terms(
     let rows = stmt.query_map(params![issue_id, term_kind], |row| {
         row.get::<_, Option<String>>(0)
     })?;
-    let terms: Vec<String> = rows
-        .filter_map(|r| r.ok().and_then(|name| name))
-        .collect();
+    let terms: Vec<String> = rows.filter_map(|r| r.ok().and_then(|name| name)).collect();
     Ok(terms)
 }
 
@@ -573,9 +567,7 @@ pub fn generate_snapshots_for_range(
     generated_at: &str,
 ) -> Result<usize, IssueHistoryError> {
     // Collect all issue IDs for this source system
-    let mut stmt = conn.prepare(
-        "SELECT id FROM work_items WHERE source_system_id = ?1",
-    )?;
+    let mut stmt = conn.prepare("SELECT id FROM work_items WHERE source_system_id = ?1")?;
     let issue_ids: Vec<String> = stmt
         .query_map(params![source_system_id], |row| row.get(0))?
         .collect::<rusqlite::Result<Vec<String>>>()?;
@@ -593,8 +585,7 @@ pub fn generate_snapshots_for_range(
 
         for date in &dates {
             let folded = fold_events_to_day_end(base_state.clone(), &events, date);
-            let input =
-                snapshot_input_from_state(folded, date, "generated", generated_at)?;
+            let input = snapshot_input_from_state(folded, date, "generated", generated_at)?;
             upsert_issue_snapshot(conn, &input)?;
             total += 1;
         }
@@ -635,9 +626,11 @@ pub fn replay_missing_snapshots(
             Ok(Some(v)) => v.as_str().map(|s| s.to_string()),
             Ok(None) => None,
             Err(e) => {
-                return Err(IssueHistoryError::Storage(rusqlite::Error::ToSqlConversionFailure(
-                    Box::new(std::io::Error::other(e.to_string())),
-                )));
+                return Err(IssueHistoryError::Storage(
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
+                        e.to_string(),
+                    ))),
+                ));
             }
         };
 
@@ -679,8 +672,13 @@ pub fn replay_missing_snapshots(
         .map_err(IssueHistoryError::Storage)?;
 
     // Generate snapshots for the full missing range.
-    let snapshots_written =
-        generate_snapshots_for_range(conn, source_system_id, &start_date, current_local_date, now_utc)?;
+    let snapshots_written = generate_snapshots_for_range(
+        conn,
+        source_system_id,
+        &start_date,
+        current_local_date,
+        now_utc,
+    )?;
 
     // Mark the job done.
     let final_progress = serde_json::json!({
@@ -795,10 +793,8 @@ pub fn compact_snapshot_retention(
     now_utc: &str,
 ) -> Result<RetentionCompactionResult, IssueHistoryError> {
     // 1. Create a retention_compaction job row.
-    let job_id = crate::issues::ids::stable_id(
-        "retjob",
-        &[source_system_id, current_local_date, now_utc],
-    );
+    let job_id =
+        crate::issues::ids::stable_id("retjob", &[source_system_id, current_local_date, now_utc]);
     let job_input = crate::issues::history::IssueSnapshotJobStartInput {
         id: job_id.clone(),
         source_system_id: Some(source_system_id.to_string()),
@@ -980,11 +976,39 @@ mod tests {
     fn events_spanning_two_days() -> Vec<IssueEventRow> {
         vec![
             // Day 1 events (2026-05-27)
-            make_event("e1", "status_changed",   "2026-05-27T10:00:00Z", Some("To Do"),          Some("In Progress"),       None),
-            make_event("e2", "priority_changed",  "2026-05-27T11:00:00Z", Some("Medium"),          Some("High"),              None),
-            make_event("e3", "labels_changed",    "2026-05-27T12:00:00Z", Some(""),                Some("backend, urgent"),   None),
+            make_event(
+                "e1",
+                "status_changed",
+                "2026-05-27T10:00:00Z",
+                Some("To Do"),
+                Some("In Progress"),
+                None,
+            ),
+            make_event(
+                "e2",
+                "priority_changed",
+                "2026-05-27T11:00:00Z",
+                Some("Medium"),
+                Some("High"),
+                None,
+            ),
+            make_event(
+                "e3",
+                "labels_changed",
+                "2026-05-27T12:00:00Z",
+                Some(""),
+                Some("backend, urgent"),
+                None,
+            ),
             // Day 2 event (2026-05-28) — must NOT affect the May-27 snapshot
-            make_event("e4", "status_changed",    "2026-05-28T09:00:00Z", Some("In Progress"),    Some("Done"),              None),
+            make_event(
+                "e4",
+                "status_changed",
+                "2026-05-28T09:00:00Z",
+                Some("In Progress"),
+                Some("Done"),
+                None,
+            ),
         ]
     }
 
@@ -1125,7 +1149,10 @@ mod tests {
         );
         assert_eq!(folded.priority_name.as_deref(), Some("Medium"));
         // labels from_string was "" so it parses to empty vec
-        assert!(folded.labels.is_empty(), "labels should be empty before first label change");
+        assert!(
+            folded.labels.is_empty(),
+            "labels should be empty before first label change"
+        );
     }
 
     // ── Test 2: JSON array serialization ──────────────────────────────────────
@@ -1311,7 +1338,10 @@ mod tests {
             result.generated_dates.contains(&"2026-05-28".to_string()),
             "should include 2026-05-28"
         );
-        assert!(result.snapshots_written > 0, "should write at least one snapshot");
+        assert!(
+            result.snapshots_written > 0,
+            "should write at least one snapshot"
+        );
 
         // Cursor is updated to current date (stored as JSON string "\"2026-05-28\"")
         let updated_cursor_json: String = conn
@@ -1388,7 +1418,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 1, "re-generating the same date should upsert, not duplicate");
+        assert_eq!(
+            count, 1,
+            "re-generating the same date should upsert, not duplicate"
+        );
     }
 
     // ── Retention compaction helpers ──────────────────────────────────────────
@@ -1464,8 +1497,14 @@ mod tests {
                     'AMP-1043', 'Fix the widget', 'open', 'To Do', '[]', '[]',
                     '[]', '[]', '[]', '[]', 'generated', ?4
                  )",
-                rusqlite::params![issue_id, date, source_system_id, format!("{date}T12:00:00Z")],
-            ).unwrap();
+                rusqlite::params![
+                    issue_id,
+                    date,
+                    source_system_id,
+                    format!("{date}T12:00:00Z")
+                ],
+            )
+            .unwrap();
         }
 
         conn
@@ -1499,8 +1538,14 @@ mod tests {
         // Recent 30 days (2026-04-28..2026-05-28) are kept as-is
         assert!(result.kept_daily_rows > 0, "should have kept daily rows");
         // Old rows were compacted (deleted non-Monday rows outside daily window)
-        assert!(result.deleted_daily_rows > 0, "should have deleted old non-Monday rows");
-        assert!(result.compacted_weekly_rows > 0, "expected some Monday rows to be compacted to weekly");
+        assert!(
+            result.deleted_daily_rows > 0,
+            "should have deleted old non-Monday rows"
+        );
+        assert!(
+            result.compacted_weekly_rows > 0,
+            "expected some Monday rows to be compacted to weekly"
+        );
         // issue_events are untouched
         let event_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM issue_events", [], |row| row.get(0))

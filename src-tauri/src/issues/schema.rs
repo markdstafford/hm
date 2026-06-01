@@ -416,7 +416,11 @@ mod tests {
         rows.map(|r| r.expect("row")).collect()
     }
 
-    fn insert_source_system(conn: &rusqlite::Connection, id: &str, base_url: &str) -> rusqlite::Result<usize> {
+    fn insert_source_system(
+        conn: &rusqlite::Connection,
+        id: &str,
+        base_url: &str,
+    ) -> rusqlite::Result<usize> {
         conn.execute(
             "INSERT INTO source_systems (id, kind, deployment_kind, display_name, base_url, config_source_id, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -482,7 +486,9 @@ mod tests {
         }
 
         let count: i64 = conn
-            .query_row("SELECT count(*) FROM ingestion_cursors", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM ingestion_cursors", [], |row| {
+                row.get(0)
+            })
             .expect("count query");
         assert_eq!(count, 4, "four distinct cursor keys should coexist");
     }
@@ -504,7 +510,8 @@ mod tests {
                 "{}",
             ],
         );
-        let err = result.expect_err("FK violation should be raised when source_system_id is missing");
+        let err =
+            result.expect_err("FK violation should be raised when source_system_id is missing");
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("foreign key") || msg.contains("constraint"),
@@ -557,7 +564,9 @@ mod tests {
             .expect("issue_events table should exist");
         assert!(issue_events_sql.contains("upstream_event_id TEXT"));
         assert!(issue_events_sql.contains("payload_json TEXT NOT NULL"));
-        assert!(issue_events_sql.contains("UNIQUE(source_system_id, upstream_event_id, upstream_item_id, issue_id, event_type)"));
+        assert!(issue_events_sql.contains(
+            "UNIQUE(source_system_id, upstream_event_id, upstream_item_id, issue_id, event_type)"
+        ));
 
         let issue_snapshots_sql: String = conn
             .query_row(

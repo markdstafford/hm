@@ -21,7 +21,10 @@ pub fn execute_jira_update_labels<C: JiraMutationClient + ?Sized>(
     }
 
     client
-        .update_issue_fields(&issue_key, serde_json::json!({"labels": input.after_labels}))
+        .update_issue_fields(
+            &issue_key,
+            serde_json::json!({"labels": input.after_labels}),
+        )
         .map_err(|e| MutationError::Jira(e.to_string()))?;
 
     let batch_id = batch_or_new(input.common.batch_id);
@@ -114,8 +117,8 @@ pub fn jira_update_labels(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_update_labels(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
@@ -128,8 +131,8 @@ pub fn jira_update_labels_reverse(
 ) -> Result<AuditLogEntry, String> {
     use crate::mutations::jira_client::resolve_real_client;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let client = resolve_real_client(&conn, &app, &input.common.source_id)
-        .map_err(|e| e.to_string())?;
+    let client =
+        resolve_real_client(&conn, &app, &input.common.source_id).map_err(|e| e.to_string())?;
     execute_jira_update_labels_reverse(&conn, &*client, input).map_err(|e| e.to_string())
 }
 
