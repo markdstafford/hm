@@ -164,7 +164,7 @@ export function QuickSwitcher({ open, onOpenChange, sources, initialQuery = "" }
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className="flex max-h-[82vh] w-[min(68rem,92vw)] flex-col gap-0 overflow-hidden p-0">
+      <Dialog.Content className="flex h-[min(82vh,640px)] w-[min(68rem,92vw)] flex-col gap-0 overflow-hidden p-0">
         <Dialog.Title className="sr-only">Quick switcher</Dialog.Title>
         <div className="flex h-12 items-center gap-3 border-b border-border px-3">
           <Search size={14} aria-hidden className="text-subtext" />
